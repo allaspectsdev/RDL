@@ -11,7 +11,6 @@ import pandas as pd
 import numpy as np
 import html as _html
 
-# Page configuration
 st.set_page_config(
     page_title="Ryan's Data Lab",
     page_icon="📊",
@@ -19,67 +18,64 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ─── DESIGN SYSTEM ──────────────────────────────────────────────────────────
+# ─── FONT IMPORT ────────────────────────────────────────────────────────────
 st.markdown("""
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&display=swap" rel="stylesheet">
-<style>
-/* ================================================================
-   RYAN'S DATA LAB — Design System
-   Warm Studio: refined dark sidebar, soft surfaces, indigo accent
-   ================================================================ */
+""", unsafe_allow_html=True)
 
-/* ──── CSS Variables ──── */
+# ─── DESIGN SYSTEM — Variables, Typography, Background ─────────────────────
+st.markdown("""<style>
 :root {
     --rdl-font: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
-
     --rdl-bg: #f4f5f9;
     --rdl-bg-card: #ffffff;
-
     --rdl-sidebar-bg: #111827;
     --rdl-sidebar-text: #cbd5e1;
     --rdl-sidebar-bright: #f1f5f9;
     --rdl-sidebar-hover: rgba(255,255,255,0.06);
     --rdl-sidebar-active: rgba(99,102,241,0.15);
     --rdl-sidebar-border: rgba(255,255,255,0.06);
-
     --rdl-text: #1e293b;
     --rdl-text-secondary: #64748b;
     --rdl-text-muted: #94a3b8;
-
     --rdl-accent: #6366f1;
     --rdl-accent-light: #eef2ff;
     --rdl-accent-hover: #4f46e5;
     --rdl-accent-subtle: rgba(99,102,241,0.08);
-
     --rdl-success: #22c55e;
     --rdl-warning: #f59e0b;
     --rdl-error: #ef4444;
     --rdl-info: #3b82f6;
-
     --rdl-border: #e2e8f0;
     --rdl-shadow-xs: 0 1px 2px rgba(0,0,0,0.03);
     --rdl-shadow-sm: 0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.03);
     --rdl-shadow-md: 0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -2px rgba(0,0,0,0.03);
     --rdl-shadow-lg: 0 10px 25px -5px rgba(0,0,0,0.06), 0 4px 6px -4px rgba(0,0,0,0.03);
-
     --rdl-radius: 14px;
     --rdl-radius-sm: 10px;
     --rdl-radius-xs: 6px;
-
     --rdl-ease: cubic-bezier(0.4, 0, 0.2, 1);
     --rdl-dur: 0.2s;
 }
 
-/* ──── Global Typography ──── */
-html, body, [class*="css"],
+html, body,
 .stMarkdown, .stText, p, span, label, li, td, th,
-[data-testid="stSidebar"], [data-testid="stSidebar"] *,
+[data-testid="stSidebar"],
+[data-testid="stSidebar"] p,
+[data-testid="stSidebar"] span,
+[data-testid="stSidebar"] label,
+[data-testid="stSidebar"] div,
 button, input, select, textarea,
 .stSelectbox label, .stMultiSelect label,
 .stRadio label, .stCheckbox label,
-[data-baseweb="select"] *, [data-baseweb="radio"] *,
+[data-baseweb="select"],
+[data-baseweb="select"] div,
+[data-baseweb="select"] span,
+[data-baseweb="radio"],
+[data-baseweb="radio"] div,
+[data-baseweb="radio"] span,
 [data-baseweb="tab"] {
     font-family: var(--rdl-font) !important;
 }
@@ -90,7 +86,6 @@ h1, h2, h3, h4, h5, h6,
     letter-spacing: -0.02em;
 }
 
-/* ──── App Background ──── */
 .stApp {
     background: var(--rdl-bg) !important;
 }
@@ -98,7 +93,6 @@ h1, h2, h3, h4, h5, h6,
     background: var(--rdl-bg) !important;
 }
 
-/* ──── Hide Default Chrome ──── */
 [data-testid="stHeader"] {
     background: rgba(244,245,249,0.8) !important;
     backdrop-filter: blur(12px);
@@ -106,8 +100,10 @@ h1, h2, h3, h4, h5, h6,
 }
 #MainMenu { visibility: hidden; }
 footer { visibility: hidden; }
+</style>""", unsafe_allow_html=True)
 
-/* ──── Sidebar ──── */
+# ─── SIDEBAR STYLES ─────────────────────────────────────────────────────────
+st.markdown("""<style>
 [data-testid="stSidebar"] {
     background: var(--rdl-sidebar-bg) !important;
     border-right: 1px solid rgba(255,255,255,0.04) !important;
@@ -116,7 +112,6 @@ footer { visibility: hidden; }
     padding-top: 1.5rem;
 }
 
-/* Sidebar text defaults */
 [data-testid="stSidebar"] p,
 [data-testid="stSidebar"] span,
 [data-testid="stSidebar"] label,
@@ -124,7 +119,6 @@ footer { visibility: hidden; }
     color: var(--rdl-sidebar-text) !important;
 }
 
-/* Sidebar section headers */
 [data-testid="stSidebar"] [data-testid="stHeading"] h2,
 [data-testid="stSidebar"] [data-testid="stHeading"] h3 {
     font-size: 0.68rem !important;
@@ -139,13 +133,11 @@ footer { visibility: hidden; }
     padding-bottom: 0 !important;
 }
 
-/* Sidebar dividers */
 [data-testid="stSidebar"] hr {
     border-color: var(--rdl-sidebar-border) !important;
     margin: 0.75rem 0 !important;
 }
 
-/* Sidebar radio buttons — nav style */
 [data-testid="stSidebar"] [data-testid="stRadio"] > div {
     gap: 1px !important;
 }
@@ -166,16 +158,6 @@ footer { visibility: hidden; }
     font-weight: 600 !important;
 }
 
-/* Sidebar radio dot color */
-[data-testid="stSidebar"] [data-baseweb="radio"] div[data-baseweb="radio-inner"] {
-    border-color: rgba(255,255,255,0.2) !important;
-}
-[data-testid="stSidebar"] [data-baseweb="radio"]:has(input:checked) div[data-baseweb="radio-inner"] {
-    border-color: #818cf8 !important;
-    background: #818cf8 !important;
-}
-
-/* Sidebar success alerts */
 [data-testid="stSidebar"] [data-testid="stAlert"] {
     background: rgba(34,197,94,0.1) !important;
     border: 1px solid rgba(34,197,94,0.2) !important;
@@ -187,7 +169,6 @@ footer { visibility: hidden; }
     font-size: 0.8rem !important;
 }
 
-/* Sidebar selectbox */
 [data-testid="stSidebar"] [data-baseweb="select"] > div {
     background: rgba(255,255,255,0.06) !important;
     border-color: rgba(255,255,255,0.1) !important;
@@ -195,7 +176,6 @@ footer { visibility: hidden; }
     color: var(--rdl-sidebar-bright) !important;
 }
 
-/* Sidebar button */
 [data-testid="stSidebar"] .stButton > button {
     background: var(--rdl-accent) !important;
     color: #ffffff !important;
@@ -214,7 +194,6 @@ footer { visibility: hidden; }
     box-shadow: 0 4px 12px rgba(99,102,241,0.35) !important;
 }
 
-/* Sidebar file uploader */
 [data-testid="stSidebar"] [data-testid="stFileUploader"] {
     background: rgba(255,255,255,0.03) !important;
     border: 1px dashed rgba(255,255,255,0.12) !important;
@@ -230,14 +209,12 @@ footer { visibility: hidden; }
     color: var(--rdl-sidebar-bright) !important;
 }
 
-/* Sidebar captions */
 [data-testid="stSidebar"] [data-testid="stCaptionContainer"] p {
     font-size: 0.78rem !important;
     line-height: 1.6 !important;
     color: var(--rdl-sidebar-text) !important;
 }
 
-/* ──── Sidebar Brand ──── */
 .rdl-brand {
     display: flex;
     align-items: center;
@@ -275,7 +252,6 @@ footer { visibility: hidden; }
     margin-top: 2px;
 }
 
-/* ──── Sidebar Dataset Info Card ──── */
 .rdl-dataset-info {
     background: rgba(255,255,255,0.04);
     border-radius: var(--rdl-radius-xs);
@@ -306,8 +282,10 @@ footer { visibility: hidden; }
     font-weight: 600;
     font-variant-numeric: tabular-nums;
 }
+</style>""", unsafe_allow_html=True)
 
-/* ──── Main Content Headers ──── */
+# ─── COMPONENT STYLES — Tabs, Metrics, Buttons, Inputs, etc. ───────────────
+st.markdown("""<style>
 [data-testid="stAppViewContainer"] h2 {
     font-size: 1.6rem !important;
     font-weight: 700 !important;
@@ -323,7 +301,6 @@ footer { visibility: hidden; }
     color: var(--rdl-text) !important;
 }
 
-/* ──── Tabs — Pill Style ──── */
 .stTabs [data-baseweb="tab-list"] {
     gap: 0 !important;
     background: var(--rdl-bg-card) !important;
@@ -363,7 +340,6 @@ footer { visibility: hidden; }
     padding-top: 1.25rem !important;
 }
 
-/* ──── Metric Cards ──── */
 [data-testid="stMetric"] {
     background: var(--rdl-bg-card) !important;
     border: 1px solid var(--rdl-border) !important;
@@ -391,7 +367,6 @@ footer { visibility: hidden; }
     font-variant-numeric: tabular-nums;
 }
 
-/* ──── Buttons (Main Area) ──── */
 .stButton > button {
     border-radius: var(--rdl-radius-xs) !important;
     font-weight: 600 !important;
@@ -423,7 +398,6 @@ footer { visibility: hidden; }
     box-shadow: 0 4px 12px rgba(99,102,241,0.3) !important;
 }
 
-/* ──── Inputs & Selects ──── */
 [data-baseweb="select"] > div,
 [data-baseweb="input"] > div,
 .stTextInput > div > div,
@@ -443,7 +417,6 @@ footer { visibility: hidden; }
     box-shadow: 0 0 0 3px var(--rdl-accent-subtle) !important;
 }
 
-/* ──── Expanders ──── */
 [data-testid="stExpander"] {
     background: var(--rdl-bg-card) !important;
     border: 1px solid var(--rdl-border) !important;
@@ -459,7 +432,6 @@ footer { visibility: hidden; }
     color: var(--rdl-accent) !important;
 }
 
-/* ──── DataFrames ──── */
 [data-testid="stDataFrame"] {
     border: 1px solid var(--rdl-border) !important;
     border-radius: var(--rdl-radius-sm) !important;
@@ -467,19 +439,16 @@ footer { visibility: hidden; }
     box-shadow: var(--rdl-shadow-xs) !important;
 }
 
-/* ──── Alerts ──── */
 [data-testid="stAlert"] {
     border-radius: var(--rdl-radius-sm) !important;
     font-size: 0.88rem !important;
 }
 
-/* ──── Dividers ──── */
 [data-testid="stAppViewContainer"] hr {
     border-color: var(--rdl-border) !important;
     opacity: 0.5 !important;
 }
 
-/* ──── Scrollbars ──── */
 ::-webkit-scrollbar {
     width: 6px;
     height: 6px;
@@ -495,18 +464,18 @@ footer { visibility: hidden; }
     background: var(--rdl-text-secondary);
 }
 
-/* ──── Plotly Charts ──── */
 .js-plotly-plot, .plotly {
     border-radius: var(--rdl-radius-sm) !important;
     overflow: hidden !important;
 }
 
-/* ──── Slider ──── */
 [data-testid="stSlider"] [data-baseweb="slider"] [role="slider"] {
     background: var(--rdl-accent) !important;
 }
+</style>""", unsafe_allow_html=True)
 
-/* ──── Landing Page ──── */
+# ─── LANDING PAGE STYLES ────────────────────────────────────────────────────
+st.markdown("""<style>
 .rdl-hero {
     text-align: center;
     padding: 3rem 1rem 1.5rem;
@@ -589,8 +558,7 @@ footer { visibility: hidden; }
                 transform 0.25s var(--rdl-ease),
                 border-color 0.25s var(--rdl-ease);
 }
-.rdl-feature-card::before {
-    content: '';
+.rdl-feature-card-bar {
     position: absolute;
     top: 0;
     left: 0;
@@ -605,7 +573,7 @@ footer { visibility: hidden; }
     transform: translateY(-3px);
     border-color: rgba(99,102,241,0.2);
 }
-.rdl-feature-card:hover::before {
+.rdl-feature-card:hover .rdl-feature-card-bar {
     opacity: 1;
 }
 .rdl-feature-card h3 {
@@ -677,23 +645,7 @@ footer { visibility: hidden; }
     position: relative;
     padding: 0 1rem;
 }
-.rdl-section-label span::before,
-.rdl-section-label span::after {
-    content: '';
-    position: absolute;
-    top: 50%;
-    width: 40px;
-    height: 1px;
-    background: var(--rdl-border);
-}
-.rdl-section-label span::before {
-    right: 100%;
-}
-.rdl-section-label span::after {
-    left: 100%;
-}
 
-/* ──── Animations ──── */
 @keyframes rdl-fade-up {
     from {
         opacity: 0;
@@ -705,7 +657,6 @@ footer { visibility: hidden; }
     }
 }
 
-/* ──── Responsive ──── */
 @media (max-width: 768px) {
     .rdl-features-grid,
     .rdl-modules-grid {
@@ -719,8 +670,7 @@ footer { visibility: hidden; }
         font-size: 2rem !important;
     }
 }
-</style>
-""", unsafe_allow_html=True)
+</style>""", unsafe_allow_html=True)
 
 
 # ─── MODULE IMPORTS ──────────────────────────────────────────────────────────
@@ -774,9 +724,7 @@ def load_sample_dataset(name: str) -> pd.DataFrame:
 
 
 def main():
-    # ── Sidebar ──────────────────────────────────────────────────────────────
     with st.sidebar:
-        # Brand
         st.markdown("""
             <div class="rdl-brand">
                 <div class="rdl-brand-mark">RDL</div>
@@ -788,7 +736,6 @@ def main():
         """, unsafe_allow_html=True)
         st.divider()
 
-        # Data source
         st.subheader("Data Source")
         data_source = st.radio(
             "Choose data source:",
@@ -829,7 +776,6 @@ def main():
 
         st.divider()
 
-        # Module selection
         st.subheader("Analysis Module")
         module = st.radio(
             "Select module:",
@@ -847,7 +793,6 @@ def main():
             label_visibility="collapsed",
         )
 
-        # Dataset info card
         if "df" in st.session_state and st.session_state["df"] is not None:
             st.divider()
             st.subheader("Active Dataset")
@@ -890,9 +835,8 @@ def main():
                 </div>
             """, unsafe_allow_html=True)
 
-    # ── Main Content ─────────────────────────────────────────────────────────
+    # Main content
     if "df" not in st.session_state or st.session_state["df"] is None:
-        # Landing page
         st.markdown("""
             <div class="rdl-hero">
                 <h1>Ryan's <span class="rdl-accent-text">Data Lab</span></h1>
@@ -924,6 +868,7 @@ def main():
 
             <div class="rdl-features-grid">
                 <div class="rdl-feature-card">
+                    <div class="rdl-feature-card-bar"></div>
                     <h3>Upload & Explore</h3>
                     <p>
                         Import CSV, Excel, TSV, or JSON files. Preview your
@@ -932,6 +877,7 @@ def main():
                     </p>
                 </div>
                 <div class="rdl-feature-card">
+                    <div class="rdl-feature-card-bar"></div>
                     <h3>Analyze & Test</h3>
                     <p>
                         Comprehensive statistical suite including hypothesis
@@ -940,6 +886,7 @@ def main():
                     </p>
                 </div>
                 <div class="rdl-feature-card">
+                    <div class="rdl-feature-card-bar"></div>
                     <h3>Visualize & Model</h3>
                     <p>
                         22+ interactive Plotly chart types plus machine
@@ -1000,7 +947,6 @@ def main():
         """, unsafe_allow_html=True)
         return
 
-    # Route to selected module
     df = st.session_state["df"]
 
     if module == "Data Manager":
