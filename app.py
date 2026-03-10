@@ -679,6 +679,7 @@ from modules.time_series import render_time_series
 from modules.machine_learning import render_machine_learning
 
 
+@st.cache_data
 def load_sample_dataset(name: str) -> pd.DataFrame:
     """Load a built-in sample dataset for demonstration."""
     if name == "Iris":
@@ -715,6 +716,16 @@ def load_sample_dataset(name: str) -> pd.DataFrame:
         import plotly.express as px
         return px.data.stocks()
     return None
+
+
+@st.cache_data
+def _dataset_info(df):
+    """Compute dataset info for sidebar display (cached)."""
+    n_numeric = len(df.select_dtypes(include=[np.number]).columns)
+    n_cat = len(df.select_dtypes(include=["object", "category"]).columns)
+    missing_pct = (df.isnull().sum().sum() / (df.shape[0] * df.shape[1])) * 100
+    mem_kb = df.memory_usage(deep=True).sum() / 1024
+    return n_numeric, n_cat, missing_pct, mem_kb
 
 
 def main():
@@ -794,14 +805,7 @@ def main():
             data_name = _html.escape(
                 st.session_state.get("data_name", "Unknown")
             )
-            n_numeric = len(df.select_dtypes(include=[np.number]).columns)
-            n_cat = len(
-                df.select_dtypes(include=["object", "category"]).columns
-            )
-            missing_pct = (
-                df.isnull().sum().sum() / (df.shape[0] * df.shape[1])
-            ) * 100
-            mem_kb = df.memory_usage(deep=True).sum() / 1024
+            n_numeric, n_cat, missing_pct, mem_kb = _dataset_info(df)
 
             st.markdown(f"""
                 <div class="rdl-dataset-info">
@@ -945,33 +949,60 @@ def main():
 
     if module == "Data Manager":
         st.markdown("## Data Manager")
-        result = render_data_manager(df)
-        if result is not None:
-            st.session_state["df"] = result
+        try:
+            result = render_data_manager(df)
+            if result is not None:
+                st.session_state["df"] = result
+        except Exception as e:
+            st.error(f"An error occurred in Data Manager: {e}")
     elif module == "Descriptive Statistics":
         st.markdown("## Descriptive Statistics")
-        render_descriptive_stats(df)
+        try:
+            render_descriptive_stats(df)
+        except Exception as e:
+            st.error(f"An error occurred in Descriptive Statistics: {e}")
     elif module == "Visualization Builder":
         st.markdown("## Visualization Builder")
-        render_visualization(df)
+        try:
+            render_visualization(df)
+        except Exception as e:
+            st.error(f"An error occurred in Visualization Builder: {e}")
     elif module == "Hypothesis Testing":
         st.markdown("## Hypothesis Testing")
-        render_hypothesis_testing(df)
+        try:
+            render_hypothesis_testing(df)
+        except Exception as e:
+            st.error(f"An error occurred in Hypothesis Testing: {e}")
     elif module == "Correlation & Multivariate":
         st.markdown("## Correlation & Multivariate Analysis")
-        render_correlation(df)
+        try:
+            render_correlation(df)
+        except Exception as e:
+            st.error(f"An error occurred in Correlation & Multivariate: {e}")
     elif module == "Regression Analysis":
         st.markdown("## Regression Analysis")
-        render_regression(df)
+        try:
+            render_regression(df)
+        except Exception as e:
+            st.error(f"An error occurred in Regression Analysis: {e}")
     elif module == "ANOVA":
         st.markdown("## ANOVA")
-        render_anova(df)
+        try:
+            render_anova(df)
+        except Exception as e:
+            st.error(f"An error occurred in ANOVA: {e}")
     elif module == "Time Series Analysis":
         st.markdown("## Time Series Analysis")
-        render_time_series(df)
+        try:
+            render_time_series(df)
+        except Exception as e:
+            st.error(f"An error occurred in Time Series Analysis: {e}")
     elif module == "Machine Learning":
         st.markdown("## Machine Learning")
-        render_machine_learning(df)
+        try:
+            render_machine_learning(df)
+        except Exception as e:
+            st.error(f"An error occurred in Machine Learning: {e}")
 
 
 if __name__ == "__main__":

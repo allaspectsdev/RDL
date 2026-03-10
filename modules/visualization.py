@@ -182,7 +182,10 @@ def render_visualization(df: pd.DataFrame):
             elif method == "Raw Mean":
                 matrix = df[selected].describe().loc[["mean", "std", "min", "max"]]
             else:
+                n_rows = len(df)
                 matrix = df[selected].head(50)
+                if n_rows > 50:
+                    st.caption(f"Showing first 50 of {n_rows:,} rows.")
 
             fig = px.imshow(matrix, text_auto=".2f", color_continuous_scale=color_scale,
                             title=title, aspect="auto")
@@ -220,10 +223,20 @@ def render_visualization(df: pd.DataFrame):
         values = st.selectbox("Values:", [None] + num_cols, key="pie_vals")
         hole = st.slider("Hole (0=pie, >0=donut):", 0.0, 0.7, 0.0, 0.05, key="pie_hole")
 
+        n_unique = df[names].nunique()
+        if n_unique > 30:
+            st.warning(f"Too many categories ({n_unique}). Showing top 20 only.")
         if values:
-            fig = px.pie(df, names=names, values=values, title=title, hole=hole)
+            if n_unique > 30:
+                top20 = df[names].value_counts().head(20).index
+                plot_df = df[df[names].isin(top20)]
+                fig = px.pie(plot_df, names=names, values=values, title=title, hole=hole)
+            else:
+                fig = px.pie(df, names=names, values=values, title=title, hole=hole)
         else:
             counts = df[names].value_counts()
+            if n_unique > 30:
+                counts = counts.head(20)
             fig = px.pie(values=counts.values, names=counts.index.astype(str),
                          title=title, hole=hole)
         fig.update_layout(height=height)

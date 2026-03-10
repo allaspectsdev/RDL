@@ -33,6 +33,62 @@ from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
 
 
+@st.cache_data(show_spinner="Training classifiers...")
+def _compare_classifiers(X, y):
+    """Compare all classifiers with 5-fold CV (cached)."""
+    models = {
+        "Logistic Regression": LogisticRegression(max_iter=1000, random_state=42),
+        "Random Forest": RandomForestClassifier(random_state=42, n_estimators=100),
+        "Gradient Boosting": GradientBoostingClassifier(random_state=42),
+        "SVM": SVC(random_state=42),
+        "KNN": KNeighborsClassifier(),
+        "Naive Bayes": GaussianNB(),
+        "Decision Tree": DecisionTreeClassifier(random_state=42),
+    }
+    results = []
+    for name, model in models.items():
+        try:
+            scores = cross_val_score(model, X, y, cv=5, scoring="accuracy")
+            results.append({
+                "Model": name,
+                "Mean Accuracy": scores.mean(),
+                "Std": scores.std(),
+                "Min": scores.min(),
+                "Max": scores.max(),
+            })
+        except Exception:
+            pass
+    return results
+
+
+@st.cache_data(show_spinner="Training regressors...")
+def _compare_regressors(X, y):
+    """Compare all regressors with 5-fold CV (cached)."""
+    models = {
+        "Linear": LinearRegression(),
+        "Ridge": Ridge(),
+        "Lasso": Lasso(),
+        "ElasticNet": ElasticNet(),
+        "Random Forest": RandomForestRegressor(random_state=42, n_estimators=100),
+        "Gradient Boosting": GradientBoostingRegressor(random_state=42),
+        "KNN": KNeighborsRegressor(),
+    }
+    results = []
+    for name, model in models.items():
+        try:
+            r2_scores = cross_val_score(model, X, y, cv=5, scoring="r2")
+            neg_rmse = cross_val_score(model, X, y, cv=5, scoring="neg_root_mean_squared_error")
+            results.append({
+                "Model": name,
+                "Mean R²": r2_scores.mean(),
+                "Std R²": r2_scores.std(),
+                "Mean RMSE": -neg_rmse.mean(),
+            })
+        except Exception:
+            pass
+    return results
+
+
 def render_machine_learning(df: pd.DataFrame):
     """Render machine learning interface."""
     if df is None or df.empty:
@@ -236,8 +292,13 @@ def _render_classification(df: pd.DataFrame):
         scaler = StandardScaler()
         X = scaler.fit_transform(X)
 
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=test_size, random_state=random_state, stratify=y)
+        try:
+            X_train, X_test, y_train, y_test = train_test_split(
+                X, y, test_size=test_size, random_state=random_state, stratify=y)
+        except ValueError:
+            st.warning("Stratified split failed (too few samples in a class). Using non-stratified split.")
+            X_train, X_test, y_train, y_test = train_test_split(
+                X, y, test_size=test_size, random_state=random_state)
 
         # Build model
         model = _build_classifier(algorithm, params, random_state)
@@ -287,6 +348,13 @@ def _render_classification(df: pd.DataFrame):
             imp_df = pd.DataFrame({"Feature": features, "Importance": imp}).sort_values("Importance", ascending=True)
             fig = px.bar(imp_df, x="Importance", y="Feature", orientation="h",
                          title="Feature Importance")
+            fig.update_layout(height=max(300, len(features) * 25))
+            st.plotly_chart(fig, use_container_width=True)
+        elif hasattr(model, "coef_"):
+            coefs = np.abs(model.coef_[0]) if model.coef_.ndim > 1 else np.abs(model.coef_)
+            imp_df = pd.DataFrame({"Feature": features, "Importance": coefs}).sort_values("Importance", ascending=True)
+            fig = px.bar(imp_df, x="Importance", y="Feature", orientation="h",
+                         title="Feature Importance (|coefficients|)")
             fig.update_layout(height=max(300, len(features) * 25))
             st.plotly_chart(fig, use_container_width=True)
 
@@ -526,30 +594,7 @@ def _render_model_comparison(df: pd.DataFrame):
             X = StandardScaler().fit_transform(data[features].values)
             y = LabelEncoder().fit_transform(data[target])
 
-            models = {
-                "Logistic Regression": LogisticRegression(max_iter=1000, random_state=42),
-                "Random Forest": RandomForestClassifier(random_state=42, n_estimators=100),
-                "Gradient Boosting": GradientBoostingClassifier(random_state=42),
-                "SVM": SVC(random_state=42),
-                "KNN": KNeighborsClassifier(),
-                "Naive Bayes": GaussianNB(),
-                "Decision Tree": DecisionTreeClassifier(random_state=42),
-            }
-
-            results = []
-            with st.spinner("Training models..."):
-                for name, model in models.items():
-                    try:
-                        scores = cross_val_score(model, X, y, cv=5, scoring="accuracy")
-                        results.append({
-                            "Model": name,
-                            "Mean Accuracy": scores.mean(),
-                            "Std": scores.std(),
-                            "Min": scores.min(),
-                            "Max": scores.max(),
-                        })
-                    except Exception:
-                        pass
+            results = _compare_classifiers(X, y)
 
             results_df = pd.DataFrame(results).sort_values("Mean Accuracy", ascending=False)
             st.dataframe(results_df.round(4), use_container_width=True, hide_index=True)
@@ -575,30 +620,7 @@ def _render_model_comparison(df: pd.DataFrame):
             X = StandardScaler().fit_transform(data[features].values)
             y = data[target].values
 
-            models = {
-                "Linear": LinearRegression(),
-                "Ridge": Ridge(),
-                "Lasso": Lasso(),
-                "ElasticNet": ElasticNet(),
-                "Random Forest": RandomForestRegressor(random_state=42, n_estimators=100),
-                "Gradient Boosting": GradientBoostingRegressor(random_state=42),
-                "KNN": KNeighborsRegressor(),
-            }
-
-            results = []
-            with st.spinner("Training models..."):
-                for name, model in models.items():
-                    try:
-                        r2_scores = cross_val_score(model, X, y, cv=5, scoring="r2")
-                        neg_rmse = cross_val_score(model, X, y, cv=5, scoring="neg_root_mean_squared_error")
-                        results.append({
-                            "Model": name,
-                            "Mean R²": r2_scores.mean(),
-                            "Std R²": r2_scores.std(),
-                            "Mean RMSE": -neg_rmse.mean(),
-                        })
-                    except Exception:
-                        pass
+            results = _compare_regressors(X, y)
 
             results_df = pd.DataFrame(results).sort_values("Mean R²", ascending=False)
             st.dataframe(results_df.round(4), use_container_width=True, hide_index=True)

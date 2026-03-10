@@ -198,6 +198,8 @@ def _render_distribution(df: pd.DataFrame):
 
     # Shapiro-Wilk (max 5000 samples)
     sample = col_data.values[:5000] if len(col_data) > 5000 else col_data.values
+    if len(col_data) > 5000:
+        st.caption(f"Shapiro-Wilk computed on first 5,000 of {len(col_data):,} values.")
     try:
         sw_stat, sw_p = stats.shapiro(sample)
         test_results.append({"Test": "Shapiro-Wilk", "Statistic": sw_stat, "p-value": sw_p,
@@ -324,7 +326,7 @@ def _render_grouped_stats(df: pd.DataFrame):
     stats_df = grouped.agg(["count", "mean", "median", "std", "min", "max"]).round(4)
     stats_df.columns = ["Count", "Mean", "Median", "Std Dev", "Min", "Max"]
     stats_df["SEM"] = (stats_df["Std Dev"] / np.sqrt(stats_df["Count"])).round(4)
-    stats_df["CV (%)"] = (stats_df["Std Dev"] / stats_df["Mean"] * 100).round(2)
+    stats_df["CV (%)"] = np.round(np.where(stats_df["Mean"] != 0, stats_df["Std Dev"] / stats_df["Mean"] * 100, np.nan), 2)
     st.dataframe(stats_df, use_container_width=True)
 
     plot_type = st.radio("Plot:", ["Box Plot", "Violin Plot", "Histogram"], horizontal=True, key="group_plot")

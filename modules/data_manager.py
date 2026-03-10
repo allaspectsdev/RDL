@@ -196,7 +196,11 @@ def _render_missing_values(df: pd.DataFrame) -> pd.DataFrame:
             elif fill_method == "Median" and pd.api.types.is_numeric_dtype(df[fill_col]):
                 df[fill_col] = df[fill_col].fillna(df[fill_col].median())
             elif fill_method == "Mode":
-                df[fill_col] = df[fill_col].fillna(df[fill_col].mode().iloc[0])
+                mode_vals = df[fill_col].mode()
+                if mode_vals.empty:
+                    st.warning(f"No mode found for '{fill_col}' (all values unique or all NaN).")
+                else:
+                    df[fill_col] = df[fill_col].fillna(mode_vals.iloc[0])
             elif fill_method == "Constant":
                 df[fill_col] = df[fill_col].fillna(fill_val)
             elif fill_method == "Forward Fill":
@@ -220,6 +224,7 @@ def _render_transform(df: pd.DataFrame) -> pd.DataFrame:
     )
     if st.button("Convert", key="apply_convert"):
         try:
+            nans_before = df[conv_col].isna().sum()
             if target_type == "numeric":
                 df[conv_col] = pd.to_numeric(df[conv_col], errors="coerce")
             elif target_type == "string":
@@ -228,6 +233,10 @@ def _render_transform(df: pd.DataFrame) -> pd.DataFrame:
                 df[conv_col] = df[conv_col].astype("category")
             elif target_type == "datetime":
                 df[conv_col] = pd.to_datetime(df[conv_col], errors="coerce")
+            nans_after = df[conv_col].isna().sum()
+            new_nans = nans_after - nans_before
+            if new_nans > 0:
+                st.warning(f"{new_nans} value(s) could not be converted and became NaN.")
             st.success(f"Converted '{conv_col}' to {target_type}.")
             st.session_state["df"] = df
         except Exception as e:

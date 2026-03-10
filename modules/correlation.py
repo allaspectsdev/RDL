@@ -14,6 +14,27 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 
+@st.cache_data
+def _compute_corr_and_pvals(df_subset, method):
+    """Compute correlation matrix and p-values (cached)."""
+    selected = df_subset.columns.tolist()
+    corr = df_subset.corr(method=method)
+    p_matrix = pd.DataFrame(np.ones((len(selected), len(selected))),
+                            index=selected, columns=selected)
+    for i, c1 in enumerate(selected):
+        for j, c2 in enumerate(selected):
+            if i != j:
+                pair = df_subset[[c1, c2]].dropna()
+                if method == "pearson":
+                    _, p = stats.pearsonr(pair[c1], pair[c2])
+                elif method == "spearman":
+                    _, p = stats.spearmanr(pair[c1], pair[c2])
+                else:
+                    _, p = stats.kendalltau(pair[c1], pair[c2])
+                p_matrix.iloc[i, j] = p
+    return corr, p_matrix
+
+
 def render_correlation(df: pd.DataFrame):
     """Render correlation and multivariate analysis interface."""
     if df is None or df.empty:
@@ -55,23 +76,7 @@ def _render_corr_matrix(df: pd.DataFrame):
     method = st.selectbox("Method:", ["pearson", "spearman", "kendall"], key="corr_method")
     show_tri = st.selectbox("Show:", ["Full", "Upper Triangle", "Lower Triangle"], key="corr_tri")
 
-    corr = df[selected].corr(method=method)
-
-    # Compute p-values
-    n = len(df[selected].dropna())
-    p_matrix = pd.DataFrame(np.ones((len(selected), len(selected))),
-                            index=selected, columns=selected)
-    for i, c1 in enumerate(selected):
-        for j, c2 in enumerate(selected):
-            if i != j:
-                pair = df[[c1, c2]].dropna()
-                if method == "pearson":
-                    _, p = stats.pearsonr(pair[c1], pair[c2])
-                elif method == "spearman":
-                    _, p = stats.spearmanr(pair[c1], pair[c2])
-                else:
-                    _, p = stats.kendalltau(pair[c1], pair[c2])
-                p_matrix.iloc[i, j] = p
+    corr, p_matrix = _compute_corr_and_pvals(df[selected], method)
 
     # Mask
     mask = np.zeros_like(corr, dtype=bool)
@@ -173,13 +178,16 @@ def _render_pairwise(df: pd.DataFrame):
 
     # Confidence interval for Pearson r (Fisher z-transform)
     n = len(pair_data)
-    z = np.arctanh(pearson_r)
-    se = 1 / np.sqrt(n - 3)
-    z_lower = z - 1.96 * se
-    z_upper = z + 1.96 * se
-    r_lower = np.tanh(z_lower)
-    r_upper = np.tanh(z_upper)
-    st.write(f"**95% CI for Pearson r:** [{r_lower:.4f}, {r_upper:.4f}]")
+    if abs(pearson_r) >= 1.0 or n <= 3:
+        st.write("**95% CI for Pearson r:** not computable (|r| = 1 or n ≤ 3)")
+    else:
+        z = np.arctanh(pearson_r)
+        se = 1 / np.sqrt(n - 3)
+        z_lower = z - 1.96 * se
+        z_upper = z + 1.96 * se
+        r_lower = np.tanh(z_lower)
+        r_upper = np.tanh(z_upper)
+        st.write(f"**95% CI for Pearson r:** [{r_lower:.4f}, {r_upper:.4f}]")
 
 
 def _render_pca(df: pd.DataFrame):
@@ -350,7 +358,11 @@ def _render_factor_analysis(df: pd.DataFrame):
     if len(selected) < 3:
         return
 
-    n_factors = st.slider("Number of factors:", 1, min(len(selected), 10), 2, key="fa_n")
+    max_factors = min(len(selected) - 1, 10)
+    if max_factors < 1:
+        st.warning("Need at least 2 variables selected for factor analysis.")
+        return
+    n_factors = st.slider("Number of factors:", 1, max_factors, min(2, max_factors), key="fa_n")
     rotation = st.selectbox("Rotation:", ["varimax", "none"], key="fa_rot",
                             help="Varimax: orthogonal rotation for simpler structure")
 

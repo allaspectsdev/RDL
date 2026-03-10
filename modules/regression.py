@@ -179,7 +179,10 @@ def _render_multiple_linear(df: pd.DataFrame):
         if X_no_const.shape[1] > 1:
             vif_data = []
             for i in range(X_no_const.shape[1]):
-                vif_val = variance_inflation_factor(X_no_const, i)
+                try:
+                    vif_val = variance_inflation_factor(X_no_const, i)
+                except Exception:
+                    vif_val = float("inf")
                 vif_data.append({"Variable": x_cols[i], "VIF": round(vif_val, 4)})
             vif_df = pd.DataFrame(vif_data)
             st.dataframe(vif_df, use_container_width=True, hide_index=True)
@@ -232,9 +235,18 @@ def _render_polynomial(df: pd.DataFrame):
         # R² and adjusted R²
         ss_res = np.sum((y - y_pred) ** 2)
         ss_tot = np.sum((y - y.mean()) ** 2)
-        r2 = 1 - ss_res / ss_tot
         n = len(x)
-        adj_r2 = 1 - (1 - r2) * (n - 1) / (n - degree - 1)
+        if ss_tot == 0:
+            st.warning("Constant target variable — R² is undefined.")
+            r2 = np.nan
+            adj_r2 = np.nan
+        elif n <= degree + 1:
+            st.warning(f"Too few points ({n}) for polynomial degree {degree}.")
+            r2 = 1 - ss_res / ss_tot
+            adj_r2 = np.nan
+        else:
+            r2 = 1 - ss_res / ss_tot
+            adj_r2 = 1 - (1 - r2) * (n - 1) / (n - degree - 1)
         rmse = np.sqrt(ss_res / n)
 
         c1, c2, c3 = st.columns(3)
@@ -352,6 +364,7 @@ def _render_logistic(df: pd.DataFrame):
                 y_prob = logit_model.predict(X_sm)
             except Exception:
                 # Fallback to sklearn
+                st.warning("Using sklearn for logistic regression — limited statistical output.")
                 model = LogisticRegression(max_iter=1000)
                 model.fit(X, y)
                 y_prob = model.predict_proba(X)[:, 1]

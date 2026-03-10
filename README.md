@@ -198,6 +198,20 @@ RDL/
 
 ---
 
+## Robustness & Error Handling
+
+Ryan's Data Lab is hardened against common edge cases:
+
+- **Error boundaries** — A crash in any module shows a user-friendly error message instead of killing the app
+- **Division guards** — Division by zero in CV, chi-square residuals, and polynomial R^2 are handled gracefully
+- **Small/empty data** — Guards for empty mode, <2-observation groups, singular matrices, constant targets, empty test sets, and imbalanced stratification
+- **Silent failure alerts** — Warnings when type conversion creates NaNs, when Shapiro-Wilk uses a subsample, when heatmaps truncate, when pie charts have too many categories, and when MAPE is undefined
+- **Strategic caching** — `@st.cache_data` on sample dataset loading, sidebar info, correlation p-values, model comparison (35 fits), and Auto-ARIMA grid search (48 fits) — second clicks are instant
+
+See [CHANGELOG.md](CHANGELOG.md) for full details.
+
+---
+
 ## License
 
 MIT

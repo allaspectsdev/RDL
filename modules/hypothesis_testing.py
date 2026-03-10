@@ -132,8 +132,9 @@ def _render_one_sample(df: pd.DataFrame):
                 return
             stat, p = stats.wilcoxon(adjusted, alternative=alt)
             # Effect size r = Z / sqrt(N)
-            z_approx = stats.norm.ppf(p / 2) if alt == "two-sided" else stats.norm.ppf(p)
-            r = abs(z_approx) / np.sqrt(len(adjusted))
+            n_w = len(adjusted)
+            z_approx = (stat - n_w * (n_w + 1) / 4) / np.sqrt(n_w * (n_w + 1) * (2 * n_w + 1) / 24)
+            r = abs(z_approx) / np.sqrt(n_w)
 
             st.markdown(f"**H₀:** median = {mu_0}")
             c1, c2, c3 = st.columns(3)
@@ -348,7 +349,8 @@ def _render_chi_square(df: pd.DataFrame):
                 st.write(f"**Fisher's exact test:** odds ratio = {odds:.4f}, p = {fisher_p:.6f}")
 
             # Residuals heatmap
-            residuals = (ct.values - expected) / np.sqrt(expected)
+            with np.errstate(divide="ignore", invalid="ignore"):
+                residuals = np.where(expected > 0, (ct.values - expected) / np.sqrt(expected), 0.0)
             fig = px.imshow(residuals, x=ct.columns.astype(str), y=ct.index.astype(str),
                             color_continuous_scale="RdBu_r", text_auto=".2f",
                             title="Standardized Residuals")

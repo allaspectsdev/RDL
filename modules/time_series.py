@@ -23,6 +23,28 @@ except ImportError:
     HAS_SM = False
 
 
+@st.cache_data(show_spinner="Searching for best ARIMA order...")
+def _auto_arima_search(values, index):
+    """Grid search for best ARIMA order (cached)."""
+    ts = pd.Series(values, index=index)
+    best_aic = np.inf
+    best_order = (0, 0, 0)
+    results = []
+    for pi in range(4):
+        for di in range(3):
+            for qi in range(4):
+                try:
+                    model = ARIMA(ts, order=(pi, di, qi)).fit()
+                    results.append({"p": pi, "d": di, "q": qi,
+                                    "AIC": model.aic, "BIC": model.bic})
+                    if model.aic < best_aic:
+                        best_aic = model.aic
+                        best_order = (pi, di, qi)
+                except Exception:
+                    pass
+    return best_order, best_aic, results
+
+
 def render_time_series(df: pd.DataFrame):
     """Render time series analysis interface."""
     if df is None or df.empty:
@@ -65,9 +87,13 @@ def _get_ts_data(df, date_col, value_col):
     data = data.sort_values(date_col).set_index(date_col)
     # Try to infer frequency
     try:
-        data = data.asfreq(pd.infer_freq(data.index))
+        freq = pd.infer_freq(data.index)
+        if freq:
+            data = data.asfreq(freq)
+        else:
+            st.caption("Could not infer frequency from the date index.")
     except Exception:
-        pass
+        st.caption("Could not infer frequency from the date index.")
     return data[value_col]
 
 
@@ -410,6 +436,12 @@ def _render_arima(df: pd.DataFrame):
 
     if st.button("Fit Model", key="fit_arima"):
         n_train = int(len(ts_clean) * train_pct / 100)
+        if n_train < 10:
+            st.error("Training set too small (need at least 10 observations).")
+            return
+        if n_train >= len(ts_clean):
+            st.error("No data left for testing. Reduce training %.")
+            return
         train = ts_clean[:n_train]
         test = ts_clean[n_train:]
 
@@ -474,7 +506,9 @@ def _render_arima(df: pd.DataFrame):
                 c1, c2, c3 = st.columns(3)
                 c1.metric("MAE", f"{mae:.4f}")
                 c2.metric("RMSE", f"{rmse:.4f}")
-                c3.metric("MAPE", f"{mape:.2f}%")
+                c3.metric("MAPE", f"{mape:.2f}%" if not np.isnan(mape) else "N/A")
+                if np.isnan(mape):
+                    st.caption("MAPE undefined: test data contains zero values.")
 
             # Full forecast
             forecast_full = model.get_forecast(steps=forecast_steps + len(test))
@@ -502,26 +536,10 @@ def _render_arima(df: pd.DataFrame):
     # Auto-ARIMA (simple grid search)
     with st.expander("Auto-ARIMA (Grid Search)"):
         if st.button("Run Auto-ARIMA", key="run_auto_arima"):
-            with st.spinner("Searching for best ARIMA order..."):
-                best_aic = np.inf
-                best_order = (0, 0, 0)
-                results = []
-                for pi in range(4):
-                    for di in range(3):
-                        for qi in range(4):
-                            try:
-                                model = ARIMA(ts_clean, order=(pi, di, qi)).fit()
-                                results.append({"p": pi, "d": di, "q": qi,
-                                                "AIC": model.aic, "BIC": model.bic})
-                                if model.aic < best_aic:
-                                    best_aic = model.aic
-                                    best_order = (pi, di, qi)
-                            except Exception:
-                                pass
-
-                st.success(f"**Best order: ARIMA{best_order}** (AIC={best_aic:.2f})")
-                results_df = pd.DataFrame(results).sort_values("AIC")
-                st.dataframe(results_df.head(10).round(2), use_container_width=True, hide_index=True)
+            best_order, best_aic, results = _auto_arima_search(ts_clean.values, ts_clean.index)
+            st.success(f"**Best order: ARIMA{best_order}** (AIC={best_aic:.2f})")
+            results_df = pd.DataFrame(results).sort_values("AIC")
+            st.dataframe(results_df.head(10).round(2), use_container_width=True, hide_index=True)
 
 
 def _render_forecast_comparison(df: pd.DataFrame):

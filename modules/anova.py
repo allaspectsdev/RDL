@@ -74,12 +74,17 @@ def _render_one_way(df: pd.DataFrame):
 
     if st.button("Run ANOVA", key="run_ow"):
         data = df[[dep_var, factor]].dropna()
-        groups = [group[dep_var].values for name, group in data.groupby(factor)]
-        group_names = list(data[factor].unique())
+        all_groups = [(name, group[dep_var].values) for name, group in data.groupby(factor)]
+        small = [name for name, g in all_groups if len(g) < 2]
+        if small:
+            st.warning(f"Groups with <2 observations excluded: {', '.join(str(s) for s in small)}")
+        valid = [(name, g) for name, g in all_groups if len(g) >= 2]
+        group_names = [name for name, g in valid]
+        groups = [g for name, g in valid]
         k = len(groups)
 
         if k < 2:
-            st.error("Need at least 2 groups.")
+            st.error("Need at least 2 valid groups (each with ≥2 observations).")
             return
 
         # One-way ANOVA
@@ -306,7 +311,7 @@ def _render_kruskal_wallis(df: pd.DataFrame):
         n = len(data)
         k = len(groups)
         # Effect size: eta-squared for Kruskal-Wallis
-        eta_sq_h = (h_stat - k + 1) / (n - k)
+        eta_sq_h = max(0, (h_stat - k + 1) / (n - k))
 
         c1, c2, c3 = st.columns(3)
         c1.metric("H-statistic", f"{h_stat:.4f}")
