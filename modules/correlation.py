@@ -45,6 +45,7 @@ def render_correlation(df: pd.DataFrame):
     tabs = st.tabs([
         "Correlation Matrix", "Scatter Matrix", "Pairwise Scatter",
         "PCA", "t-SNE", "Factor Analysis", "Partial Correlation",
+        "Discriminant Analysis", "MDS",
     ])
 
     with tabs[0]:
@@ -61,6 +62,10 @@ def render_correlation(df: pd.DataFrame):
         _render_factor_analysis(df)
     with tabs[6]:
         _render_partial_corr(df)
+    with tabs[7]:
+        _render_discriminant(df)
+    with tabs[8]:
+        _render_mds(df)
 
 
 def _render_corr_matrix(df: pd.DataFrame):
@@ -452,3 +457,235 @@ def _render_partial_corr(df: pd.DataFrame):
                          labels={"x": f"{var1} (residualized)", "y": f"{var2} (residualized)"},
                          title=f"Partial Correlation: {var1} vs {var2}")
         st.plotly_chart(fig, use_container_width=True)
+
+
+# ===================================================================
+# Tab 8 -- Discriminant Analysis (LDA / QDA)
+# ===================================================================
+
+def _render_discriminant(df: pd.DataFrame):
+    """Linear and Quadratic Discriminant Analysis."""
+    from sklearn.discriminant_analysis import LinearDiscriminantAnalysis, QuadraticDiscriminantAnalysis
+    from sklearn.model_selection import cross_val_score
+    from sklearn.metrics import confusion_matrix, classification_report
+
+    num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    cat_cols = df.select_dtypes(include=["object", "category"]).columns.tolist()
+
+    target_options = cat_cols + [c for c in num_cols if df[c].nunique() <= 10]
+    if not target_options:
+        empty_state("Need a categorical target variable.")
+        return
+
+    section_header("Discriminant Analysis")
+
+    target = st.selectbox("Target (group) variable:", target_options, key="da_target")
+    features = st.multiselect("Feature variables:", [c for c in num_cols if c != target],
+                               key="da_features")
+    if len(features) < 2:
+        st.info("Select at least 2 feature variables.")
+        return
+
+    method = st.selectbox("Method:", ["LDA (Linear)", "QDA (Quadratic)"], key="da_method")
+
+    if st.button("Run Analysis", key="da_run"):
+        data = df[features + [target]].dropna()
+        X = data[features].values
+        y = data[target].values
+
+        scaler = StandardScaler()
+        X_scaled = scaler.fit_transform(X)
+
+        if method == "LDA (Linear)":
+            model = LinearDiscriminantAnalysis()
+        else:
+            model = QuadraticDiscriminantAnalysis()
+
+        model.fit(X_scaled, y)
+        y_pred = model.predict(X_scaled)
+        accuracy = (y_pred == y).mean()
+        cv_scores = cross_val_score(model, X_scaled, y, cv=5, scoring="accuracy")
+
+        # Metrics
+        c1m, c2m, c3m = st.columns(3)
+        c1m.metric("Training Accuracy", f"{accuracy:.4f}")
+        c2m.metric("CV Accuracy (5-fold)", f"{cv_scores.mean():.4f} ± {cv_scores.std():.4f}")
+        classes = np.unique(y)
+        c3m.metric("Classes", str(len(classes)))
+
+        # Confusion matrix
+        cm = confusion_matrix(y, y_pred)
+        fig_cm = px.imshow(cm, text_auto=True, color_continuous_scale="Blues",
+                            x=[str(c) for c in classes], y=[str(c) for c in classes],
+                            labels=dict(x="Predicted", y="Actual"),
+                            title="Confusion Matrix")
+        st.plotly_chart(fig_cm, use_container_width=True)
+
+        # Classification report
+        report = classification_report(y, y_pred, output_dict=True)
+        st.dataframe(pd.DataFrame(report).transpose().round(4), use_container_width=True)
+
+        # LDA-specific: discriminant functions and projections
+        if method == "LDA (Linear)" and hasattr(model, 'scalings_'):
+            section_header("Discriminant Functions")
+            n_components = min(model.scalings_.shape[1], 2)
+
+            if n_components >= 1:
+                coef_df = pd.DataFrame(
+                    model.scalings_[:, :n_components],
+                    index=features,
+                    columns=[f"LD{i+1}" for i in range(n_components)],
+                ).round(4)
+                st.dataframe(coef_df, use_container_width=True)
+
+                # Explained variance ratio
+                if hasattr(model, 'explained_variance_ratio_'):
+                    st.write("**Explained variance ratio:** " +
+                             ", ".join([f"LD{i+1}: {v:.1%}" for i, v in
+                                        enumerate(model.explained_variance_ratio_[:n_components])]))
+
+            # LD scatter plot
+            if n_components >= 2:
+                section_header("LD1 vs LD2 Plot")
+                X_lda = model.transform(X_scaled)
+                lda_df = pd.DataFrame({
+                    "LD1": X_lda[:, 0],
+                    "LD2": X_lda[:, 1],
+                    "Group": y,
+                })
+                fig = px.scatter(lda_df, x="LD1", y="LD2", color="Group",
+                                 title="Linear Discriminant Projection", opacity=0.7)
+                fig.update_layout(height=500)
+                st.plotly_chart(fig, use_container_width=True)
+            elif n_components == 1:
+                section_header("LD1 Distribution by Group")
+                X_lda = model.transform(X_scaled)
+                lda_df = pd.DataFrame({"LD1": X_lda[:, 0], "Group": y})
+                fig = px.histogram(lda_df, x="LD1", color="Group", barmode="overlay",
+                                   opacity=0.6, title="LD1 by Group")
+                fig.update_layout(height=400)
+                st.plotly_chart(fig, use_container_width=True)
+
+        # Wilks' Lambda (approximate)
+        if method == "LDA (Linear)":
+            section_header("Wilks' Lambda")
+            # Compute Wilks' Lambda as product of 1/(1+eigenvalue)
+            if hasattr(model, 'explained_variance_ratio_'):
+                # Approximate from eigenvalues
+                eigenvalues = model.explained_variance_ratio_ / (1 - model.explained_variance_ratio_ + 1e-10)
+                wilks = np.prod(1 / (1 + eigenvalues))
+                n = len(y)
+                p = len(features)
+                g = len(classes)
+
+                # F-approximation for Wilks' Lambda
+                df1 = p * (g - 1)
+                df2 = n - (p + g) / 2
+                if wilks > 0 and wilks < 1:
+                    f_stat = ((1 - wilks) / wilks) * (df2 / df1)
+                    p_val = 1 - stats.f.cdf(f_stat, df1, max(df2, 1))
+                    st.write(f"**Wilks' Λ:** {wilks:.4f}")
+                    st.write(f"**Approximate F:** {f_stat:.4f}, p = {p_val:.6f}")
+
+
+# ===================================================================
+# Tab 9 -- Multidimensional Scaling (MDS)
+# ===================================================================
+
+def _render_mds(df: pd.DataFrame):
+    """Multidimensional Scaling visualization."""
+    from sklearn.manifold import MDS
+    from sklearn.metrics import pairwise_distances
+
+    num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    cat_cols = df.select_dtypes(include=["object", "category"]).columns.tolist()
+
+    if len(num_cols) < 2:
+        empty_state("Need at least 2 numeric columns.")
+        return
+
+    section_header("Multidimensional Scaling (MDS)")
+
+    selected = st.multiselect("Variables:", num_cols, default=num_cols, key="mds_cols")
+    if len(selected) < 2:
+        return
+
+    c1, c2, c3 = st.columns(3)
+    metric = c1.selectbox("Type:", ["Metric", "Non-metric"], key="mds_metric")
+    n_dims = c2.selectbox("Dimensions:", [2, 3], key="mds_dims")
+    color_col = c3.selectbox("Color by:", [None] + cat_cols, key="mds_color")
+
+    max_samples = st.slider("Max samples:", 50, min(2000, len(df)), min(500, len(df)),
+                             key="mds_max")
+
+    if st.button("Run MDS", key="run_mds"):
+        data = df[selected].dropna()
+        if len(data) > max_samples:
+            data = data.sample(max_samples, random_state=42)
+
+        X = StandardScaler().fit_transform(data.values)
+
+        with st.spinner("Computing MDS embedding..."):
+            mds = MDS(n_components=n_dims,
+                      metric=(metric == "Metric"),
+                      random_state=42, n_init=4, max_iter=300,
+                      normalized_stress="auto")
+            embedding = mds.fit_transform(X)
+
+        stress = mds.stress_
+        st.metric("Stress", f"{stress:.4f}")
+
+        emb_df = pd.DataFrame(embedding, columns=[f"Dim{i+1}" for i in range(n_dims)])
+        if color_col and color_col in df.columns:
+            emb_df["color"] = df[color_col].iloc[data.index].values
+
+        if n_dims == 2:
+            fig = px.scatter(emb_df, x="Dim1", y="Dim2",
+                             color="color" if "color" in emb_df else None,
+                             title=f"MDS 2D ({metric})", opacity=0.7)
+        else:
+            fig = px.scatter_3d(emb_df, x="Dim1", y="Dim2", z="Dim3",
+                                color="color" if "color" in emb_df else None,
+                                title=f"MDS 3D ({metric})", opacity=0.7)
+        fig.update_layout(height=600)
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Shepard diagram
+        section_header("Shepard Diagram")
+        original_dist = pairwise_distances(X)
+        embedded_dist = pairwise_distances(embedding)
+
+        # Sample pairs for large datasets
+        n = len(X)
+        if n > 200:
+            idx_pairs = np.random.choice(n * n, min(5000, n * n), replace=False)
+            orig_flat = original_dist.flatten()[idx_pairs]
+            emb_flat = embedded_dist.flatten()[idx_pairs]
+        else:
+            triu_idx = np.triu_indices(n, k=1)
+            orig_flat = original_dist[triu_idx]
+            emb_flat = embedded_dist[triu_idx]
+
+        fig_shep = go.Figure()
+        fig_shep.add_trace(go.Scatter(x=orig_flat, y=emb_flat, mode="markers",
+                                       marker=dict(size=3, opacity=0.3), name="Pairs"))
+        # Perfect fit line
+        max_val = max(orig_flat.max(), emb_flat.max())
+        fig_shep.add_trace(go.Scatter(x=[0, max_val], y=[0, max_val],
+                                       mode="lines", line=dict(dash="dash", color="red"),
+                                       name="Perfect Fit"))
+        fig_shep.update_layout(title="Shepard Diagram",
+                               xaxis_title="Original Distance",
+                               yaxis_title="Embedded Distance",
+                               height=450)
+        st.plotly_chart(fig_shep, use_container_width=True)
+
+        # Interpretation
+        if stress < 0.05:
+            st.success(f"Stress = {stress:.4f}: Excellent fit")
+        elif stress < 0.10:
+            st.success(f"Stress = {stress:.4f}: Good fit")
+        elif stress < 0.20:
+            st.info(f"Stress = {stress:.4f}: Fair fit")
+        else:
+            st.warning(f"Stress = {stress:.4f}: Poor fit — consider more dimensions")

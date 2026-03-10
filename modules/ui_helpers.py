@@ -112,11 +112,11 @@ def empty_state(message, suggestion=None):
 CHART_CATEGORIES = {
     "Distribution": ["Histogram", "Box Plot", "Violin Plot", "Strip Plot"],
     "Comparison": ["Bar Chart", "Radar Chart", "Funnel Chart", "Waterfall Chart"],
-    "Relationship": ["Scatter Plot", "Bubble Chart", "Joint Plot", "Heatmap"],
+    "Relationship": ["Scatter Plot", "Bubble Chart", "Joint Plot", "Heatmap", "Mosaic Plot"],
     "Composition": ["Pie / Donut", "Treemap", "Sunburst", "Area Chart"],
     "Trend": ["Line Chart", "Candlestick (OHLC)"],
     "3D & Spatial": ["3D Scatter", "3D Surface", "Contour Plot"],
-    "Multivariate": ["Parallel Coordinates"],
+    "Multivariate": ["Parallel Coordinates", "Variability Chart"],
 }
 
 

@@ -9,7 +9,7 @@ from scipy import stats
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from modules.ui_helpers import section_header, empty_state
+from modules.ui_helpers import section_header, empty_state, help_tip
 
 try:
     import statsmodels.api as sm
@@ -58,6 +58,7 @@ def render_time_series(df: pd.DataFrame):
     tabs = st.tabs([
         "Exploration", "Decomposition", "Stationarity",
         "ACF/PACF", "Smoothing", "ARIMA/SARIMA", "Forecast Comparison",
+        "Multiple Series", "Spectral Analysis",
     ])
 
     with tabs[0]:
@@ -74,6 +75,10 @@ def render_time_series(df: pd.DataFrame):
         _render_arima(df)
     with tabs[6]:
         _render_forecast_comparison(df)
+    with tabs[7]:
+        _render_multiple_series(df)
+    with tabs[8]:
+        _render_spectral(df)
 
 
 def _get_ts_data(df, date_col, value_col):
@@ -644,3 +649,264 @@ def _eval_forecast(name, actual, forecast, aic=None):
     if aic is not None:
         result["AIC"] = aic
     return result
+
+
+# ===================================================================
+# Tab 8 -- Multiple Time Series
+# ===================================================================
+
+def _render_multiple_series(df: pd.DataFrame):
+    """Multiple time series analysis: VAR and cross-correlation."""
+    num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    all_cols = df.columns.tolist()
+    date_cols = df.select_dtypes(include=["datetime64"]).columns.tolist()
+
+    if len(num_cols) < 2:
+        empty_state("Need at least 2 numeric columns for multiple series analysis.")
+        return
+
+    section_header("Multiple Time Series")
+
+    date_col = st.selectbox("Date column:", date_cols + all_cols, key="multi_date")
+    value_cols = st.multiselect("Value columns (2+):", num_cols, default=num_cols[:2],
+                                 key="multi_vals")
+    if len(value_cols) < 2:
+        st.info("Select at least 2 value columns.")
+        return
+
+    # Prepare data
+    data = df[[date_col] + value_cols].dropna().copy()
+    if not pd.api.types.is_datetime64_any_dtype(data[date_col]):
+        try:
+            data[date_col] = pd.to_datetime(data[date_col])
+        except Exception:
+            st.error(f"Cannot convert '{date_col}' to datetime.")
+            return
+    data = data.sort_values(date_col).set_index(date_col)
+
+    # Side-by-side plots
+    section_header("Time Series Plots")
+    fig = make_subplots(rows=len(value_cols), cols=1, shared_xaxes=True,
+                        subplot_titles=value_cols, vertical_spacing=0.05)
+    for i, col in enumerate(value_cols):
+        fig.add_trace(go.Scatter(x=data.index, y=data[col], name=col,
+                                 mode="lines"), row=i + 1, col=1)
+    fig.update_layout(height=300 * len(value_cols))
+    st.plotly_chart(fig, use_container_width=True)
+
+    # Cross-correlation
+    section_header("Cross-Correlation")
+    if len(value_cols) == 2:
+        c1_col, c2_col = value_cols
+        max_lags = min(40, len(data) // 2)
+        ccf_vals = []
+        s1 = (data[c1_col] - data[c1_col].mean()) / data[c1_col].std()
+        s2 = (data[c2_col] - data[c2_col].mean()) / data[c2_col].std()
+        for lag in range(-max_lags, max_lags + 1):
+            if lag >= 0:
+                ccf = np.correlate(s1[lag:].values, s2[:len(s1) - lag].values)[0] / len(data)
+            else:
+                ccf = np.correlate(s1[:len(s1) + lag].values, s2[-lag:].values)[0] / len(data)
+            ccf_vals.append(ccf)
+        lags = list(range(-max_lags, max_lags + 1))
+
+        ci = 1.96 / np.sqrt(len(data))
+        fig_ccf = go.Figure()
+        for i, (l, v) in enumerate(zip(lags, ccf_vals)):
+            fig_ccf.add_trace(go.Scatter(x=[l, l], y=[0, v], mode="lines",
+                                          line=dict(color="#6366f1", width=2),
+                                          showlegend=False))
+        fig_ccf.add_trace(go.Scatter(x=lags, y=ccf_vals, mode="markers",
+                                      marker=dict(color="#6366f1", size=4),
+                                      name="CCF"))
+        fig_ccf.add_hline(y=ci, line_dash="dash", line_color="red")
+        fig_ccf.add_hline(y=-ci, line_dash="dash", line_color="red")
+        fig_ccf.add_hline(y=0, line_color="black")
+        fig_ccf.update_layout(title=f"Cross-Correlation: {c1_col} vs {c2_col}",
+                              xaxis_title="Lag", yaxis_title="CCF", height=400)
+        st.plotly_chart(fig_ccf, use_container_width=True)
+    else:
+        # Correlation matrix of all series
+        corr = data[value_cols].corr()
+        fig_corr = px.imshow(corr, text_auto=".2f", color_continuous_scale="RdBu_r",
+                              zmin=-1, zmax=1, title="Series Correlation Matrix")
+        st.plotly_chart(fig_corr, use_container_width=True)
+
+    # VAR model
+    section_header("VAR Model")
+    try:
+        from statsmodels.tsa.api import VAR as VARModel
+        max_lag = st.number_input("Max lag order:", 1, 20, 5, key="multi_var_lag")
+        if st.button("Fit VAR Model", key="multi_var_fit"):
+            # Ensure numeric data is clean
+            var_data = data[value_cols].dropna()
+            try:
+                var_model = VARModel(var_data)
+                results = var_model.select_order(maxlags=max_lag)
+                st.write("**Information Criteria:**")
+                st.dataframe(pd.DataFrame({
+                    "Lag": range(1, max_lag + 1),
+                    "AIC": [results.ics["aic"][i] for i in range(1, max_lag + 1)],
+                    "BIC": [results.ics["bic"][i] for i in range(1, max_lag + 1)],
+                }).round(4), use_container_width=True, hide_index=True)
+
+                best_lag = results.selected_orders["aic"]
+                st.write(f"**Best lag (AIC):** {best_lag}")
+
+                fitted = var_model.fit(best_lag)
+                st.write(f"**Log-likelihood:** {fitted.llf:.2f}")
+
+                # Forecast
+                n_forecast = st.number_input("Forecast steps:", 1, 50, 10, key="multi_var_fc")
+                forecast = fitted.forecast(var_data.values[-best_lag:], steps=n_forecast)
+                fc_df = pd.DataFrame(forecast, columns=value_cols)
+                section_header("VAR Forecast")
+                st.dataframe(fc_df.round(4), use_container_width=True)
+
+            except Exception as e:
+                st.error(f"VAR model error: {e}")
+    except ImportError:
+        st.info("statsmodels VAR not available.")
+
+    # Granger causality
+    section_header("Granger Causality")
+    if len(value_cols) == 2:
+        try:
+            from statsmodels.tsa.stattools import grangercausalitytests
+            max_gc_lag = st.number_input("Max lag for Granger test:", 1, 20, 4, key="multi_gc_lag")
+            if st.button("Test Granger Causality", key="multi_gc_run"):
+                for c1_name, c2_name in [(value_cols[0], value_cols[1]),
+                                          (value_cols[1], value_cols[0])]:
+                    st.write(f"**{c1_name} → {c2_name}:**")
+                    test_data = data[[c2_name, c1_name]].dropna()
+                    try:
+                        gc_result = grangercausalitytests(test_data, maxlag=max_gc_lag, verbose=False)
+                        gc_rows = []
+                        for lag, res in gc_result.items():
+                            f_stat = res[0]["ssr_ftest"][0]
+                            p_val = res[0]["ssr_ftest"][1]
+                            gc_rows.append({"Lag": lag, "F-statistic": round(f_stat, 4),
+                                            "p-value": round(p_val, 6)})
+                        gc_df = pd.DataFrame(gc_rows)
+                        st.dataframe(gc_df, use_container_width=True, hide_index=True)
+                        min_p = gc_df["p-value"].min()
+                        if min_p < 0.05:
+                            st.success(f"{c1_name} Granger-causes {c2_name} (min p = {min_p:.6f})")
+                        else:
+                            st.info(f"No Granger causality from {c1_name} to {c2_name}")
+                    except Exception as e:
+                        st.warning(f"Granger test failed: {e}")
+        except ImportError:
+            st.info("Granger causality requires statsmodels.")
+
+
+# ===================================================================
+# Tab 9 -- Spectral Analysis
+# ===================================================================
+
+def _render_spectral(df: pd.DataFrame):
+    """Spectral analysis: periodogram and Welch's method."""
+    from scipy.signal import periodogram, welch
+
+    num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    all_cols = df.columns.tolist()
+    date_cols = df.select_dtypes(include=["datetime64"]).columns.tolist()
+
+    if not num_cols:
+        empty_state("No numeric columns available.")
+        return
+
+    section_header("Spectral Analysis")
+    help_tip("Spectral Analysis", """
+Analyzes the frequency content of a time series:
+- **Periodogram:** Raw estimate of power spectral density (PSD)
+- **Welch's Method:** Smoother PSD estimate using windowed segments
+- Peak frequencies indicate dominant cycles in the data
+""")
+
+    date_col = st.selectbox("Date column:", date_cols + all_cols, key="spec_date")
+    value_col = st.selectbox("Value column:", num_cols, key="spec_val")
+
+    ts = _get_ts_data(df, date_col, value_col)
+    if ts is None:
+        return
+
+    ts_clean = ts.dropna().values
+
+    method = st.selectbox("Method:", ["Periodogram", "Welch's Method"], key="spec_method")
+
+    c1, c2 = st.columns(2)
+    fs = c1.number_input("Sampling frequency (e.g. 1 for daily, 12 for monthly):",
+                          value=1.0, min_value=0.001, key="spec_fs")
+
+    if method == "Welch's Method":
+        window = c2.selectbox("Window:", ["hann", "hamming", "blackman", "bartlett"],
+                               key="spec_window")
+        nperseg = st.slider("Segment length:", 8, min(len(ts_clean), 512),
+                             min(256, len(ts_clean) // 2), key="spec_nperseg")
+
+    detrend_opt = st.selectbox("Detrend:", ["constant", "linear", False], key="spec_detrend")
+    if detrend_opt is False:
+        detrend_val = False
+    else:
+        detrend_val = detrend_opt
+
+    if st.button("Compute Spectrum", key="spec_compute"):
+        with st.spinner("Computing spectral analysis..."):
+            if method == "Periodogram":
+                freqs, psd = periodogram(ts_clean, fs=fs, detrend=detrend_val)
+            else:
+                freqs, psd = welch(ts_clean, fs=fs, window=window,
+                                    nperseg=nperseg, detrend=detrend_val)
+
+        # Find dominant frequencies
+        # Skip DC component (freq=0)
+        if len(freqs) > 1:
+            psd_no_dc = psd[1:]
+            freqs_no_dc = freqs[1:]
+            peak_indices = np.argsort(psd_no_dc)[-5:][::-1]
+            peak_freqs = freqs_no_dc[peak_indices]
+            peak_powers = psd_no_dc[peak_indices]
+            peak_periods = [1 / f if f > 0 else np.inf for f in peak_freqs]
+
+        # PSD plot
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=freqs, y=psd, mode="lines", name="PSD",
+                                 line=dict(width=2)))
+
+        # Annotate top peaks
+        if len(freqs) > 1:
+            for i in range(min(3, len(peak_indices))):
+                fig.add_annotation(
+                    x=peak_freqs[i], y=peak_powers[i],
+                    text=f"f={peak_freqs[i]:.4f}<br>T={peak_periods[i]:.1f}",
+                    showarrow=True, arrowhead=2,
+                )
+
+        fig.update_layout(
+            title=f"Power Spectral Density ({method})",
+            xaxis_title="Frequency",
+            yaxis_title="Power/Frequency",
+            height=500,
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Log-scale PSD
+        with st.expander("Log-scale PSD"):
+            fig_log = go.Figure()
+            fig_log.add_trace(go.Scatter(x=freqs[1:], y=10 * np.log10(psd[1:] + 1e-12),
+                                          mode="lines", name="PSD (dB)"))
+            fig_log.update_layout(title="PSD (Log Scale)", xaxis_title="Frequency",
+                                  yaxis_title="Power (dB)", height=400)
+            st.plotly_chart(fig_log, use_container_width=True)
+
+        # Dominant frequencies table
+        if len(freqs) > 1:
+            section_header("Dominant Frequencies")
+            peaks_df = pd.DataFrame({
+                "Rank": range(1, min(6, len(peak_indices)) + 1),
+                "Frequency": peak_freqs[:5],
+                "Period": peak_periods[:5],
+                "Power": peak_powers[:5],
+            }).round(4)
+            st.dataframe(peaks_df, use_container_width=True, hide_index=True)

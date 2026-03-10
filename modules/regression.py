@@ -32,6 +32,7 @@ def render_regression(df: pd.DataFrame):
         "Simple Linear", "Multiple Linear", "Polynomial",
         "Logistic", "Curve Fitting", "Diagnostics",
         "GLM", "Robust & Quantile", "Mixed Models",
+        "Regularized", "Nonlinear", "Profiler",
     ])
 
     with tabs[0]:
@@ -52,6 +53,12 @@ def render_regression(df: pd.DataFrame):
         _render_robust_quantile(df)
     with tabs[8]:
         _render_mixed_models(df)
+    with tabs[9]:
+        _render_regularized(df)
+    with tabs[10]:
+        _render_nonlinear(df)
+    with tabs[11]:
+        _render_profiler(df)
 
 
 def _render_simple_linear(df: pd.DataFrame):
@@ -1097,3 +1104,479 @@ def _render_mixed_models(df: pd.DataFrame):
 
         except Exception as e:
             st.error(f"Mixed model failed: {e}")
+
+
+# ===================================================================
+# Tab 10 -- Regularized Regression (LASSO / Ridge / Elastic Net)
+# ===================================================================
+
+def _render_regularized(df: pd.DataFrame):
+    """Regularized regression with path plots and CV alpha selection."""
+    num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    if len(num_cols) < 2:
+        empty_state("Need at least 2 numeric columns.")
+        return
+
+    section_header("Regularized Regression")
+    help_tip("Regularized Regression", """
+- **LASSO (L1):** Shrinks some coefficients to exactly zero → feature selection
+- **Ridge (L2):** Shrinks all coefficients toward zero → handles multicollinearity
+- **Elastic Net:** Combines L1 and L2 penalties
+- The regularization path shows how coefficients change as penalty (α) increases
+""")
+
+    y_col = st.selectbox("Response (Y):", num_cols, key="reg_reg_y")
+    x_cols = st.multiselect("Predictors (X):", [c for c in num_cols if c != y_col],
+                             key="reg_reg_x")
+    if not x_cols:
+        st.info("Select predictor variables.")
+        return
+
+    method = st.selectbox("Method:", ["LASSO (L1)", "Ridge (L2)", "Elastic Net"],
+                           key="reg_reg_method")
+
+    c1, c2 = st.columns(2)
+    n_folds = c1.number_input("CV folds:", 3, 20, 5, key="reg_reg_cv")
+    if method == "Elastic Net":
+        l1_ratio = c2.slider("L1 ratio:", 0.0, 1.0, 0.5, 0.05, key="reg_reg_l1")
+
+    if st.button("Fit Model", key="reg_reg_fit"):
+        data = df[[y_col] + x_cols].dropna()
+        X = data[x_cols].values
+        y = data[y_col].values
+
+        from sklearn.preprocessing import StandardScaler
+        from sklearn.linear_model import LassoCV, RidgeCV, ElasticNetCV, lasso_path
+
+        scaler = StandardScaler()
+        X_scaled = scaler.fit_transform(X)
+
+        with st.spinner("Fitting regularized model..."):
+            if method == "LASSO (L1)":
+                model = LassoCV(cv=n_folds, random_state=42, max_iter=10000)
+                model.fit(X_scaled, y)
+                best_alpha = model.alpha_
+                coefs = model.coef_
+                mse_path = model.mse_path_
+                alphas_path = model.alphas_
+
+                # Regularization path
+                alphas_lasso, coefs_path, _ = lasso_path(X_scaled, y, alphas=alphas_path)
+
+            elif method == "Ridge (L2)":
+                alphas_ridge = np.logspace(-3, 3, 100)
+                model = RidgeCV(alphas=alphas_ridge, cv=n_folds,
+                                scoring="neg_mean_squared_error")
+                model.fit(X_scaled, y)
+                best_alpha = model.alpha_
+                coefs = model.coef_
+
+                # Compute path manually
+                from sklearn.linear_model import Ridge
+                coefs_path = []
+                for a in alphas_ridge:
+                    ridge = Ridge(alpha=a)
+                    ridge.fit(X_scaled, y)
+                    coefs_path.append(ridge.coef_)
+                coefs_path = np.array(coefs_path).T
+                alphas_path = alphas_ridge
+                mse_path = None
+
+            else:  # Elastic Net
+                model = ElasticNetCV(cv=n_folds, l1_ratio=l1_ratio, random_state=42,
+                                      max_iter=10000)
+                model.fit(X_scaled, y)
+                best_alpha = model.alpha_
+                coefs = model.coef_
+                mse_path = model.mse_path_
+                alphas_path = model.alphas_
+
+                alphas_en, coefs_path, _ = lasso_path(X_scaled, y, alphas=alphas_path,
+                                                        l1_ratio=l1_ratio if method == "Elastic Net" else 1.0)
+
+        # Results
+        section_header("Results")
+        r2 = model.score(X_scaled, y)
+        y_pred = model.predict(X_scaled)
+        rmse = np.sqrt(np.mean((y - y_pred) ** 2))
+
+        c1m, c2m, c3m = st.columns(3)
+        c1m.metric("Best α", f"{best_alpha:.6f}")
+        c2m.metric("R²", f"{r2:.4f}")
+        c3m.metric("RMSE", f"{rmse:.4f}")
+
+        # Coefficient table
+        selected_mask = coefs != 0
+        coef_df = pd.DataFrame({
+            "Variable": x_cols,
+            "Coefficient": coefs.round(6),
+            "Selected": selected_mask,
+        }).sort_values("Coefficient", key=abs, ascending=False)
+        st.dataframe(coef_df, use_container_width=True, hide_index=True)
+
+        n_selected = selected_mask.sum()
+        st.write(f"**Variables selected:** {n_selected} / {len(x_cols)}")
+
+        # Regularization path plot
+        section_header("Regularization Path")
+        fig = go.Figure()
+        for i, name in enumerate(x_cols):
+            fig.add_trace(go.Scatter(x=np.log10(alphas_path), y=coefs_path[i],
+                                     mode="lines", name=name))
+        fig.add_vline(x=np.log10(best_alpha), line_dash="dash", line_color="red",
+                      annotation_text=f"Best α={best_alpha:.4f}")
+        fig.update_layout(title="Coefficient Path vs log(α)",
+                          xaxis_title="log₁₀(α)", yaxis_title="Coefficient",
+                          height=500)
+        st.plotly_chart(fig, use_container_width=True)
+
+        # MSE vs alpha plot
+        if mse_path is not None:
+            section_header("Cross-Validation MSE")
+            mean_mse = mse_path.mean(axis=1)
+            std_mse = mse_path.std(axis=1)
+            fig_mse = go.Figure()
+            fig_mse.add_trace(go.Scatter(x=np.log10(alphas_path), y=mean_mse,
+                                          mode="lines+markers", name="Mean MSE"))
+            fig_mse.add_trace(go.Scatter(
+                x=np.log10(alphas_path).tolist() + np.log10(alphas_path).tolist()[::-1],
+                y=(mean_mse + std_mse).tolist() + (mean_mse - std_mse).tolist()[::-1],
+                fill="toself", fillcolor="rgba(99,102,241,0.15)",
+                line=dict(color="rgba(99,102,241,0)"), name="±1 Std",
+            ))
+            fig_mse.add_vline(x=np.log10(best_alpha), line_dash="dash", line_color="red",
+                              annotation_text=f"Best α")
+            fig_mse.update_layout(title="CV MSE vs log(α)",
+                                  xaxis_title="log₁₀(α)", yaxis_title="MSE",
+                                  height=400)
+            st.plotly_chart(fig_mse, use_container_width=True)
+
+        # Coefficient bar chart
+        section_header("Coefficient Magnitudes")
+        coef_abs = pd.DataFrame({
+            "Variable": x_cols, "Coefficient": coefs
+        }).sort_values("Coefficient", key=abs)
+        fig_bar = go.Figure(go.Bar(x=coef_abs["Coefficient"], y=coef_abs["Variable"],
+                                    orientation="h",
+                                    marker_color=["#EF553B" if c == 0 else "#6366f1"
+                                                   for c in coef_abs["Coefficient"]]))
+        fig_bar.update_layout(title="Coefficients (standardized)", height=max(300, len(x_cols) * 25))
+        st.plotly_chart(fig_bar, use_container_width=True)
+
+
+# ===================================================================
+# Tab 11 -- Nonlinear Regression
+# ===================================================================
+
+def _render_nonlinear(df: pd.DataFrame):
+    """Nonlinear regression with built-in model library."""
+    num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    if len(num_cols) < 2:
+        empty_state("Need at least 2 numeric columns.")
+        return
+
+    section_header("Nonlinear Regression")
+    help_tip("Nonlinear Models", """
+Built-in models:
+- **Exponential Growth:** y = a · exp(b·x)
+- **Exponential Decay:** y = a · exp(-b·x)
+- **Logistic/Sigmoid:** y = L / (1 + exp(-k·(x-x₀)))
+- **Michaelis-Menten:** y = Vmax·x / (Km + x)
+- **Power Law:** y = a · x^b
+- **Gompertz:** y = a · exp(-b · exp(-c·x))
+""")
+
+    c1, c2 = st.columns(2)
+    x_col = c1.selectbox("X:", num_cols, key="nl_x")
+    y_col = c2.selectbox("Y:", [c for c in num_cols if c != x_col], key="nl_y")
+
+    model_type = st.selectbox("Model:", [
+        "Exponential Growth", "Exponential Decay", "Logistic (Sigmoid)",
+        "Michaelis-Menten", "Power Law", "Gompertz",
+    ], key="nl_model")
+
+    if st.button("Fit Model", key="nl_fit"):
+        data = df[[x_col, y_col]].dropna()
+        x = data[x_col].values
+        y = data[y_col].values
+
+        if len(data) < 3:
+            st.error("Need at least 3 data points.")
+            return
+
+        # Model definitions: (function, initial parameters, parameter names)
+        models = {
+            "Exponential Growth": (
+                lambda x, a, b: a * np.exp(b * x),
+                [1.0, 0.01],
+                ["a", "b"],
+                "y = a · exp(b·x)",
+            ),
+            "Exponential Decay": (
+                lambda x, a, b: a * np.exp(-b * x),
+                [max(y), 0.01],
+                ["a", "b"],
+                "y = a · exp(-b·x)",
+            ),
+            "Logistic (Sigmoid)": (
+                lambda x, L, k, x0: L / (1 + np.exp(-k * (x - x0))),
+                [max(y), 1.0, np.median(x)],
+                ["L", "k", "x₀"],
+                "y = L / (1 + exp(-k·(x-x₀)))",
+            ),
+            "Michaelis-Menten": (
+                lambda x, Vmax, Km: Vmax * x / (Km + x),
+                [max(y), np.median(x)],
+                ["Vmax", "Km"],
+                "y = Vmax·x / (Km + x)",
+            ),
+            "Power Law": (
+                lambda x, a, b: a * np.power(np.abs(x), b),
+                [1.0, 1.0],
+                ["a", "b"],
+                "y = a · x^b",
+            ),
+            "Gompertz": (
+                lambda x, a, b, c: a * np.exp(-b * np.exp(-c * x)),
+                [max(y), 1.0, 0.1],
+                ["a", "b", "c"],
+                "y = a · exp(-b · exp(-c·x))",
+            ),
+        }
+
+        func, p0, param_names, formula = models[model_type]
+
+        try:
+            with st.spinner("Fitting nonlinear model..."):
+                popt, pcov = optimize.curve_fit(func, x, y, p0=p0, maxfev=10000)
+                perr = np.sqrt(np.diag(pcov))
+
+            y_pred = func(x, *popt)
+            ss_res = np.sum((y - y_pred) ** 2)
+            ss_tot = np.sum((y - np.mean(y)) ** 2)
+            r2_analog = 1 - ss_res / ss_tot if ss_tot > 0 else 0
+            rmse = np.sqrt(np.mean((y - y_pred) ** 2))
+
+            # Results
+            section_header("Model Fit")
+            st.markdown(f"**Model:** {formula}")
+
+            c1m, c2m = st.columns(2)
+            c1m.metric("Pseudo R²", f"{r2_analog:.4f}")
+            c2m.metric("RMSE", f"{rmse:.4f}")
+
+            # Parameter estimates
+            section_header("Parameter Estimates")
+            param_df = pd.DataFrame({
+                "Parameter": param_names,
+                "Estimate": popt,
+                "Std Error": perr,
+                "Lower 95% CI": popt - 1.96 * perr,
+                "Upper 95% CI": popt + 1.96 * perr,
+            }).round(6)
+            st.dataframe(param_df, use_container_width=True, hide_index=True)
+
+            # Fitted equation
+            param_str = ", ".join([f"{name}={val:.4f}" for name, val in zip(param_names, popt)])
+            st.write(f"**Fitted parameters:** {param_str}")
+
+            # Plot
+            section_header("Fitted Curve")
+            x_smooth = np.linspace(x.min(), x.max(), 200)
+            y_smooth = func(x_smooth, *popt)
+
+            # Confidence bands (delta method approximation)
+            from scipy.optimize import approx_fprime
+            y_ci_upper = np.zeros(len(x_smooth))
+            y_ci_lower = np.zeros(len(x_smooth))
+            for idx_s, xi in enumerate(x_smooth):
+                def pred_func(params):
+                    return func(xi, *params)
+                J = approx_fprime(popt, pred_func, 1e-8)
+                var_pred = J @ pcov @ J
+                se_pred = np.sqrt(max(0, var_pred))
+                y_ci_upper[idx_s] = y_smooth[idx_s] + 1.96 * se_pred
+                y_ci_lower[idx_s] = y_smooth[idx_s] - 1.96 * se_pred
+
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=x, y=y, mode="markers", name="Data",
+                                     marker=dict(size=6, opacity=0.7)))
+            fig.add_trace(go.Scatter(x=x_smooth, y=y_smooth, mode="lines",
+                                     name="Fitted", line=dict(color="red", width=2)))
+            fig.add_trace(go.Scatter(
+                x=x_smooth.tolist() + x_smooth.tolist()[::-1],
+                y=y_ci_upper.tolist() + y_ci_lower.tolist()[::-1],
+                fill="toself", fillcolor="rgba(255,0,0,0.1)",
+                line=dict(color="rgba(255,0,0,0)"), name="95% CI",
+            ))
+            fig.update_layout(title=f"Nonlinear Fit: {model_type}",
+                              xaxis_title=x_col, yaxis_title=y_col, height=500)
+            st.plotly_chart(fig, use_container_width=True)
+
+            # Residual plot
+            residuals = y - y_pred
+            fig_res = make_subplots(rows=1, cols=2,
+                                     subplot_titles=("Residuals vs Predicted", "Residual Distribution"))
+            fig_res.add_trace(go.Scatter(x=y_pred, y=residuals, mode="markers",
+                                          marker=dict(size=5)), row=1, col=1)
+            fig_res.add_hline(y=0, line_dash="dash", line_color="red", row=1, col=1)
+            fig_res.add_trace(go.Histogram(x=residuals, nbinsx=20), row=1, col=2)
+            fig_res.update_layout(height=350)
+            st.plotly_chart(fig_res, use_container_width=True)
+
+        except RuntimeError as e:
+            st.error(f"Curve fitting failed: {e}. Try different initial parameters or a different model.")
+        except Exception as e:
+            st.error(f"Error: {e}")
+
+
+# ===================================================================
+# Tab 12 -- Prediction Profiler
+# ===================================================================
+
+def _render_profiler(df: pd.DataFrame):
+    """Interactive prediction profiler for exploring fitted models."""
+    if not HAS_SM:
+        st.warning("statsmodels required for the prediction profiler.")
+        return
+
+    num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    if len(num_cols) < 2:
+        empty_state("Need at least 2 numeric columns.")
+        return
+
+    section_header("Prediction Profiler")
+    help_tip("Profiler", """
+Interactively explore how each predictor affects the response:
+- Each subplot shows the marginal effect of one predictor
+- Other predictors are held at the values set by the sliders
+- The prediction interval shows uncertainty at each setting
+""")
+
+    y_col = st.selectbox("Response (Y):", num_cols, key="prof_y")
+    x_cols = st.multiselect("Predictors:", [c for c in num_cols if c != y_col],
+                             key="prof_x")
+    if len(x_cols) < 1:
+        st.info("Select at least 1 predictor.")
+        return
+
+    model_type = st.selectbox("Model type:", [
+        "Linear (main effects)", "Quadratic (with squares & interactions)",
+    ], key="prof_model_type")
+
+    if st.button("Fit & Profile", key="prof_fit"):
+        data = df[[y_col] + x_cols].dropna()
+        X = data[x_cols].values
+        y = data[y_col].values
+
+        if len(data) < len(x_cols) + 2:
+            st.error("Not enough data points.")
+            return
+
+        # Build design matrix
+        X_design = [np.ones(len(y))]
+        for j in range(len(x_cols)):
+            X_design.append(X[:, j])
+        if model_type.startswith("Quadratic"):
+            for j in range(len(x_cols)):
+                X_design.append(X[:, j] ** 2)
+            for j1 in range(len(x_cols)):
+                for j2 in range(j1 + 1, len(x_cols)):
+                    X_design.append(X[:, j1] * X[:, j2])
+        X_design = np.column_stack(X_design)
+
+        try:
+            model = sm.OLS(y, X_design).fit()
+        except Exception as e:
+            st.error(f"Model fitting failed: {e}")
+            return
+
+        section_header("Model Fit")
+        c1m, c2m, c3m = st.columns(3)
+        c1m.metric("R²", f"{model.rsquared:.4f}")
+        c2m.metric("Adj R²", f"{model.rsquared_adj:.4f}")
+        c3m.metric("RMSE", f"{np.sqrt(model.mse_resid):.4f}")
+
+        # Interactive sliders
+        section_header("Profiler Settings")
+        st.caption("Adjust predictor values. Plots show marginal effect of each predictor while others are held constant.")
+        current_values = {}
+        cols_per_row = min(4, len(x_cols))
+        slider_cols = st.columns(cols_per_row)
+        for i, col in enumerate(x_cols):
+            col_data = data[col]
+            c = slider_cols[i % cols_per_row]
+            current_values[col] = c.slider(
+                f"{col}:", float(col_data.min()), float(col_data.max()),
+                float(col_data.mean()), key=f"prof_slider_{col}",
+            )
+
+        # Build prediction function
+        def predict_at(x_vals):
+            x_row = [1.0]
+            for j in range(len(x_cols)):
+                x_row.append(x_vals[j])
+            if model_type.startswith("Quadratic"):
+                for j in range(len(x_cols)):
+                    x_row.append(x_vals[j] ** 2)
+                for j1 in range(len(x_cols)):
+                    for j2 in range(j1 + 1, len(x_cols)):
+                        x_row.append(x_vals[j1] * x_vals[j2])
+            x_arr = np.array([x_row])
+            pred = model.get_prediction(x_arr)
+            return pred.predicted_mean[0], pred.conf_int(alpha=0.05)[0]
+
+        # Current prediction
+        current_x = [current_values[col] for col in x_cols]
+        pred_mean, pred_ci = predict_at(current_x)
+        st.metric("Predicted Response", f"{pred_mean:.4f}",
+                   delta=f"95% CI: [{pred_ci[0]:.4f}, {pred_ci[1]:.4f}]")
+
+        # Marginal effect plots
+        section_header("Marginal Effect Plots")
+        n_plots = len(x_cols)
+        cols_plot = min(n_plots, 3)
+        rows_plot = (n_plots + cols_plot - 1) // cols_plot
+
+        fig = make_subplots(rows=rows_plot, cols=cols_plot,
+                            subplot_titles=[f"{col}" for col in x_cols])
+
+        for idx, col in enumerate(x_cols):
+            row = idx // cols_plot + 1
+            c = idx % cols_plot + 1
+
+            x_range = np.linspace(data[col].min(), data[col].max(), 50)
+            y_preds = []
+            y_lower = []
+            y_upper = []
+
+            for x_val in x_range:
+                test_x = current_x.copy()
+                test_x[idx] = x_val
+                pm, ci = predict_at(test_x)
+                y_preds.append(pm)
+                y_lower.append(ci[0])
+                y_upper.append(ci[1])
+
+            # Prediction line
+            fig.add_trace(go.Scatter(x=x_range, y=y_preds, mode="lines",
+                                     line=dict(color="#6366f1", width=2),
+                                     showlegend=False), row=row, col=c)
+            # CI band
+            fig.add_trace(go.Scatter(
+                x=x_range.tolist() + x_range.tolist()[::-1],
+                y=y_upper + y_lower[::-1],
+                fill="toself", fillcolor="rgba(99,102,241,0.15)",
+                line=dict(color="rgba(99,102,241,0)"),
+                showlegend=False), row=row, col=c)
+            # Current value marker
+            fig.add_vline(x=current_values[col], line_dash="dot", line_color="red",
+                          row=row, col=c)
+
+            fig.update_xaxes(title_text=col, row=row, col=c)
+            if c == 1:
+                fig.update_yaxes(title_text=y_col, row=row, col=c)
+
+        fig.update_layout(height=350 * rows_plot,
+                          title_text="Marginal Effect Plots (with 95% CI)")
+        st.plotly_chart(fig, use_container_width=True)

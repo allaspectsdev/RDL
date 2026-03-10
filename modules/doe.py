@@ -10,7 +10,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from itertools import combinations
-from modules.ui_helpers import section_header, empty_state
+from modules.ui_helpers import section_header, empty_state, help_tip
 
 try:
     import pyDOE2
@@ -34,6 +34,7 @@ def render_doe(df: pd.DataFrame):
 
     tabs = st.tabs([
         "Design Generation", "Design Analysis", "Response Surface",
+        "Augment Design", "Desirability",
     ])
 
     with tabs[0]:
@@ -42,6 +43,10 @@ def render_doe(df: pd.DataFrame):
         _render_design_analysis(df)
     with tabs[2]:
         _render_response_surface(df)
+    with tabs[3]:
+        _render_augment_design(df)
+    with tabs[4]:
+        _render_desirability(df)
 
 
 # ---------------------------------------------------------------------------
@@ -66,6 +71,10 @@ def _render_design_generation(df: pd.DataFrame):
         "Plackett-Burman",
         "Central Composite (CCD)",
         "Box-Behnken",
+        "Definitive Screening (DSD)",
+        "D-optimal",
+        "I-optimal",
+        "Mixture Design",
     ], key="doe_design_type")
 
     # Factor definitions
@@ -86,6 +95,24 @@ def _render_design_generation(df: pd.DataFrame):
         factor_lows.append(low)
         factor_highs.append(high)
 
+    if design_type == "Mixture Design":
+        st.info("For mixture designs, factors represent component proportions that sum to 1. "
+                "Low/High values define the feasible range for each component.")
+        mixture_type = st.selectbox("Mixture design type:", [
+            "Simplex Lattice", "Simplex Centroid", "Extreme Vertices",
+        ], key="doe_mixture_type")
+        st.session_state["doe_mixture_type"] = mixture_type
+
+    if design_type in ("D-optimal", "I-optimal"):
+        c1, c2 = st.columns(2)
+        n_runs = c1.number_input("Number of runs:", n_factors + 1, 100,
+                                  2 * n_factors + 1, key="doe_d_opt_runs_input")
+        model_type = c2.selectbox("Model type:", [
+            "main", "main+interactions", "quadratic",
+        ], key="doe_d_opt_model_input")
+        st.session_state["doe_d_opt_runs"] = n_runs
+        st.session_state["doe_d_opt_model"] = model_type
+
     if st.button("Generate Design", key="doe_generate"):
         try:
             coded_matrix = _generate_design(design_type, n_factors)
@@ -105,12 +132,17 @@ def _render_design_generation(df: pd.DataFrame):
         coded_df.index.name = "Run"
 
         # Build actual values dataframe
-        actual_df = coded_df.copy()
-        for i, name in enumerate(factor_names):
-            low, high = factor_lows[i], factor_highs[i]
-            mid = (low + high) / 2.0
-            half_range = (high - low) / 2.0
-            actual_df[name] = coded_df[name] * half_range + mid
+        is_mixture = st.session_state.pop("doe_is_mixture", False)
+        if is_mixture:
+            actual_df = coded_df.copy()
+            st.info("Mixture design: values represent component proportions (sum to 1).")
+        else:
+            actual_df = coded_df.copy()
+            for i, name in enumerate(factor_names):
+                low, high = factor_lows[i], factor_highs[i]
+                mid = (low + high) / 2.0
+                half_range = (high - low) / 2.0
+                actual_df[name] = coded_df[name] * half_range + mid
 
         # Display coded design
         section_header("Coded Design Matrix (-1 / +1)")
@@ -146,6 +178,28 @@ def _render_design_generation(df: pd.DataFrame):
                 mime="text/csv",
                 key="doe_dl_actual",
             )
+
+        # Ternary plot for 3-component mixtures
+        if is_mixture and n_factors == 3:
+            section_header("Ternary Plot")
+            fig_tern = go.Figure(go.Scatterternary(
+                a=actual_df[factor_names[0]],
+                b=actual_df[factor_names[1]],
+                c=actual_df[factor_names[2]],
+                mode="markers",
+                marker=dict(size=10, color="#6366f1"),
+                text=[f"Run {i+1}" for i in range(n_runs)],
+            ))
+            fig_tern.update_layout(
+                title="Mixture Design Points",
+                ternary=dict(
+                    aaxis=dict(title=factor_names[0]),
+                    baxis=dict(title=factor_names[1]),
+                    caxis=dict(title=factor_names[2]),
+                ),
+                height=500,
+            )
+            st.plotly_chart(fig_tern, use_container_width=True)
 
         # Store in session state for Tab 2
         st.session_state["doe_coded_design"] = coded_df
@@ -188,6 +242,18 @@ def _generate_design(design_type: str, n_factors: int) -> np.ndarray:
             st.warning("Box-Behnken requires at least 3 factors. Using CCD instead.")
             return pyDOE2.ccdesign(n_factors, center=(1, 1))
         return pyDOE2.bbdesign(n_factors, center=1)
+
+    elif design_type == "Definitive Screening (DSD)":
+        return _generate_dsd(n_factors)
+
+    elif design_type == "D-optimal":
+        return _generate_d_optimal(n_factors)
+
+    elif design_type == "I-optimal":
+        return _generate_i_optimal(n_factors)
+
+    elif design_type == "Mixture Design":
+        return _generate_mixture_design(n_factors)
 
     return None
 
@@ -237,6 +303,264 @@ def _get_fracfact_generator(n_factors: int, resolution: int) -> str:
             return gen
 
     return None
+
+
+def _generate_dsd(n_factors):
+    """Definitive Screening Design (Jones & Nachtsheim 2011).
+
+    Generates 2k+1 runs via conference matrix construction.
+    """
+    k = n_factors
+    n_runs = 2 * k + 1
+
+    # Build conference matrix for k factors
+    # Start with identity-like pattern
+    design = np.zeros((n_runs, k))
+
+    # First k rows: fold-over pairs
+    for i in range(k):
+        # Row 2i: factor i at +1, others follow a specific pattern
+        # Row 2i+1: factor i at -1, others follow the negated pattern
+        design[2 * i, i] = 1
+        design[2 * i + 1, i] = -1
+        for j in range(k):
+            if j != i:
+                # Balanced assignment
+                if (i + j) % 2 == 0:
+                    design[2 * i, j] = 1
+                    design[2 * i + 1, j] = -1
+                else:
+                    design[2 * i, j] = -1
+                    design[2 * i + 1, j] = 1
+
+    # Last row: center point (all zeros)
+    design[n_runs - 1, :] = 0
+
+    return design
+
+
+def _generate_d_optimal(n_factors):
+    """D-optimal design via coordinate exchange algorithm."""
+    import streamlit as st
+
+    n_runs = st.session_state.get("doe_d_opt_runs", 2 * n_factors + 1)
+    model_type = st.session_state.get("doe_d_opt_model", "main+interactions")
+    n_restarts = 10
+
+    # Build candidate model matrix function
+    def model_matrix(X):
+        n, k = X.shape
+        cols = [np.ones(n)]  # Intercept
+        for j in range(k):
+            cols.append(X[:, j])  # Main effects
+        if model_type in ("main+interactions", "quadratic"):
+            for j1 in range(k):
+                for j2 in range(j1 + 1, k):
+                    cols.append(X[:, j1] * X[:, j2])
+        if model_type == "quadratic":
+            for j in range(k):
+                cols.append(X[:, j] ** 2)
+        return np.column_stack(cols)
+
+    best_det = -np.inf
+    best_design = None
+
+    for _ in range(n_restarts):
+        # Random starting design
+        X = np.random.choice([-1, 0, 1], size=(n_runs, n_factors))
+
+        # Coordinate exchange
+        improved = True
+        while improved:
+            improved = False
+            for i in range(n_runs):
+                for j in range(n_factors):
+                    current_val = X[i, j]
+                    best_val = current_val
+                    M = model_matrix(X)
+                    try:
+                        current_det = np.linalg.det(M.T @ M)
+                    except Exception:
+                        current_det = 0
+
+                    for candidate in [-1, 0, 1]:
+                        if candidate == current_val:
+                            continue
+                        X[i, j] = candidate
+                        M = model_matrix(X)
+                        try:
+                            new_det = np.linalg.det(M.T @ M)
+                        except Exception:
+                            new_det = 0
+                        if new_det > current_det:
+                            current_det = new_det
+                            best_val = candidate
+                            improved = True
+                    X[i, j] = best_val
+
+        M = model_matrix(X)
+        try:
+            det_val = np.linalg.det(M.T @ M)
+        except Exception:
+            det_val = 0
+
+        if det_val > best_det:
+            best_det = det_val
+            best_design = X.copy()
+
+    if best_design is not None:
+        # Show D-efficiency
+        M = model_matrix(best_design)
+        p = M.shape[1]
+        d_eff = (np.linalg.det(M.T @ M) ** (1.0 / p)) / n_runs * 100 if best_det > 0 else 0
+        st.write(f"**D-efficiency:** {d_eff:.1f}%")
+        return best_design
+
+    # Fallback to random design
+    return np.random.choice([-1, 0, 1], size=(n_runs, n_factors))
+
+
+def _generate_i_optimal(n_factors):
+    """I-optimal design: minimize average prediction variance."""
+    import streamlit as st
+
+    n_runs = st.session_state.get("doe_d_opt_runs", 2 * n_factors + 1)
+    n_restarts = 10
+
+    def model_matrix(X):
+        n, k = X.shape
+        cols = [np.ones(n)]
+        for j in range(k):
+            cols.append(X[:, j])
+        for j1 in range(k):
+            for j2 in range(j1 + 1, k):
+                cols.append(X[:, j1] * X[:, j2])
+        return np.column_stack(cols)
+
+    # Generate candidate points for evaluating prediction variance
+    n_eval = 100
+    eval_points = np.random.uniform(-1, 1, (n_eval, n_factors))
+    F_eval = model_matrix(eval_points)
+
+    best_apv = np.inf
+    best_design = None
+
+    for _ in range(n_restarts):
+        X = np.random.choice([-1, 0, 1], size=(n_runs, n_factors))
+
+        improved = True
+        while improved:
+            improved = False
+            for i in range(n_runs):
+                for j in range(n_factors):
+                    current_val = X[i, j]
+                    best_val = current_val
+                    M = model_matrix(X)
+                    try:
+                        MtM_inv = np.linalg.inv(M.T @ M)
+                        current_apv = np.mean(np.sum((F_eval @ MtM_inv) * F_eval, axis=1))
+                    except Exception:
+                        current_apv = np.inf
+
+                    for candidate in [-1, 0, 1]:
+                        if candidate == current_val:
+                            continue
+                        X[i, j] = candidate
+                        M = model_matrix(X)
+                        try:
+                            MtM_inv = np.linalg.inv(M.T @ M)
+                            new_apv = np.mean(np.sum((F_eval @ MtM_inv) * F_eval, axis=1))
+                        except Exception:
+                            new_apv = np.inf
+                        if new_apv < current_apv:
+                            current_apv = new_apv
+                            best_val = candidate
+                            improved = True
+                    X[i, j] = best_val
+
+        M = model_matrix(X)
+        try:
+            MtM_inv = np.linalg.inv(M.T @ M)
+            apv = np.mean(np.sum((F_eval @ MtM_inv) * F_eval, axis=1))
+        except Exception:
+            apv = np.inf
+
+        if apv < best_apv:
+            best_apv = apv
+            best_design = X.copy()
+
+    if best_design is not None:
+        st.write(f"**Average prediction variance:** {best_apv:.4f}")
+        return best_design
+
+    return np.random.choice([-1, 0, 1], size=(n_runs, n_factors))
+
+
+def _generate_mixture_design(n_factors):
+    """Generate mixture design (components sum to 1)."""
+    import streamlit as st
+    from itertools import combinations_with_replacement
+
+    mixture_type = st.session_state.get("doe_mixture_type", "Simplex Lattice")
+    k = n_factors
+
+    if mixture_type == "Simplex Lattice":
+        # Degree 2 simplex lattice: all permutations of (1,0,...,0), (0.5,0.5,0,...,0), etc.
+        degree = 2
+        points = set()
+        # Generate all compositions of degree into k parts
+        def compositions(n, k):
+            if k == 1:
+                yield (n,)
+            else:
+                for i in range(n + 1):
+                    for c in compositions(n - i, k - 1):
+                        yield (i,) + c
+
+        for comp in compositions(degree, k):
+            points.add(tuple(c / degree for c in comp))
+
+        design = np.array(list(points))
+
+    elif mixture_type == "Simplex Centroid":
+        # All subsets of components at equal proportions
+        points = []
+        for r in range(1, k + 1):
+            for combo in combinations(range(k), r):
+                point = np.zeros(k)
+                for idx in combo:
+                    point[idx] = 1.0 / r
+                points.append(point)
+        design = np.array(points)
+
+    elif mixture_type == "Extreme Vertices":
+        # For constrained mixtures, generate vertices of the feasible region
+        # Simple case: evenly spaced grid on simplex
+        n_grid = 3  # Points per edge
+        points = set()
+
+        def simplex_grid(k, n_grid):
+            if k == 1:
+                yield (1.0,)
+            else:
+                for i in range(n_grid + 1):
+                    for rest in simplex_grid(k - 1, n_grid - i):
+                        yield (i / n_grid,) + rest
+
+        for pt in simplex_grid(k, n_grid):
+            if abs(sum(pt) - 1.0) < 1e-10:
+                points.add(pt)
+
+        design = np.array(list(points))
+
+    else:
+        design = np.eye(k)
+
+    # For mixture designs, the values are already proportions (0-1), not coded -1/+1
+    # Store a flag so the actual-values conversion handles it correctly
+    st.session_state["doe_is_mixture"] = True
+
+    return design
 
 
 # ---------------------------------------------------------------------------
@@ -760,3 +1084,343 @@ def _find_optimum(b, x1_col, x2_col, response_col, x1, x2,
         st.markdown("**Other factors held at:**")
         for col, val in hold_values.items():
             st.write(f"- {col} = {val:.4f}")
+
+
+# ---------------------------------------------------------------------------
+# Tab 4: Augment Design
+# ---------------------------------------------------------------------------
+
+def _render_augment_design(df: pd.DataFrame):
+    """Augment an existing experimental design."""
+    if not HAS_PYDOE:
+        st.warning("pyDOE2 required for design augmentation.")
+        return
+
+    num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    if len(num_cols) < 2:
+        empty_state("Need a design loaded with at least 2 numeric factor columns.")
+        return
+
+    section_header("Augment Existing Design")
+    help_tip("Design Augmentation", """
+Extend an existing experiment by adding runs:
+- **Center Points:** Add runs at the midpoint of all factors (tests for curvature)
+- **Axial Points:** Add star points to convert factorial to CCD
+- **Fold-over:** Add the mirror image of the design (resolves aliasing)
+- **Replicate:** Duplicate existing runs (estimates pure error)
+""")
+
+    factor_cols = st.multiselect("Factor columns (from existing design):", num_cols,
+                                  key="aug_factors")
+    if len(factor_cols) < 2:
+        st.info("Select at least 2 factor columns.")
+        return
+
+    aug_type = st.selectbox("Augmentation type:", [
+        "Add Center Points",
+        "Add Axial Points (Star Points)",
+        "Add Fold-over",
+        "Add Replicates",
+    ], key="aug_type")
+
+    if aug_type == "Add Center Points":
+        n_center = st.number_input("Number of center points:", 1, 10, 3, key="aug_n_center")
+    elif aug_type == "Add Axial Points (Star Points)":
+        alpha_star = st.number_input("Axial distance (\u03b1):", 0.5, 3.0, 1.414, 0.001,
+                                      format="%.3f", key="aug_alpha_star")
+    elif aug_type == "Add Replicates":
+        n_reps = st.number_input("Number of replicates:", 1, 5, 1, key="aug_n_reps")
+
+    if st.button("Augment Design", key="aug_run"):
+        existing = df[factor_cols].dropna()
+        k = len(factor_cols)
+
+        if aug_type == "Add Center Points":
+            center = np.zeros((n_center, k))
+            # Use column means as center
+            for j, col in enumerate(factor_cols):
+                center[:, j] = existing[col].mean()
+            new_runs = pd.DataFrame(center, columns=factor_cols)
+
+        elif aug_type == "Add Axial Points (Star Points)":
+            axial = np.zeros((2 * k, k))
+            for j, col in enumerate(factor_cols):
+                col_mean = existing[col].mean()
+                col_range = (existing[col].max() - existing[col].min()) / 2
+                axial[2 * j, j] = col_mean + alpha_star * col_range
+                axial[2 * j + 1, j] = col_mean - alpha_star * col_range
+                # Other columns at center
+                for j2 in range(k):
+                    if j2 != j:
+                        axial[2 * j, j2] = existing[factor_cols[j2]].mean()
+                        axial[2 * j + 1, j2] = existing[factor_cols[j2]].mean()
+            new_runs = pd.DataFrame(axial, columns=factor_cols)
+
+        elif aug_type == "Add Fold-over":
+            # Mirror the design around the center
+            center = existing.mean()
+            folded = 2 * center - existing
+            new_runs = folded.reset_index(drop=True)
+
+        elif aug_type == "Add Replicates":
+            new_runs = pd.concat([existing] * n_reps, ignore_index=True)
+
+        augmented = pd.concat([existing.reset_index(drop=True), new_runs.reset_index(drop=True)],
+                              ignore_index=True)
+        augmented.index = range(1, len(augmented) + 1)
+        augmented.index.name = "Run"
+
+        section_header("Augmented Design")
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Original Runs", len(existing))
+        c2.metric("New Runs", len(new_runs))
+        c3.metric("Total Runs", len(augmented))
+
+        st.dataframe(augmented.round(4), use_container_width=True)
+
+        csv_data = augmented.to_csv()
+        st.download_button("Download Augmented Design (CSV)", csv_data,
+                           file_name="augmented_design.csv", mime="text/csv",
+                           key="aug_dl")
+
+        st.session_state["doe_coded_design"] = augmented
+        st.session_state["doe_actual_design"] = augmented
+        st.session_state["doe_factor_names"] = factor_cols
+
+
+# ---------------------------------------------------------------------------
+# Tab 5: Desirability Functions
+# ---------------------------------------------------------------------------
+
+def _render_desirability(df: pd.DataFrame):
+    """Multi-response optimization via desirability functions."""
+    if not HAS_SM:
+        st.warning("statsmodels required for desirability optimization.")
+        return
+
+    num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    if len(num_cols) < 3:
+        empty_state("Need at least 3 numeric columns (factors + responses).")
+        return
+
+    section_header("Multi-Response Optimization")
+    help_tip("Desirability Functions", """
+Simultaneously optimize multiple response variables:
+- Each response gets an individual desirability score (0=unacceptable, 1=ideal)
+- **Maximize:** d = ((y-L)/(T-L))^s when L \u2264 y \u2264 T, else 0 or 1
+- **Minimize:** d = ((U-y)/(U-T))^s when T \u2264 y \u2264 U, else 0 or 1
+- **Target:** d = ((y-L)/(T-L))^s when L \u2264 y \u2264 T, ((U-y)/(U-T))^s when T \u2264 y \u2264 U
+- Overall desirability D = (\u220f d\u1d62^w\u1d62)^(1/\u03a3w\u1d62)
+""")
+
+    factor_cols = st.multiselect("Factor columns:", num_cols, key="des_factors")
+    remaining = [c for c in num_cols if c not in factor_cols]
+    response_cols = st.multiselect("Response columns:", remaining, key="des_responses")
+
+    if len(factor_cols) < 1 or len(response_cols) < 1:
+        st.info("Select at least 1 factor and 1 response column.")
+        return
+
+    # Response settings
+    section_header("Response Settings")
+    response_settings = []
+    for resp in response_cols:
+        with st.expander(f"Settings for: {resp}"):
+            data_vals = df[resp].dropna()
+            c1, c2 = st.columns(2)
+            goal = c1.selectbox("Goal:", ["Maximize", "Minimize", "Target"],
+                                key=f"des_goal_{resp}")
+            weight = c2.slider("Weight:", 0.1, 10.0, 1.0, 0.1, key=f"des_weight_{resp}")
+
+            c1, c2, c3 = st.columns(3)
+            lower = c1.number_input("Lower bound:", value=float(data_vals.min()),
+                                     key=f"des_lower_{resp}")
+            target_val = c2.number_input("Target:", value=float(data_vals.mean()),
+                                          key=f"des_target_{resp}")
+            upper = c3.number_input("Upper bound:", value=float(data_vals.max()),
+                                     key=f"des_upper_{resp}")
+            shape = st.slider("Shape (s):", 0.1, 10.0, 1.0, 0.1, key=f"des_shape_{resp}",
+                              help="s=1: linear, s<1: less sensitive near bounds, s>1: more sensitive near bounds")
+
+            response_settings.append({
+                "name": resp, "goal": goal, "weight": weight,
+                "lower": lower, "target": target_val, "upper": upper, "shape": shape,
+            })
+
+    if st.button("Optimize", key="des_optimize"):
+        data = df[factor_cols + response_cols].dropna()
+        if len(data) < len(factor_cols) + 2:
+            st.error("Not enough data points.")
+            return
+
+        # Fit response surface models for each response
+        from scipy.optimize import minimize
+
+        models = {}
+        for resp in response_cols:
+            X_factors = data[factor_cols].values
+            y = data[resp].values
+            # Quadratic model
+            X_design = [np.ones(len(y))]
+            for j in range(len(factor_cols)):
+                X_design.append(X_factors[:, j])
+            for j in range(len(factor_cols)):
+                X_design.append(X_factors[:, j] ** 2)
+            for j1 in range(len(factor_cols)):
+                for j2 in range(j1 + 1, len(factor_cols)):
+                    X_design.append(X_factors[:, j1] * X_factors[:, j2])
+            X_design = np.column_stack(X_design)
+
+            try:
+                model = sm.OLS(y, X_design).fit()
+                models[resp] = (model, X_design.shape[1])
+            except Exception as e:
+                st.warning(f"Could not fit model for {resp}: {e}")
+                return
+
+        def predict_response(x, resp_name):
+            model, n_params = models[resp_name]
+            X_new = [1.0]
+            for j in range(len(factor_cols)):
+                X_new.append(x[j])
+            for j in range(len(factor_cols)):
+                X_new.append(x[j] ** 2)
+            for j1 in range(len(factor_cols)):
+                for j2 in range(j1 + 1, len(factor_cols)):
+                    X_new.append(x[j1] * x[j2])
+            return model.predict(np.array([X_new]))[0]
+
+        def individual_desirability(y, settings):
+            L, T, U, s = settings["lower"], settings["target"], settings["upper"], settings["shape"]
+            goal = settings["goal"]
+
+            if goal == "Maximize":
+                if y <= L:
+                    return 0.0
+                elif y >= T:
+                    return 1.0
+                else:
+                    return ((y - L) / (T - L)) ** s
+            elif goal == "Minimize":
+                if y >= U:
+                    return 0.0
+                elif y <= T:
+                    return 1.0
+                else:
+                    return ((U - y) / (U - T)) ** s
+            else:  # Target
+                if y < L or y > U:
+                    return 0.0
+                elif y <= T:
+                    return ((y - L) / (T - L)) ** s if T > L else 1.0
+                else:
+                    return ((U - y) / (U - T)) ** s if U > T else 1.0
+
+        def overall_desirability(x):
+            d_values = []
+            weights = []
+            for settings in response_settings:
+                y_pred = predict_response(x, settings["name"])
+                d = individual_desirability(y_pred, settings)
+                d_values.append(d)
+                weights.append(settings["weight"])
+
+            # Weighted geometric mean
+            d_values = np.array(d_values)
+            weights = np.array(weights)
+            if np.any(d_values == 0):
+                return 0.0
+            log_d = np.sum(weights * np.log(d_values)) / np.sum(weights)
+            return np.exp(log_d)
+
+        def neg_desirability(x):
+            return -overall_desirability(x)
+
+        # Optimize
+        bounds = [(data[col].min(), data[col].max()) for col in factor_cols]
+        x0 = data[factor_cols].mean().values
+
+        with st.spinner("Optimizing desirability..."):
+            best_result = None
+            best_D = -np.inf
+            # Multi-start optimization
+            for _ in range(20):
+                x_start = np.array([np.random.uniform(b[0], b[1]) for b in bounds])
+                try:
+                    result = minimize(neg_desirability, x_start, bounds=bounds,
+                                      method="L-BFGS-B")
+                    if -result.fun > best_D:
+                        best_D = -result.fun
+                        best_result = result
+                except Exception:
+                    pass
+
+            # Also try from data mean
+            try:
+                result = minimize(neg_desirability, x0, bounds=bounds, method="L-BFGS-B")
+                if -result.fun > best_D:
+                    best_D = -result.fun
+                    best_result = result
+            except Exception:
+                pass
+
+        if best_result is not None:
+            section_header("Optimal Settings")
+            opt_x = best_result.x
+
+            cols = st.columns(len(factor_cols) + 1)
+            for i, col in enumerate(factor_cols):
+                cols[i].metric(f"Optimal {col}", f"{opt_x[i]:.4f}")
+            cols[-1].metric("Overall Desirability", f"{best_D:.4f}")
+
+            # Predicted responses at optimum
+            section_header("Predicted Responses at Optimum")
+            for settings in response_settings:
+                y_pred = predict_response(opt_x, settings["name"])
+                d_i = individual_desirability(y_pred, settings)
+                st.write(f"**{settings['name']}:** {y_pred:.4f} (d = {d_i:.4f}, goal: {settings['goal']})")
+
+            # Desirability profile plots
+            section_header("Desirability Profiles")
+            n_factors_plot = len(factor_cols)
+            fig = make_subplots(rows=len(response_cols) + 1, cols=n_factors_plot,
+                                subplot_titles=[f"{resp} vs {fac}"
+                                                for resp in response_cols + ["Overall D"]
+                                                for fac in factor_cols],
+                                vertical_spacing=0.05,
+                                horizontal_spacing=0.05)
+
+            for fi, fac in enumerate(factor_cols):
+                x_range = np.linspace(bounds[fi][0], bounds[fi][1], 50)
+                for ri, settings in enumerate(response_settings):
+                    y_vals = []
+                    d_vals = []
+                    for x_val in x_range:
+                        x_test = opt_x.copy()
+                        x_test[fi] = x_val
+                        y_pred = predict_response(x_test, settings["name"])
+                        y_vals.append(y_pred)
+                        d_vals.append(individual_desirability(y_pred, settings))
+
+                    fig.add_trace(go.Scatter(x=x_range, y=y_vals, mode="lines",
+                                             showlegend=False, line=dict(width=2)),
+                                  row=ri + 1, col=fi + 1)
+                    fig.add_vline(x=opt_x[fi], line_dash="dot", line_color="red",
+                                  row=ri + 1, col=fi + 1)
+
+                # Overall desirability
+                d_overall = []
+                for x_val in x_range:
+                    x_test = opt_x.copy()
+                    x_test[fi] = x_val
+                    d_overall.append(overall_desirability(x_test))
+                fig.add_trace(go.Scatter(x=x_range, y=d_overall, mode="lines",
+                                         showlegend=False, line=dict(width=2, color="red")),
+                              row=len(response_cols) + 1, col=fi + 1)
+                fig.add_vline(x=opt_x[fi], line_dash="dot", line_color="red",
+                              row=len(response_cols) + 1, col=fi + 1)
+
+            fig.update_layout(height=250 * (len(response_cols) + 1))
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.warning("Optimization did not converge. Try different settings.")

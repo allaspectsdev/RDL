@@ -58,6 +58,11 @@ def _compare_classifiers(X, y):
         models["LightGBM"] = LGBMClassifier(random_state=42, verbose=-1)
     except ImportError:
         pass
+    try:
+        from sklearn.neural_network import MLPClassifier
+        models["Neural Network"] = MLPClassifier(max_iter=1000, random_state=42)
+    except ImportError:
+        pass
     results = []
     for name, model in models.items():
         try:
@@ -95,6 +100,11 @@ def _compare_regressors(X, y):
     try:
         from lightgbm import LGBMRegressor
         models["LightGBM"] = LGBMRegressor(random_state=42, verbose=-1)
+    except ImportError:
+        pass
+    try:
+        from sklearn.neural_network import MLPRegressor
+        models["Neural Network"] = MLPRegressor(max_iter=1000, random_state=42)
     except ImportError:
         pass
     results = []
@@ -292,6 +302,7 @@ def _render_classification(df: pd.DataFrame):
         _clf_algos.append("LightGBM")
     except ImportError:
         pass
+    _clf_algos.append("Neural Network (MLP)")
     algorithm = st.selectbox("Algorithm:", _clf_algos, key="clf_algo")
 
     c1, c2, c3 = st.columns(3)
@@ -324,6 +335,15 @@ def _render_classification(df: pd.DataFrame):
             params["n_estimators"] = st.slider("n_estimators:", 10, 500, 100, key="clf_lgb_n")
             params["learning_rate"] = st.slider("learning_rate:", 0.01, 1.0, 0.1, key="clf_lgb_lr")
             params["max_depth"] = st.slider("max_depth:", -1, 15, -1, key="clf_lgb_d")
+        elif algorithm == "Neural Network (MLP)":
+            hidden_str = st.text_input("Hidden layers (comma-sep):", "100,50",
+                                        key="clf_mlp_hidden")
+            try:
+                params["hidden_layer_sizes"] = tuple(int(x.strip()) for x in hidden_str.split(","))
+            except ValueError:
+                params["hidden_layer_sizes"] = (100,)
+            params["activation"] = st.selectbox("Activation:", ["relu", "tanh", "logistic"],
+                                                 key="clf_mlp_act")
 
     if st.button("Train Model", key="train_clf"):
         data = df[features + [target]].dropna()
@@ -433,6 +453,16 @@ def _render_classification(df: pd.DataFrame):
         except ImportError:
             pass
 
+        # Loss curve for neural network
+        if algorithm == "Neural Network (MLP)" and hasattr(model, 'loss_curve_'):
+            with st.expander("Training Loss Curve"):
+                fig_loss = go.Figure()
+                fig_loss.add_trace(go.Scatter(y=model.loss_curve_, mode="lines",
+                                              name="Loss"))
+                fig_loss.update_layout(title="Training Loss", xaxis_title="Iteration",
+                                       yaxis_title="Loss", height=350)
+                st.plotly_chart(fig_loss, use_container_width=True)
+
 
 def _build_classifier(algorithm, params, random_state):
     """Build classifier from algorithm name and params."""
@@ -457,6 +487,12 @@ def _build_classifier(algorithm, params, random_state):
     elif algorithm == "LightGBM":
         from lightgbm import LGBMClassifier
         return LGBMClassifier(random_state=random_state, verbose=-1, **params)
+    elif algorithm == "Neural Network (MLP)":
+        from sklearn.neural_network import MLPClassifier
+        hidden = params.get("hidden_layer_sizes", (100,))
+        activation = params.get("activation", "relu")
+        return MLPClassifier(hidden_layer_sizes=hidden, activation=activation,
+                             max_iter=1000, random_state=random_state)
 
 
 def _render_ml_regression(df: pd.DataFrame):
@@ -488,6 +524,7 @@ def _render_ml_regression(df: pd.DataFrame):
         _reg_algos.append("LightGBM")
     except ImportError:
         pass
+    _reg_algos.append("Neural Network (MLP)")
     algorithm = st.selectbox("Algorithm:", _reg_algos, key="reg_algo")
 
     c1, c2, c3 = st.columns(3)
@@ -524,6 +561,15 @@ def _render_ml_regression(df: pd.DataFrame):
             params["n_estimators"] = st.slider("n_estimators:", 10, 500, 100, key="reg_lgb_n")
             params["learning_rate"] = st.slider("learning_rate:", 0.01, 1.0, 0.1, key="reg_lgb_lr")
             params["max_depth"] = st.slider("max_depth:", -1, 15, -1, key="reg_lgb_d")
+        elif algorithm == "Neural Network (MLP)":
+            hidden_str = st.text_input("Hidden layers (comma-sep):", "100,50",
+                                        key="reg_mlp_hidden")
+            try:
+                params["hidden_layer_sizes"] = tuple(int(x.strip()) for x in hidden_str.split(","))
+            except ValueError:
+                params["hidden_layer_sizes"] = (100,)
+            params["activation"] = st.selectbox("Activation:", ["relu", "tanh", "logistic"],
+                                                 key="reg_mlp_act")
 
     if st.button("Train Model", key="train_reg"):
         data = df[features + [target]].dropna()
@@ -624,6 +670,16 @@ def _render_ml_regression(df: pd.DataFrame):
         except ImportError:
             pass
 
+        # Loss curve for neural network
+        if algorithm == "Neural Network (MLP)" and hasattr(model, 'loss_curve_'):
+            with st.expander("Training Loss Curve"):
+                fig_loss = go.Figure()
+                fig_loss.add_trace(go.Scatter(y=model.loss_curve_, mode="lines",
+                                              name="Loss"))
+                fig_loss.update_layout(title="Training Loss", xaxis_title="Iteration",
+                                       yaxis_title="Loss", height=350)
+                st.plotly_chart(fig_loss, use_container_width=True)
+
 
 def _build_regressor(algorithm, params, random_state):
     """Build regressor from algorithm name and params."""
@@ -649,6 +705,12 @@ def _build_regressor(algorithm, params, random_state):
     elif algorithm == "LightGBM":
         from lightgbm import LGBMRegressor
         return LGBMRegressor(random_state=random_state, verbose=-1, **params)
+    elif algorithm == "Neural Network (MLP)":
+        from sklearn.neural_network import MLPRegressor
+        hidden = params.get("hidden_layer_sizes", (100,))
+        activation = params.get("activation", "relu")
+        return MLPRegressor(hidden_layer_sizes=hidden, activation=activation,
+                            max_iter=1000, random_state=random_state)
 
 
 def _render_dim_reduction(df: pd.DataFrame):

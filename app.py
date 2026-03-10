@@ -797,6 +797,10 @@ from modules.machine_learning import render_machine_learning
 from modules.survival_analysis import render_survival_analysis
 from modules.quality import render_quality
 from modules.doe import render_doe
+from modules.text_analytics import render_text_analytics
+from modules.monte_carlo import render_monte_carlo
+from modules.report import render_report_builder
+from modules.templates import render_templates
 
 
 @st.cache_data
@@ -1063,6 +1067,10 @@ def main():
                 "Survival Analysis",
                 "Quality & SPC",
                 "Design of Experiments",
+                "Text Analytics",
+                "Monte Carlo Simulation",
+                "Report Builder",
+                "Templates",
             ],
             key="module_radio",
             label_visibility="collapsed",
@@ -1082,6 +1090,10 @@ def main():
             "Survival Analysis": "Kaplan-Meier, log-rank test, Cox PH, parametric AFT models.",
             "Quality & SPC": "Control charts (I-MR, X-bar), attributes charts, process capability.",
             "Design of Experiments": "Factorial, CCD, Box-Behnken, response surface, effect analysis.",
+            "Text Analytics": "Text exploration, TF-IDF, word clouds, sentiment analysis.",
+            "Monte Carlo Simulation": "Distribution simulation, process propagation, risk analysis.",
+            "Report Builder": "Build and download HTML reports from your analyses.",
+            "Templates": "Save and load analysis configurations as JSON templates.",
         }
         desc = _MODULE_DESCRIPTIONS.get(module, "")
         if desc:
@@ -1326,6 +1338,30 @@ def main():
             render_doe(df)
         except Exception as e:
             st.error(f"An error occurred in Design of Experiments: {e}")
+    elif module == "Text Analytics":
+        st.markdown("## Text Analytics")
+        try:
+            render_text_analytics(df)
+        except Exception as e:
+            st.error(f"An error occurred in Text Analytics: {e}")
+    elif module == "Monte Carlo Simulation":
+        st.markdown("## Monte Carlo Simulation")
+        try:
+            render_monte_carlo(df)
+        except Exception as e:
+            st.error(f"An error occurred in Monte Carlo Simulation: {e}")
+    elif module == "Report Builder":
+        st.markdown("## Report Builder")
+        try:
+            render_report_builder(df)
+        except Exception as e:
+            st.error(f"An error occurred in Report Builder: {e}")
+    elif module == "Templates":
+        st.markdown("## Analysis Templates")
+        try:
+            render_templates()
+        except Exception as e:
+            st.error(f"An error occurred in Templates: {e}")
 
 
 if __name__ == "__main__":

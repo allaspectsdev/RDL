@@ -36,6 +36,7 @@ def render_survival_analysis(df: pd.DataFrame):
     tabs = st.tabs([
         "Kaplan-Meier", "Log-Rank Test",
         "Cox Proportional Hazards", "Parametric Models",
+        "Reliability",
     ])
 
     with tabs[0]:
@@ -46,6 +47,8 @@ def render_survival_analysis(df: pd.DataFrame):
         _render_cox_ph(df)
     with tabs[3]:
         _render_parametric(df)
+    with tabs[4]:
+        _render_reliability(df)
 
 
 def _get_duration_event_cols(df, prefix):
@@ -583,3 +586,281 @@ def _render_parametric(df: pd.DataFrame):
             yaxis=dict(range=[0, 1.05]), height=550,
         )
         st.plotly_chart(fig, use_container_width=True)
+
+
+# ---------------------------------------------------------------------------
+# Tab 5: Reliability Analysis
+# ---------------------------------------------------------------------------
+
+def _render_reliability(df: pd.DataFrame):
+    """Reliability analysis: Weibull plots, multi-distribution fitting, degradation."""
+    from scipy import stats as sp_stats
+
+    num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    if not num_cols:
+        empty_state("No numeric columns found.")
+        return
+
+    analysis = st.selectbox("Analysis:", [
+        "Weibull Probability Plot",
+        "Multi-Distribution Fitting",
+        "Degradation Analysis",
+    ], key="rel_analysis")
+
+    if analysis == "Weibull Probability Plot":
+        section_header("Weibull Probability Plot")
+        help_tip("Weibull Analysis", """
+The Weibull distribution is the most common reliability model:
+- **Shape (\u03b2):** \u03b2 < 1 = early life failures, \u03b2 = 1 = random failures, \u03b2 > 1 = wear-out
+- **Scale (\u03b7):** Characteristic life (63.2% of units fail by this time)
+- Points following a straight line on Weibull paper indicate a good fit
+""")
+
+        col = st.selectbox("Failure time column:", num_cols, key="rel_wb_col")
+        data = df[col].dropna().values
+        data = data[data > 0]  # Weibull needs positive values
+
+        if len(data) < 3:
+            st.error("Need at least 3 positive observations.")
+            return
+
+        # Fit Weibull distribution
+        shape, loc, scale = sp_stats.weibull_min.fit(data, floc=0)
+
+        # Weibull probability plot (linearized)
+        sorted_data = np.sort(data)
+        n = len(sorted_data)
+        # Median rank approximation for plotting positions
+        median_ranks = (np.arange(1, n + 1) - 0.3) / (n + 0.4)
+
+        # Linearized coordinates
+        x_plot = np.log(sorted_data)
+        y_plot = np.log(-np.log(1 - median_ranks))
+
+        # Fitted line
+        slope = shape
+        intercept = -shape * np.log(scale)
+        x_fit = np.linspace(x_plot.min(), x_plot.max(), 100)
+        y_fit = slope * x_fit + intercept
+
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=x_plot, y=y_plot, mode="markers",
+                                 marker=dict(size=8), name="Data"))
+        fig.add_trace(go.Scatter(x=x_fit, y=y_fit, mode="lines",
+                                 line=dict(color="red", dash="dash"), name="Fitted Line"))
+        fig.update_layout(title="Weibull Probability Plot",
+                          xaxis_title="ln(Time)", yaxis_title="ln(-ln(1-F(t)))",
+                          height=500)
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Parameters
+        section_header("Weibull Parameters")
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Shape (\u03b2)", f"{shape:.4f}")
+        c2.metric("Scale (\u03b7)", f"{scale:.4f}")
+
+        # Interpretation
+        if shape < 1:
+            c3.metric("Failure Pattern", "Early Life (\u03b2 < 1)")
+        elif abs(shape - 1) < 0.1:
+            c3.metric("Failure Pattern", "Random (\u03b2 \u2248 1)")
+        else:
+            c3.metric("Failure Pattern", "Wear-out (\u03b2 > 1)")
+
+        # Reliability at specific times
+        section_header("Reliability Predictions")
+        times_input = st.text_input("Predict at times (comma-sep):",
+                                     placeholder="e.g. 100, 500, 1000",
+                                     key="rel_wb_times")
+        if times_input.strip():
+            try:
+                times = [float(t.strip()) for t in times_input.split(",")]
+                pred_rows = []
+                for t in times:
+                    R_t = 1 - sp_stats.weibull_min.cdf(t, shape, scale=scale)
+                    h_t = sp_stats.weibull_min.pdf(t, shape, scale=scale) / R_t if R_t > 0 else np.inf
+                    pred_rows.append({
+                        "Time": t,
+                        "R(t) Reliability": round(R_t, 6),
+                        "F(t) Failure Prob": round(1 - R_t, 6),
+                        "h(t) Hazard Rate": round(h_t, 6),
+                    })
+                st.dataframe(pd.DataFrame(pred_rows), use_container_width=True, hide_index=True)
+            except ValueError:
+                st.warning("Invalid time format.")
+
+        # CDF and reliability curves
+        t_range = np.linspace(0.01, sorted_data.max() * 1.5, 200)
+        cdf_vals = sp_stats.weibull_min.cdf(t_range, shape, scale=scale)
+        rel_vals = 1 - cdf_vals
+        pdf_vals = sp_stats.weibull_min.pdf(t_range, shape, scale=scale)
+
+        fig2 = make_subplots(rows=1, cols=2,
+                              subplot_titles=("CDF & Reliability", "PDF & Hazard"))
+        fig2.add_trace(go.Scatter(x=t_range, y=cdf_vals, name="F(t) CDF",
+                                   line=dict(color="red")), row=1, col=1)
+        fig2.add_trace(go.Scatter(x=t_range, y=rel_vals, name="R(t) Reliability",
+                                   line=dict(color="green")), row=1, col=1)
+        fig2.add_trace(go.Scatter(x=t_range, y=pdf_vals, name="f(t) PDF",
+                                   line=dict(color="blue")), row=1, col=2)
+        hazard = pdf_vals / rel_vals
+        hazard[rel_vals < 1e-10] = np.nan
+        fig2.add_trace(go.Scatter(x=t_range, y=hazard, name="h(t) Hazard",
+                                   line=dict(color="orange")), row=1, col=2)
+        fig2.update_layout(height=400)
+        st.plotly_chart(fig2, use_container_width=True)
+
+    elif analysis == "Multi-Distribution Fitting":
+        section_header("Multi-Distribution Fitting")
+        col = st.selectbox("Failure time column:", num_cols, key="rel_multi_col")
+        data = df[col].dropna().values
+        data = data[data > 0]
+
+        if len(data) < 5:
+            st.error("Need at least 5 positive observations.")
+            return
+
+        distributions = [
+            ("Weibull", sp_stats.weibull_min),
+            ("Lognormal", sp_stats.lognorm),
+            ("Exponential", sp_stats.expon),
+            ("Normal", sp_stats.norm),
+            ("Gamma", sp_stats.gamma),
+        ]
+
+        results = []
+        fitted = {}
+        for name, dist in distributions:
+            try:
+                params = dist.fit(data)
+                log_lik = np.sum(dist.logpdf(data, *params))
+                k = len(params)
+                n = len(data)
+                aic = 2 * k - 2 * log_lik
+                bic = k * np.log(n) - 2 * log_lik
+                # KS test
+                ks_stat, ks_p = sp_stats.kstest(data, dist.cdf, args=params)
+
+                results.append({
+                    "Distribution": name,
+                    "AIC": round(aic, 2),
+                    "BIC": round(bic, 2),
+                    "Log-Likelihood": round(log_lik, 2),
+                    "KS Statistic": round(ks_stat, 4),
+                    "KS p-value": round(ks_p, 6),
+                })
+                fitted[name] = (dist, params)
+            except Exception:
+                pass
+
+        if not results:
+            st.error("All distribution fits failed.")
+            return
+
+        results_df = pd.DataFrame(results).sort_values("AIC")
+        st.dataframe(results_df, use_container_width=True, hide_index=True)
+
+        best = results_df.iloc[0]["Distribution"]
+        st.success(f"Best fit by AIC: **{best}**")
+
+        # Overlay fitted CDFs
+        section_header("Fitted CDFs")
+        sorted_data = np.sort(data)
+        empirical_cdf = np.arange(1, len(sorted_data) + 1) / len(sorted_data)
+        t_range = np.linspace(data.min() * 0.5, data.max() * 1.2, 200)
+
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=sorted_data, y=empirical_cdf, mode="markers",
+                                 marker=dict(size=5, color="black"), name="Empirical"))
+
+        colors = px.colors.qualitative.Set1
+        for i, (name, (dist, params)) in enumerate(fitted.items()):
+            cdf_vals = dist.cdf(t_range, *params)
+            fig.add_trace(go.Scatter(x=t_range, y=cdf_vals, mode="lines",
+                                     name=name, line=dict(color=colors[i % len(colors)])))
+
+        fig.update_layout(title="Empirical vs Fitted CDFs",
+                          xaxis_title="Time", yaxis_title="F(t)", height=500)
+        st.plotly_chart(fig, use_container_width=True)
+
+    elif analysis == "Degradation Analysis":
+        section_header("Degradation Analysis")
+        help_tip("Degradation Analysis", """
+Track degradation measurements over time for each unit.
+Fit degradation models and extrapolate to a failure threshold.
+""")
+
+        c1, c2, c3 = st.columns(3)
+        time_col = c1.selectbox("Time column:", num_cols, key="rel_deg_time")
+        meas_col = c2.selectbox("Measurement column:", [c for c in num_cols if c != time_col],
+                                 key="rel_deg_meas")
+        cat_cols = df.select_dtypes(include=["object", "category"]).columns.tolist()
+        unit_col = c3.selectbox("Unit ID column:", cat_cols + num_cols, key="rel_deg_unit")
+
+        threshold = st.number_input("Failure threshold:", value=0.0, key="rel_deg_threshold")
+        model_type = st.selectbox("Degradation model:", ["Linear", "Power Law"], key="rel_deg_model")
+
+        if st.button("Analyze Degradation", key="rel_deg_run"):
+            data = df[[time_col, meas_col, unit_col]].dropna()
+            units = data[unit_col].unique()
+
+            if len(units) < 2:
+                st.warning("Need at least 2 units.")
+                return
+
+            # Plot degradation paths
+            fig = go.Figure()
+            estimated_failures = []
+            colors = px.colors.qualitative.Set1
+
+            for i, unit in enumerate(units[:20]):  # Limit to 20 units
+                unit_data = data[data[unit_col] == unit].sort_values(time_col)
+                t = unit_data[time_col].values
+                y = unit_data[meas_col].values
+
+                fig.add_trace(go.Scatter(x=t, y=y, mode="lines+markers",
+                                         name=str(unit),
+                                         line=dict(color=colors[i % len(colors)]),
+                                         marker=dict(size=4)))
+
+                # Fit degradation model
+                if len(t) >= 2:
+                    if model_type == "Linear":
+                        coeffs = np.polyfit(t, y, 1)
+                        if coeffs[0] != 0:
+                            t_fail = (threshold - coeffs[1]) / coeffs[0]
+                            if t_fail > 0:
+                                estimated_failures.append(t_fail)
+                    elif model_type == "Power Law":
+                        # log(y) = log(a) + b*log(t)
+                        t_pos = t[t > 0]
+                        y_pos = y[t > 0]
+                        if len(t_pos) >= 2 and np.all(y_pos > 0):
+                            coeffs = np.polyfit(np.log(t_pos), np.log(y_pos), 1)
+                            b, log_a = coeffs
+                            a = np.exp(log_a)
+                            if b != 0 and threshold > 0:
+                                t_fail = (threshold / a) ** (1 / b)
+                                if t_fail > 0:
+                                    estimated_failures.append(t_fail)
+
+            fig.add_hline(y=threshold, line_dash="dash", line_color="red",
+                          annotation_text=f"Failure Threshold={threshold}")
+            fig.update_layout(title="Degradation Paths",
+                              xaxis_title=time_col, yaxis_title=meas_col,
+                              height=500)
+            st.plotly_chart(fig, use_container_width=True)
+
+            if estimated_failures:
+                section_header("Estimated Failure Times")
+                fail_arr = np.array(estimated_failures)
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Mean Failure Time", f"{np.mean(fail_arr):.4f}")
+                c2.metric("Median Failure Time", f"{np.median(fail_arr):.4f}")
+                c3.metric("Std Dev", f"{np.std(fail_arr):.4f}")
+
+                fig_fail = px.histogram(x=fail_arr, nbins=20,
+                                        title="Estimated Failure Time Distribution",
+                                        labels={"x": "Failure Time"})
+                fig_fail.update_layout(height=350)
+                st.plotly_chart(fig_fail, use_container_width=True)

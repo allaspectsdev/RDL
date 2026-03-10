@@ -78,3 +78,74 @@ def render_download_report_button(title: str, sections: list, key: str = "dl_rep
         mime="text/html",
         key=key,
     )
+
+
+def render_report_builder(df: pd.DataFrame):
+    """Interactive report builder accessible from sidebar."""
+    if df is None or df.empty:
+        st.warning("No data loaded.")
+        return
+
+    st.markdown("#### Report Builder")
+    st.caption("Select analyses to include in your report, then download as HTML.")
+
+    title = st.text_input("Report title:", "Data Analysis Report", key="rpt_title")
+
+    sections = []
+
+    # Dataset summary
+    if st.checkbox("Include Dataset Summary", value=True, key="rpt_summary"):
+        summary_html = f"""
+        <p><strong>Rows:</strong> {df.shape[0]:,} | <strong>Columns:</strong> {df.shape[1]}</p>
+        """
+        # Add descriptive stats table
+        desc = df.describe().round(4)
+        summary_html += desc.to_html()
+        sections.append({"title": "Dataset Summary", "content": summary_html})
+
+    # Missing values
+    if st.checkbox("Include Missing Values Summary", value=False, key="rpt_missing"):
+        missing = df.isnull().sum()
+        missing = missing[missing > 0]
+        if len(missing) > 0:
+            missing_df = pd.DataFrame({
+                "Column": missing.index,
+                "Missing": missing.values,
+                "% Missing": (missing.values / len(df) * 100).round(2),
+            })
+            sections.append({"title": "Missing Values", "content": missing_df})
+        else:
+            sections.append({"title": "Missing Values", "content": "<p>No missing values found.</p>"})
+
+    # Correlation matrix
+    num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    if num_cols and st.checkbox("Include Correlation Matrix", value=False, key="rpt_corr"):
+        import plotly.express as px
+        corr = df[num_cols].corr()
+        fig = px.imshow(corr, text_auto=".2f", color_continuous_scale="RdBu_r",
+                        zmin=-1, zmax=1, title="Correlation Matrix")
+        fig.update_layout(height=500)
+        sections.append({"title": "Correlation Matrix", "content": fig})
+
+    # Distribution plots
+    if num_cols and st.checkbox("Include Distribution Plots", value=False, key="rpt_dist"):
+        import plotly.express as px
+        cols_to_plot = st.multiselect("Columns for distributions:", num_cols,
+                                       default=num_cols[:4], key="rpt_dist_cols")
+        if cols_to_plot:
+            for col in cols_to_plot:
+                fig = px.histogram(df, x=col, title=f"Distribution: {col}", nbins=30)
+                fig.update_layout(height=350)
+                sections.append({"title": f"Distribution: {col}", "content": fig})
+
+    # Custom notes
+    notes = st.text_area("Additional notes:", key="rpt_notes")
+    if notes:
+        sections.append({"title": "Notes", "content": f"<p>{notes}</p>"})
+
+    if sections:
+        st.divider()
+        render_download_report_button(title, sections, key="rpt_download")
+        st.write(f"**Report will include {len(sections)} section(s).**")
+    else:
+        st.info("Select at least one section to include in the report.")

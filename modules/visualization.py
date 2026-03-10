@@ -412,3 +412,154 @@ def render_visualization(df: pd.DataFrame):
                          marginal_y="histogram", title=title, opacity=opacity)
         fig.update_layout(height=height)
         st.plotly_chart(fig, use_container_width=True)
+
+    # ── Mosaic Plot ──
+    elif chart_type == "Mosaic Plot":
+        if len(cat_cols) < 2:
+            st.warning("Need at least 2 categorical columns for mosaic plot.")
+            return
+        c1, c2 = st.columns(2)
+        var1 = c1.selectbox("Variable 1 (width):", cat_cols, key="mos_v1")
+        var2 = c2.selectbox("Variable 2 (height):", [c for c in cat_cols if c != var1], key="mos_v2")
+
+        ct = pd.crosstab(df[var1], df[var2])
+        total = ct.values.sum()
+
+        # Compute expected frequencies and Pearson residuals
+        row_sums = ct.sum(axis=1)
+        col_sums = ct.sum(axis=0)
+        expected = np.outer(row_sums, col_sums) / total
+        with np.errstate(divide="ignore", invalid="ignore"):
+            residuals = np.where(expected > 0, (ct.values - expected) / np.sqrt(expected), 0)
+
+        # Build rectangles
+        fig = go.Figure()
+        x_start = 0
+        categories_v1 = ct.index.tolist()
+        categories_v2 = ct.columns.tolist()
+
+        for i, cat1 in enumerate(categories_v1):
+            width = row_sums.iloc[i] / total
+            y_start = 0
+            for j, cat2 in enumerate(categories_v2):
+                height_val = ct.iloc[i, j] / row_sums.iloc[i] if row_sums.iloc[i] > 0 else 0
+                res = residuals[i, j]
+
+                # Color based on residual
+                if res > 2:
+                    color = "rgba(99, 102, 241, 0.8)"  # Strong positive
+                elif res > 0:
+                    color = "rgba(99, 102, 241, 0.4)"  # Mild positive
+                elif res > -2:
+                    color = "rgba(239, 68, 68, 0.4)"   # Mild negative
+                else:
+                    color = "rgba(239, 68, 68, 0.8)"   # Strong negative
+
+                fig.add_shape(type="rect",
+                              x0=x_start, x1=x_start + width,
+                              y0=y_start, y1=y_start + height_val,
+                              line=dict(color="white", width=1),
+                              fillcolor=color)
+                # Label
+                if width > 0.05 and height_val > 0.05:
+                    fig.add_annotation(
+                        x=x_start + width / 2, y=y_start + height_val / 2,
+                        text=f"{ct.iloc[i, j]}<br>({res:.1f})",
+                        showarrow=False, font=dict(size=10),
+                    )
+                y_start += height_val
+            # X-axis label
+            fig.add_annotation(x=x_start + width / 2, y=-0.05,
+                               text=str(cat1), showarrow=False, font=dict(size=11))
+            x_start += width
+
+        # Y-axis labels
+        y_cum = 0
+        overall_col_props = col_sums / total
+        for j, cat2 in enumerate(categories_v2):
+            prop = overall_col_props.iloc[j]
+            fig.add_annotation(x=-0.03, y=y_cum + prop / 2,
+                               text=str(cat2), showarrow=False, font=dict(size=11),
+                               xanchor="right")
+            y_cum += prop
+
+        fig.update_layout(title=title, height=height,
+                          xaxis=dict(range=[-0.1, 1], showgrid=False, zeroline=False,
+                                     title=var1),
+                          yaxis=dict(range=[-0.1, 1.05], showgrid=False, zeroline=False,
+                                     title=var2))
+        st.plotly_chart(fig, use_container_width=True)
+
+        st.caption("Colors: Blue = more than expected (positive residual), Red = less than expected (negative residual). Numbers show count and Pearson residual.")
+
+    # ── Variability Chart ──
+    elif chart_type == "Variability Chart":
+        if not num_cols:
+            st.warning("Need numeric columns.")
+            return
+        if not cat_cols:
+            st.warning("Need at least one categorical grouping column.")
+            return
+
+        value = st.selectbox("Value:", num_cols, key="var_val")
+        group1 = st.selectbox("Primary group:", cat_cols, key="var_g1")
+        group2 = st.selectbox("Secondary group (optional):", [None] + [c for c in cat_cols if c != group1],
+                               key="var_g2")
+
+        data_clean = df[[value, group1] + ([group2] if group2 else [])].dropna()
+
+        fig = go.Figure()
+        if group2:
+            # Nested grouping
+            groups = data_clean.groupby([group1, group2])
+            x_labels = []
+            x_pos = 0
+            group_positions = {}
+            for (g1, g2), grp in groups:
+                label = f"{g1}|{g2}"
+                x_labels.append(label)
+                vals = grp[value].values
+                # Individual points
+                fig.add_trace(go.Scatter(
+                    x=[x_pos] * len(vals), y=vals, mode="markers",
+                    marker=dict(size=5, opacity=0.5), showlegend=False,
+                ))
+                if g1 not in group_positions:
+                    group_positions[g1] = []
+                group_positions[g1].append((x_pos, grp[value].mean()))
+                x_pos += 1
+
+            # Connect means within primary groups
+            for g1, positions in group_positions.items():
+                xs, ys = zip(*positions)
+                fig.add_trace(go.Scatter(x=list(xs), y=list(ys), mode="lines+markers",
+                                         marker=dict(size=8, symbol="diamond"),
+                                         line=dict(width=2),
+                                         name=str(g1)))
+
+            fig.update_layout(xaxis=dict(tickvals=list(range(len(x_labels))),
+                                         ticktext=x_labels, tickangle=45))
+        else:
+            groups = data_clean.groupby(group1)
+            x_labels = []
+            means = []
+            for i, (g_name, grp) in enumerate(groups):
+                x_labels.append(str(g_name))
+                vals = grp[value].values
+                fig.add_trace(go.Scatter(
+                    x=[i] * len(vals), y=vals, mode="markers",
+                    marker=dict(size=5, opacity=0.5), showlegend=False,
+                ))
+                means.append(grp[value].mean())
+
+            fig.add_trace(go.Scatter(x=list(range(len(x_labels))), y=means,
+                                     mode="lines+markers",
+                                     marker=dict(size=10, symbol="diamond", color="red"),
+                                     line=dict(width=2, color="red"),
+                                     name="Mean"))
+            fig.update_layout(xaxis=dict(tickvals=list(range(len(x_labels))),
+                                         ticktext=x_labels))
+
+        fig.update_layout(title=title, height=height,
+                          xaxis_title=group1, yaxis_title=value)
+        st.plotly_chart(fig, use_container_width=True)

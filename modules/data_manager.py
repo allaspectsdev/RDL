@@ -7,7 +7,7 @@ import pandas as pd
 import numpy as np
 import io
 
-from modules.ui_helpers import section_header, empty_state
+from modules.ui_helpers import section_header, empty_state, help_tip
 
 
 def render_upload():
@@ -404,13 +404,63 @@ def _render_column_operations(df: pd.DataFrame) -> pd.DataFrame:
 
     st.divider()
     section_header("Computed Column")
-    st.caption("Create a new column using a pandas expression. Use column names as variables.")
-    st.caption("Examples: `col_a + col_b`, `col_a * 2`, `col_a / col_b`")
-    expr = st.text_input("Expression:", key="computed_expr")
+    help_tip("Formula Editor", """
+Create new columns using expressions. Supported functions:
+- **Math:** abs, round, sqrt, log, log10, exp, sin, cos, tan, pi
+- **Stats:** mean, median, std, var, min, max, sum, cumsum
+- **String:** str.upper, str.lower, str.len, str.contains
+- **Conditional:** where(condition, true_val, false_val)
+- **Column reference:** Use column names directly
+""")
+
+    # Function picker
+    func_categories = {
+        "Math": ["abs(col)", "np.sqrt(col)", "np.log(col)", "np.log10(col)", "np.exp(col)",
+                 "np.round(col, 2)", "np.sin(col)", "col ** 2", "1 / col"],
+        "Stats": ["col.mean()", "col.median()", "col.std()", "col.cumsum()",
+                  "col.rank()", "(col - col.mean()) / col.std()"],
+        "Conditional": ["np.where(col > 0, 'positive', 'negative')",
+                        "np.where(col > col.median(), 'high', 'low')"],
+        "Combine": ["col_a + col_b", "col_a * col_b", "col_a / col_b",
+                     "col_a - col_b"],
+    }
+
+    with st.expander("Function Reference"):
+        for cat, funcs in func_categories.items():
+            st.markdown(f"**{cat}:** " + ", ".join([f"`{f}`" for f in funcs]))
+
+    # Column inserter
+    col_to_insert = st.selectbox("Insert column reference:", [""] + df.columns.tolist(),
+                                  key="formula_col_insert")
+    expr = st.text_input("Expression:", key="computed_expr",
+                          placeholder="e.g. col_a + col_b, np.log(col_a)")
     computed_name = st.text_input("New column name:", "computed", key="computed_name")
+
+    # Live preview
+    if expr:
+        try:
+            preview = df.head(5).eval(expr) if "np." not in expr else eval(
+                expr.replace("np.", "np."),
+                {"np": np, "pd": pd, **{c: df[c] for c in df.columns}}
+            ).head(5)
+            st.caption("**Preview (first 5 rows):**")
+            st.dataframe(pd.DataFrame({computed_name: preview}), use_container_width=True,
+                          hide_index=True)
+        except Exception:
+            pass  # Don't show errors during typing
+
     if expr and st.button("Create Column", key="apply_computed"):
         try:
-            df[computed_name] = df.eval(expr)
+            if "np." in expr:
+                # Use eval with numpy for complex expressions
+                result = eval(
+                    expr,
+                    {"__builtins__": {}},
+                    {"np": np, "pd": pd, **{c: df[c] for c in df.columns}},
+                )
+                df[computed_name] = result
+            else:
+                df[computed_name] = df.eval(expr)
             st.success(f"Created '{computed_name}' = {expr}")
             st.session_state["df"] = df
         except Exception as e:

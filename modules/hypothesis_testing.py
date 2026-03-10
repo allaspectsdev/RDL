@@ -21,7 +21,7 @@ def render_hypothesis_testing(df: pd.DataFrame):
     tabs = st.tabs([
         "One-Sample Tests", "Two-Sample Tests", "Chi-Square Tests",
         "Normality Tests", "Power Analysis", "Multiple Comparisons",
-        "Bootstrap & Permutation",
+        "Bootstrap & Permutation", "Equivalence Testing", "Bayesian Inference",
     ])
 
     help_tip("Which test should I use?", """
@@ -61,6 +61,10 @@ def render_hypothesis_testing(df: pd.DataFrame):
         _render_multiple_comparisons(df)
     with tabs[6]:
         _render_bootstrap_permutation(df)
+    with tabs[7]:
+        _render_equivalence(df)
+    with tabs[8]:
+        _render_bayesian(df)
 
 
 def _interpret_p(p_value, alpha):
@@ -803,3 +807,390 @@ def _render_bootstrap_permutation(df: pd.DataFrame):
 
             except Exception as e:
                 st.error(f"Permutation test failed: {e}")
+
+
+# ===================================================================
+# Tab 8 -- Equivalence / Non-Inferiority Testing (TOST)
+# ===================================================================
+
+def _render_equivalence(df: pd.DataFrame):
+    """TOST equivalence testing and non-inferiority testing."""
+    num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    cat_cols = df.select_dtypes(include=["object", "category"]).columns.tolist()
+
+    if not num_cols:
+        empty_state("No numeric columns available.")
+        return
+
+    section_header("Equivalence / Non-Inferiority Testing")
+    help_tip("TOST Equivalence Testing", """
+**TOST (Two One-Sided Tests)** tests whether two groups are *equivalent* within a margin δ:
+- H₀: |μ₁ - μ₂| ≥ δ (not equivalent)
+- H₁: |μ₁ - μ₂| < δ (equivalent)
+- Runs two one-sided t-tests: one testing diff > -δ, one testing diff < δ
+- Both must be significant to conclude equivalence
+
+**Non-inferiority** tests whether a new treatment is not worse by more than margin δ:
+- H₀: μ_new - μ_ref ≤ -δ (inferior)
+- H₁: μ_new - μ_ref > -δ (non-inferior)
+""")
+
+    test_type = st.selectbox("Test type:", [
+        "TOST Equivalence (Two-Sample)",
+        "TOST Equivalence (Paired)",
+        "Non-Inferiority",
+    ], key="equiv_test")
+
+    alpha = st.slider("Significance level (α):", 0.001, 0.10, 0.05, 0.001, key="equiv_alpha")
+
+    if test_type == "TOST Equivalence (Two-Sample)":
+        if not cat_cols:
+            empty_state("Need a categorical column for group definition.")
+            return
+
+        value_col = st.selectbox("Value column:", num_cols, key="equiv_val")
+        group_col = st.selectbox("Group column:", cat_cols, key="equiv_grp")
+        groups = df[group_col].dropna().unique()
+        if len(groups) < 2:
+            st.warning("Need at least 2 groups.")
+            return
+
+        c1, c2 = st.columns(2)
+        g1_name = c1.selectbox("Group 1:", groups, index=0, key="equiv_g1")
+        g2_name = c2.selectbox("Group 2:", groups, index=min(1, len(groups) - 1), key="equiv_g2")
+        delta = st.number_input("Equivalence margin (δ):", value=1.0, min_value=0.001, key="equiv_delta")
+
+        if st.button("Run TOST", key="run_tost"):
+            g1 = df[df[group_col] == g1_name][value_col].dropna()
+            g2 = df[df[group_col] == g2_name][value_col].dropna()
+            diff = g1.mean() - g2.mean()
+
+            # Two one-sided tests
+            stat_upper, p_upper = stats.ttest_ind(g1, g2)  # diff < delta
+            stat_lower, p_lower = stats.ttest_ind(g1, g2)  # diff > -delta
+
+            # TOST: test H₀: diff ≤ -δ (lower) and H₀: diff ≥ δ (upper)
+            n1, n2 = len(g1), len(g2)
+            se = np.sqrt(g1.var() / n1 + g2.var() / n2)
+            df_welch = (g1.var() / n1 + g2.var() / n2) ** 2 / (
+                (g1.var() / n1) ** 2 / (n1 - 1) + (g2.var() / n2) ** 2 / (n2 - 1)
+            )
+
+            t_lower = (diff - (-delta)) / se
+            t_upper = (diff - delta) / se
+            p_lower = 1 - stats.t.cdf(t_lower, df=df_welch)
+            p_upper = stats.t.cdf(t_upper, df=df_welch)
+            p_tost = max(p_lower, p_upper)
+
+            st.markdown(f"**H₀:** Groups differ by more than ±{delta}")
+            st.markdown(f"**H₁:** Groups are equivalent within ±{delta}")
+
+            c1m, c2m, c3m, c4m = st.columns(4)
+            c1m.metric("Mean Difference", f"{diff:.4f}")
+            c2m.metric("p (lower test)", f"{p_lower:.6f}")
+            c3m.metric("p (upper test)", f"{p_upper:.6f}")
+            c4m.metric("TOST p-value", f"{p_tost:.6f}")
+
+            # 90% CI for difference (using α not α/2 since TOST)
+            ci_level = 1 - 2 * alpha
+            t_crit = stats.t.ppf(1 - alpha, df=df_welch)
+            ci_lower = diff - t_crit * se
+            ci_upper = diff + t_crit * se
+            st.write(f"**{ci_level:.0%} CI for difference:** [{ci_lower:.4f}, {ci_upper:.4f}]")
+
+            if p_tost < alpha:
+                significance_result(p_tost, alpha, "TOST Equivalence Test")
+                st.success(f"**Conclude equivalence:** The difference ({diff:.4f}) is within ±{delta}.")
+            else:
+                significance_result(p_tost, alpha, "TOST Equivalence Test")
+                st.info("**Cannot conclude equivalence.**")
+
+            # Visualization: CI overlaid on equivalence bounds
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=[diff], y=[0.5], mode="markers",
+                                     marker=dict(size=12, color="#6366f1"),
+                                     name=f"Diff = {diff:.4f}"))
+            fig.add_trace(go.Scatter(x=[ci_lower, ci_upper], y=[0.5, 0.5],
+                                     mode="lines", line=dict(color="#6366f1", width=3),
+                                     name=f"{ci_level:.0%} CI"))
+            fig.add_vline(x=-delta, line_dash="dash", line_color="red",
+                          annotation_text=f"-δ = {-delta}")
+            fig.add_vline(x=delta, line_dash="dash", line_color="red",
+                          annotation_text=f"+δ = {delta}")
+            fig.add_vline(x=0, line_dash="dot", line_color="gray")
+            fig.add_vrect(x0=-delta, x1=delta, fillcolor="green", opacity=0.1,
+                          annotation_text="Equivalence Zone")
+            fig.update_layout(title="TOST: CI vs Equivalence Bounds",
+                              xaxis_title="Difference", height=300,
+                              yaxis_visible=False)
+            st.plotly_chart(fig, use_container_width=True)
+
+    elif test_type == "TOST Equivalence (Paired)":
+        if len(num_cols) < 2:
+            st.warning("Need at least 2 numeric columns.")
+            return
+
+        c1, c2 = st.columns(2)
+        col1 = c1.selectbox("Column 1:", num_cols, key="equiv_p_c1")
+        col2 = c2.selectbox("Column 2:", [c for c in num_cols if c != col1], key="equiv_p_c2")
+        delta = st.number_input("Equivalence margin (δ):", value=1.0, min_value=0.001, key="equiv_p_delta")
+
+        if st.button("Run Paired TOST", key="run_tost_paired"):
+            data = df[[col1, col2]].dropna()
+            diff = (data[col1] - data[col2]).values
+            mean_diff = np.mean(diff)
+            se = np.std(diff, ddof=1) / np.sqrt(len(diff))
+            df_val = len(diff) - 1
+
+            t_lower = (mean_diff + delta) / se
+            t_upper = (mean_diff - delta) / se
+            p_lower = stats.t.cdf(t_lower, df=df_val)  # Test: diff > -delta
+            p_upper = 1 - stats.t.cdf(t_upper, df=df_val)  # Test: diff < delta
+            p_tost = max(1 - p_lower, p_upper)
+
+            c1m, c2m, c3m = st.columns(3)
+            c1m.metric("Mean Difference", f"{mean_diff:.4f}")
+            c2m.metric("TOST p-value", f"{p_tost:.6f}")
+            c3m.metric("n pairs", str(len(diff)))
+
+            if p_tost < alpha:
+                significance_result(p_tost, alpha, "Paired TOST")
+            else:
+                significance_result(p_tost, alpha, "Paired TOST")
+
+    elif test_type == "Non-Inferiority":
+        if not cat_cols:
+            empty_state("Need a categorical column for group definition.")
+            return
+
+        value_col = st.selectbox("Value column:", num_cols, key="ni_val")
+        group_col = st.selectbox("Group column:", cat_cols, key="ni_grp")
+        groups = df[group_col].dropna().unique()
+        if len(groups) < 2:
+            st.warning("Need at least 2 groups.")
+            return
+
+        c1, c2 = st.columns(2)
+        new_name = c1.selectbox("New/test group:", groups, index=0, key="ni_new")
+        ref_name = c2.selectbox("Reference group:", groups, index=min(1, len(groups) - 1), key="ni_ref")
+        delta = st.number_input("Non-inferiority margin (δ):", value=1.0, min_value=0.001, key="ni_delta")
+
+        if st.button("Run Non-Inferiority Test", key="run_ni"):
+            new_grp = df[df[group_col] == new_name][value_col].dropna()
+            ref_grp = df[df[group_col] == ref_name][value_col].dropna()
+            diff = new_grp.mean() - ref_grp.mean()
+
+            n1, n2 = len(new_grp), len(ref_grp)
+            se = np.sqrt(new_grp.var() / n1 + ref_grp.var() / n2)
+            df_welch = (new_grp.var() / n1 + ref_grp.var() / n2) ** 2 / (
+                (new_grp.var() / n1) ** 2 / (n1 - 1) + (ref_grp.var() / n2) ** 2 / (n2 - 1)
+            )
+
+            t_stat = (diff + delta) / se
+            p_val = 1 - stats.t.cdf(t_stat, df=df_welch)
+
+            st.markdown(f"**H₀:** New is inferior (diff ≤ -δ = {-delta})")
+            st.markdown(f"**H₁:** New is non-inferior (diff > -δ)")
+
+            c1m, c2m, c3m = st.columns(3)
+            c1m.metric("Mean Difference", f"{diff:.4f}")
+            c2m.metric("t-statistic", f"{t_stat:.4f}")
+            c3m.metric("p-value", f"{p_val:.6f}")
+
+            significance_result(p_val, alpha, "Non-Inferiority Test")
+
+
+# ===================================================================
+# Tab 9 -- Bayesian Inference (Conjugate Priors)
+# ===================================================================
+
+def _render_bayesian(df: pd.DataFrame):
+    """Bayesian inference with conjugate priors."""
+    num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+
+    if not num_cols:
+        empty_state("No numeric columns available.")
+        return
+
+    section_header("Bayesian Inference")
+    help_tip("Bayesian Analysis", """
+Uses conjugate priors for analytical posterior computation (no MCMC needed):
+- **Normal mean:** Normal prior → Normal posterior
+- **Proportion:** Beta prior → Beta posterior
+- **Poisson rate:** Gamma prior → Gamma posterior
+Adjust prior parameters to see how prior beliefs combine with data.
+""")
+
+    analysis_type = st.selectbox("Analysis:", [
+        "Normal Mean (known σ approximation)",
+        "Proportion (Beta-Binomial)",
+        "Poisson Rate (Gamma-Poisson)",
+    ], key="bayes_type")
+
+    if analysis_type == "Normal Mean (known σ approximation)":
+        col = st.selectbox("Data column:", num_cols, key="bayes_norm_col")
+        data = df[col].dropna().values
+        n = len(data)
+        x_bar = np.mean(data)
+        s = np.std(data, ddof=1)
+
+        section_header("Prior Parameters (Normal)")
+        c1, c2 = st.columns(2)
+        prior_mu = c1.number_input("Prior mean (μ₀):", value=float(x_bar), key="bayes_prior_mu")
+        prior_sigma = c2.number_input("Prior std (σ₀):", value=float(s * 2),
+                                       min_value=0.001, key="bayes_prior_sigma")
+
+        # Posterior (Normal-Normal conjugate with known σ ≈ sample s)
+        sigma = s
+        prior_prec = 1 / prior_sigma ** 2
+        data_prec = n / sigma ** 2
+        post_prec = prior_prec + data_prec
+        post_mu = (prior_prec * prior_mu + data_prec * x_bar) / post_prec
+        post_sigma = 1 / np.sqrt(post_prec)
+
+        # Credible interval
+        ci_lower = stats.norm.ppf(0.025, post_mu, post_sigma)
+        ci_upper = stats.norm.ppf(0.975, post_mu, post_sigma)
+
+        section_header("Posterior")
+        c1m, c2m, c3m = st.columns(3)
+        c1m.metric("Posterior Mean", f"{post_mu:.4f}")
+        c2m.metric("Posterior Std", f"{post_sigma:.4f}")
+        c3m.metric("95% Credible Interval", f"[{ci_lower:.4f}, {ci_upper:.4f}]")
+
+        st.write(f"**Data:** n={n}, x̄={x_bar:.4f}, s={s:.4f}")
+        st.write(f"**Prior weight vs data:** {prior_prec / post_prec:.1%} prior, {data_prec / post_prec:.1%} data")
+
+        # Plot prior, likelihood, posterior
+        x_range = np.linspace(
+            min(prior_mu - 3 * prior_sigma, x_bar - 3 * s / np.sqrt(n)),
+            max(prior_mu + 3 * prior_sigma, x_bar + 3 * s / np.sqrt(n)),
+            300,
+        )
+        prior_pdf = stats.norm.pdf(x_range, prior_mu, prior_sigma)
+        likelihood_pdf = stats.norm.pdf(x_range, x_bar, s / np.sqrt(n))
+        posterior_pdf = stats.norm.pdf(x_range, post_mu, post_sigma)
+
+        # Normalize for visual comparison
+        prior_pdf = prior_pdf / prior_pdf.max()
+        likelihood_pdf = likelihood_pdf / likelihood_pdf.max()
+        posterior_pdf = posterior_pdf / posterior_pdf.max()
+
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=x_range, y=prior_pdf, mode="lines",
+                                 name="Prior", line=dict(dash="dash", color="blue")))
+        fig.add_trace(go.Scatter(x=x_range, y=likelihood_pdf, mode="lines",
+                                 name="Likelihood", line=dict(dash="dot", color="green")))
+        fig.add_trace(go.Scatter(x=x_range, y=posterior_pdf, mode="lines",
+                                 name="Posterior", line=dict(color="red", width=2)))
+        fig.add_vline(x=post_mu, line_dash="dot", line_color="red",
+                      annotation_text=f"Post mean={post_mu:.3f}")
+        fig.update_layout(title="Prior / Likelihood / Posterior",
+                          xaxis_title="μ", yaxis_title="Density (normalized)", height=450)
+        st.plotly_chart(fig, use_container_width=True)
+
+    elif analysis_type == "Proportion (Beta-Binomial)":
+        section_header("Data")
+        c1, c2 = st.columns(2)
+        n_success = c1.number_input("Number of successes:", 0, 100000, 30, key="bayes_x")
+        n_total = c2.number_input("Number of trials:", 1, 100000, 100, key="bayes_n")
+
+        if n_success > n_total:
+            st.error("Successes cannot exceed trials.")
+            return
+
+        section_header("Prior Parameters (Beta)")
+        c1, c2 = st.columns(2)
+        prior_a = c1.slider("α (prior successes + 1):", 0.1, 50.0, 1.0, 0.1, key="bayes_beta_a")
+        prior_b = c2.slider("β (prior failures + 1):", 0.1, 50.0, 1.0, 0.1, key="bayes_beta_b")
+
+        # Posterior: Beta(α + x, β + n - x)
+        post_a = prior_a + n_success
+        post_b = prior_b + (n_total - n_success)
+
+        post_mean = post_a / (post_a + post_b)
+        post_mode = (post_a - 1) / (post_a + post_b - 2) if (post_a > 1 and post_b > 1) else post_mean
+        ci_lower = stats.beta.ppf(0.025, post_a, post_b)
+        ci_upper = stats.beta.ppf(0.975, post_a, post_b)
+
+        section_header("Posterior")
+        c1m, c2m, c3m = st.columns(3)
+        c1m.metric("Posterior Mean", f"{post_mean:.4f}")
+        c2m.metric("Posterior Mode", f"{post_mode:.4f}")
+        c3m.metric("95% Credible Interval", f"[{ci_lower:.4f}, {ci_upper:.4f}]")
+
+        st.write(f"**MLE:** {n_success / n_total:.4f}")
+        st.write(f"**Posterior:** Beta({post_a:.1f}, {post_b:.1f})")
+
+        # Plot
+        p_range = np.linspace(0.001, 0.999, 300)
+        prior_pdf = stats.beta.pdf(p_range, prior_a, prior_b)
+        posterior_pdf = stats.beta.pdf(p_range, post_a, post_b)
+
+        # Normalize
+        prior_pdf = prior_pdf / max(prior_pdf.max(), 1e-10)
+        posterior_pdf = posterior_pdf / max(posterior_pdf.max(), 1e-10)
+
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=p_range, y=prior_pdf, mode="lines",
+                                 name="Prior", line=dict(dash="dash", color="blue")))
+        fig.add_trace(go.Scatter(x=p_range, y=posterior_pdf, mode="lines",
+                                 name="Posterior", line=dict(color="red", width=2)))
+        fig.add_vline(x=post_mean, line_dash="dot", line_color="red",
+                      annotation_text=f"Post mean={post_mean:.3f}")
+        fig.add_vrect(x0=ci_lower, x1=ci_upper, fillcolor="red", opacity=0.1)
+        fig.update_layout(title="Beta Prior → Posterior",
+                          xaxis_title="p", yaxis_title="Density (normalized)", height=450)
+        st.plotly_chart(fig, use_container_width=True)
+
+    elif analysis_type == "Poisson Rate (Gamma-Poisson)":
+        section_header("Data")
+        col = st.selectbox("Count column:", num_cols, key="bayes_pois_col")
+        data = df[col].dropna().values
+        n = len(data)
+        total = data.sum()
+        x_bar = np.mean(data)
+
+        section_header("Prior Parameters (Gamma)")
+        c1, c2 = st.columns(2)
+        prior_shape = c1.slider("Shape (α):", 0.1, 50.0, 1.0, 0.1, key="bayes_gamma_a")
+        prior_rate = c2.slider("Rate (β):", 0.01, 50.0, 1.0, 0.1, key="bayes_gamma_b")
+
+        # Posterior: Gamma(α + Σx, β + n)
+        post_shape = prior_shape + total
+        post_rate = prior_rate + n
+
+        post_mean = post_shape / post_rate
+        post_mode = (post_shape - 1) / post_rate if post_shape > 1 else 0
+        ci_lower = stats.gamma.ppf(0.025, post_shape, scale=1 / post_rate)
+        ci_upper = stats.gamma.ppf(0.975, post_shape, scale=1 / post_rate)
+
+        section_header("Posterior")
+        c1m, c2m, c3m = st.columns(3)
+        c1m.metric("Posterior Mean", f"{post_mean:.4f}")
+        c2m.metric("Posterior Mode", f"{post_mode:.4f}")
+        c3m.metric("95% Credible Interval", f"[{ci_lower:.4f}, {ci_upper:.4f}]")
+
+        st.write(f"**Data:** n={n}, Σx={total:.0f}, x̄={x_bar:.4f}")
+        st.write(f"**Posterior:** Gamma({post_shape:.1f}, {post_rate:.1f})")
+
+        # Plot
+        lam_max = max(ci_upper * 1.5, x_bar * 2)
+        lam_range = np.linspace(0.001, lam_max, 300)
+        prior_pdf = stats.gamma.pdf(lam_range, prior_shape, scale=1 / prior_rate)
+        posterior_pdf = stats.gamma.pdf(lam_range, post_shape, scale=1 / post_rate)
+
+        prior_pdf = prior_pdf / max(prior_pdf.max(), 1e-10)
+        posterior_pdf = posterior_pdf / max(posterior_pdf.max(), 1e-10)
+
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=lam_range, y=prior_pdf, mode="lines",
+                                 name="Prior", line=dict(dash="dash", color="blue")))
+        fig.add_trace(go.Scatter(x=lam_range, y=posterior_pdf, mode="lines",
+                                 name="Posterior", line=dict(color="red", width=2)))
+        fig.add_vline(x=post_mean, line_dash="dot", line_color="red",
+                      annotation_text=f"Post mean={post_mean:.3f}")
+        fig.add_vrect(x0=ci_lower, x1=ci_upper, fillcolor="red", opacity=0.1)
+        fig.update_layout(title="Gamma Prior → Posterior",
+                          xaxis_title="λ (rate)", yaxis_title="Density (normalized)", height=450)
+        st.plotly_chart(fig, use_container_width=True)
