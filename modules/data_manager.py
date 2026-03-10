@@ -7,6 +7,8 @@ import pandas as pd
 import numpy as np
 import io
 
+from modules.ui_helpers import section_header, empty_state
+
 
 def render_upload():
     """Render file upload widget and return DataFrame or None."""
@@ -34,7 +36,7 @@ def render_upload():
 def render_data_manager(df: pd.DataFrame) -> pd.DataFrame:
     """Render full data management interface. Returns modified DataFrame."""
     if df is None or df.empty:
-        st.warning("No data loaded.")
+        empty_state("No data loaded.", "Upload a dataset from the sidebar to begin.")
         return df
 
     tabs = st.tabs([
@@ -115,7 +117,7 @@ def _render_column_info(df: pd.DataFrame):
     c3.metric("Unique Values", f"{col.nunique():,}")
 
     if pd.api.types.is_numeric_dtype(col):
-        st.markdown("#### Numeric Summary")
+        section_header("Numeric Summary")
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Mean", f"{col.mean():.4g}")
         c2.metric("Median", f"{col.median():.4g}")
@@ -133,7 +135,7 @@ def _render_column_info(df: pd.DataFrame):
         c2.metric("Q2 (50%)", f"{col.quantile(0.50):.4g}")
         c3.metric("Q3 (75%)", f"{col.quantile(0.75):.4g}")
     else:
-        st.markdown("#### Categorical Summary")
+        section_header("Categorical Summary")
         freq = col.value_counts()
         st.dataframe(
             pd.DataFrame({"Value": freq.index, "Count": freq.values,
@@ -151,7 +153,7 @@ def _render_missing_values(df: pd.DataFrame) -> pd.DataFrame:
         st.success("No missing values in the dataset.")
         return df
 
-    st.markdown("#### Missing Values Summary")
+    section_header("Missing Values Summary")
     missing_df = pd.DataFrame({
         "Column": missing.index,
         "Missing Count": missing.values,
@@ -159,7 +161,7 @@ def _render_missing_values(df: pd.DataFrame) -> pd.DataFrame:
     })
     st.dataframe(missing_df, use_container_width=True, hide_index=True)
 
-    st.markdown("#### Handle Missing Values")
+    section_header("Handle Missing Values")
     strategy = st.selectbox(
         "Strategy:",
         ["Drop rows with any missing", "Drop rows with all missing",
@@ -220,7 +222,7 @@ def _render_missing_values(df: pd.DataFrame) -> pd.DataFrame:
 
 def _render_transform(df: pd.DataFrame) -> pd.DataFrame:
     """Data type conversion and transformations."""
-    st.markdown("#### Convert Data Types")
+    section_header("Convert Data Types")
     conv_col = st.selectbox("Column:", df.columns, key="conv_col")
     target_type = st.selectbox(
         "Convert to:",
@@ -248,7 +250,7 @@ def _render_transform(df: pd.DataFrame) -> pd.DataFrame:
             st.error(f"Conversion failed: {e}")
 
     st.divider()
-    st.markdown("#### Rename Columns")
+    section_header("Rename Columns")
     rename_col = st.selectbox("Column to rename:", df.columns, key="rename_col")
     new_name = st.text_input("New name:", rename_col, key="rename_new")
     if st.button("Rename", key="apply_rename"):
@@ -258,7 +260,7 @@ def _render_transform(df: pd.DataFrame) -> pd.DataFrame:
             st.session_state["df"] = df
 
     st.divider()
-    st.markdown("#### Remove Duplicates")
+    section_header("Remove Duplicates")
     dup_count = df.duplicated().sum()
     st.write(f"Duplicate rows: **{dup_count}**")
     if dup_count > 0 and st.button("Remove Duplicates", key="apply_dedup"):
@@ -271,7 +273,7 @@ def _render_transform(df: pd.DataFrame) -> pd.DataFrame:
 
 def _render_filter_sort(df: pd.DataFrame) -> pd.DataFrame:
     """Filter and sort data."""
-    st.markdown("#### Filter Rows")
+    section_header("Filter Rows")
     filter_col = st.selectbox("Filter column:", df.columns, key="filter_col")
 
     if pd.api.types.is_numeric_dtype(df[filter_col]):
@@ -293,7 +295,7 @@ def _render_filter_sort(df: pd.DataFrame) -> pd.DataFrame:
             st.session_state["df"] = df
 
     st.divider()
-    st.markdown("#### Sort Data")
+    section_header("Sort Data")
     sort_col = st.selectbox("Sort by:", df.columns, key="sort_col")
     sort_asc = st.checkbox("Ascending", value=True, key="sort_asc")
     if st.button("Sort", key="apply_sort"):
@@ -306,7 +308,7 @@ def _render_filter_sort(df: pd.DataFrame) -> pd.DataFrame:
 
 def _render_column_operations(df: pd.DataFrame) -> pd.DataFrame:
     """Column-level operations: transforms, binning, encoding."""
-    st.markdown("#### Numeric Transformations")
+    section_header("Numeric Transformations")
     num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
 
     if num_cols:
@@ -366,7 +368,7 @@ def _render_column_operations(df: pd.DataFrame) -> pd.DataFrame:
             st.session_state["df"] = df
 
     st.divider()
-    st.markdown("#### Binning")
+    section_header("Binning")
     if num_cols:
         bin_col = st.selectbox("Column to bin:", num_cols, key="bin_col")
         bin_method = st.selectbox("Method:", ["Equal Width", "Equal Frequency", "Custom"], key="bin_method")
@@ -382,7 +384,7 @@ def _render_column_operations(df: pd.DataFrame) -> pd.DataFrame:
             st.session_state["df"] = df
 
     st.divider()
-    st.markdown("#### Encoding")
+    section_header("Encoding")
     cat_cols = df.select_dtypes(include=["object", "category"]).columns.tolist()
     if cat_cols:
         enc_col = st.selectbox("Column to encode:", cat_cols, key="enc_col")
@@ -401,7 +403,7 @@ def _render_column_operations(df: pd.DataFrame) -> pd.DataFrame:
         st.info("No categorical columns available for encoding.")
 
     st.divider()
-    st.markdown("#### Computed Column")
+    section_header("Computed Column")
     st.caption("Create a new column using a pandas expression. Use column names as variables.")
     st.caption("Examples: `col_a + col_b`, `col_a * 2`, `col_a / col_b`")
     expr = st.text_input("Expression:", key="computed_expr")
@@ -419,7 +421,7 @@ def _render_column_operations(df: pd.DataFrame) -> pd.DataFrame:
 
 def _render_export(df: pd.DataFrame):
     """Export data in various formats."""
-    st.markdown("#### Export Dataset")
+    section_header("Export Dataset")
 
     data_name = st.session_state.get("data_name", "data")
     base_name = data_name.rsplit(".", 1)[0] if "." in data_name else data_name
@@ -464,7 +466,7 @@ def _render_export(df: pd.DataFrame):
     st.divider()
 
     # Export subset
-    st.markdown("#### Export Subset")
+    section_header("Export Subset")
     export_cols = st.multiselect(
         "Select columns to export:", df.columns.tolist(),
         default=df.columns.tolist(), key="export_cols",

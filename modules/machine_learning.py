@@ -9,6 +9,7 @@ from scipy import stats
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+from modules.ui_helpers import section_header, empty_state
 
 from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.preprocessing import StandardScaler, LabelEncoder
@@ -116,7 +117,7 @@ def _compare_regressors(X, y):
 def render_machine_learning(df: pd.DataFrame):
     """Render machine learning interface."""
     if df is None or df.empty:
-        st.warning("No data loaded.")
+        empty_state("No data loaded.", "Upload a dataset from the sidebar to begin.")
         return
 
     tabs = st.tabs([
@@ -142,7 +143,7 @@ def _render_clustering(df: pd.DataFrame):
     cat_cols = df.select_dtypes(include=["object", "category"]).columns.tolist()
 
     if len(num_cols) < 2:
-        st.warning("Need at least 2 numeric columns.")
+        empty_state("Need at least 2 numeric columns.")
         return
 
     features = st.multiselect("Features:", num_cols, default=num_cols[:4], key="cl_features")
@@ -167,17 +168,18 @@ def _render_clustering(df: pd.DataFrame):
             inertias = []
             sil_scores = []
             K_range = range(2, min(11, len(X)))
-            for ki in K_range:
-                km = KMeans(n_clusters=ki, random_state=42, n_init=10)
-                km.fit(X)
-                inertias.append(km.inertia_)
-                sil_scores.append(silhouette_score(X, km.labels_))
+            with st.spinner("Computing elbow plot..."):
+                for ki in K_range:
+                    km = KMeans(n_clusters=ki, random_state=42, n_init=10)
+                    km.fit(X)
+                    inertias.append(km.inertia_)
+                    sil_scores.append(silhouette_score(X, km.labels_))
 
             fig = make_subplots(rows=1, cols=2, subplot_titles=("Elbow Plot", "Silhouette Score"))
             fig.add_trace(go.Scatter(x=list(K_range), y=inertias, mode="lines+markers",
-                                     name="Inertia", marker=dict(color="steelblue")), row=1, col=1)
+                                     name="Inertia"), row=1, col=1)
             fig.add_trace(go.Scatter(x=list(K_range), y=sil_scores, mode="lines+markers",
-                                     name="Silhouette", marker=dict(color="steelblue")), row=1, col=2)
+                                     name="Silhouette"), row=1, col=2)
             fig.update_xaxes(title_text="k", row=1, col=1)
             fig.update_xaxes(title_text="k", row=1, col=2)
             fig.update_layout(height=350)
@@ -245,7 +247,7 @@ def _show_cluster_results(data, X, labels, features, cat_cols, df):
     st.plotly_chart(fig, use_container_width=True)
 
     # Cluster profiles
-    st.markdown("#### Cluster Profiles")
+    section_header("Cluster Profiles")
     profile = data.groupby("Cluster")[features].mean().round(4)
     st.dataframe(profile, use_container_width=True)
 
@@ -266,7 +268,7 @@ def _render_classification(df: pd.DataFrame):
     # Target: categorical or low-cardinality numeric
     target_options = cat_cols + [c for c in num_cols if df[c].nunique() <= 15]
     if not target_options:
-        st.warning("No suitable target variable found.")
+        empty_state("No suitable target variable found.")
         return
 
     target = st.selectbox("Target variable:", target_options, key="clf_target")
@@ -462,7 +464,7 @@ def _render_ml_regression(df: pd.DataFrame):
     num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
 
     if len(num_cols) < 2:
-        st.warning("Need at least 2 numeric columns.")
+        empty_state("Need at least 2 numeric columns.")
         return
 
     target = st.selectbox("Target:", num_cols, key="reg_target")
@@ -563,7 +565,7 @@ def _render_ml_regression(df: pd.DataFrame):
         # Predicted vs Actual
         fig = make_subplots(rows=1, cols=2, subplot_titles=("Predicted vs Actual", "Residuals"))
         fig.add_trace(go.Scatter(x=y_test, y=y_pred, mode="markers",
-                                 marker=dict(color="steelblue", size=5, opacity=0.7),
+                                 marker=dict(size=5, opacity=0.7),
                                  name="Predictions"), row=1, col=1)
         min_val = min(y_test.min(), y_pred.min())
         max_val = max(y_test.max(), y_pred.max())
@@ -573,7 +575,7 @@ def _render_ml_regression(df: pd.DataFrame):
 
         residuals = y_test - y_pred
         fig.add_trace(go.Scatter(x=y_pred, y=residuals, mode="markers",
-                                 marker=dict(color="steelblue", size=5, opacity=0.7),
+                                 marker=dict(size=5, opacity=0.7),
                                  name="Residuals"), row=1, col=2)
         fig.add_hline(y=0, line_dash="dash", line_color="red", row=1, col=2)
 
@@ -655,7 +657,7 @@ def _render_dim_reduction(df: pd.DataFrame):
     cat_cols = df.select_dtypes(include=["object", "category"]).columns.tolist()
 
     if len(num_cols) < 3:
-        st.warning("Need at least 3 numeric columns.")
+        empty_state("Need at least 3 numeric columns.")
         return
 
     features = st.multiselect("Features:", num_cols, default=num_cols, key="dr_features")
@@ -702,9 +704,10 @@ def _render_dim_reduction(df: pd.DataFrame):
                 idx = np.random.choice(len(data), max_n, replace=False)
                 X = X[idx]
                 data = data.iloc[idx]
-            reducer = umap.UMAP(n_components=n_dims, n_neighbors=umap_n_neighbors,
-                                min_dist=umap_min_dist, metric=umap_metric, random_state=42)
-            embedding = reducer.fit_transform(X)
+            with st.spinner("Computing UMAP embedding..."):
+                reducer = umap.UMAP(n_components=n_dims, n_neighbors=umap_n_neighbors,
+                                    min_dist=umap_min_dist, metric=umap_metric, random_state=42)
+                embedding = reducer.fit_transform(X)
             labels = [f"UMAP{i+1}" for i in range(n_dims)]
 
         emb_df = pd.DataFrame(embedding, columns=labels)
@@ -733,7 +736,7 @@ def _render_model_comparison(df: pd.DataFrame):
     if task == "Classification":
         target_options = cat_cols + [c for c in num_cols if df[c].nunique() <= 15]
         if not target_options:
-            st.warning("No suitable target variable found.")
+            empty_state("No suitable target variable found.")
             return
 
         target = st.selectbox("Target:", target_options, key="mc_clf_target")
@@ -759,7 +762,7 @@ def _render_model_comparison(df: pd.DataFrame):
 
     else:  # Regression
         if len(num_cols) < 2:
-            st.warning("Need at least 2 numeric columns.")
+            empty_state("Need at least 2 numeric columns.")
             return
 
         target = st.selectbox("Target:", num_cols, key="mc_reg_target")

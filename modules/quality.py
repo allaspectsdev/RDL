@@ -9,6 +9,7 @@ from scipy import stats
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+from modules.ui_helpers import section_header, empty_state, help_tip
 
 
 # ---------------------------------------------------------------------------
@@ -88,8 +89,8 @@ def _add_control_chart(fig, x, values, cl, ucl, lcl, violations, title,
     normal_mask = ~violations
     fig.add_trace(go.Scatter(
         x=x[normal_mask], y=values[normal_mask], mode="markers+lines",
-        marker=dict(color="steelblue", size=5),
-        line=dict(color="steelblue", width=1),
+        marker=dict(size=5),
+        line=dict(width=1),
         name=title, showlegend=False,
     ), row=row, col=col)
 
@@ -125,7 +126,7 @@ def _add_control_chart(fig, x, values, cl, ucl, lcl, violations, title,
 def render_quality(df: pd.DataFrame):
     """Render quality / SPC interface."""
     if df is None or df.empty:
-        st.warning("No data loaded.")
+        empty_state("No data loaded.", "Upload a dataset from the sidebar to begin.")
         return
 
     tabs = st.tabs([
@@ -148,7 +149,7 @@ def _render_variables_charts(df: pd.DataFrame):
     """I-MR, X-bar & R, X-bar & S control charts."""
     num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
     if not num_cols:
-        st.warning("No numeric columns found.")
+        empty_state("No numeric columns found.")
         return
 
     col_name = st.selectbox("Measurement column:", num_cols, key="spc_var_col")
@@ -178,14 +179,15 @@ def _render_variables_charts(df: pd.DataFrame):
         st.caption("I-MR uses individual observations (subgroup size = 1).")
 
     if st.button("Generate Chart", key="spc_var_generate"):
-        data = df[col_name].dropna().values
+        with st.spinner("Generating control chart..."):
+            data = df[col_name].dropna().values
 
-        if chart_type == "I-MR (Individuals & Moving Range)":
-            _imr_chart(data, col_name)
-        elif chart_type == "X-bar & R":
-            _xbar_r_chart(data, col_name, subgroup_col, subgroup_size, df)
-        elif chart_type == "X-bar & S":
-            _xbar_s_chart(data, col_name, subgroup_col, subgroup_size, df)
+            if chart_type == "I-MR (Individuals & Moving Range)":
+                _imr_chart(data, col_name)
+            elif chart_type == "X-bar & R":
+                _xbar_r_chart(data, col_name, subgroup_col, subgroup_size, df)
+            elif chart_type == "X-bar & S":
+                _xbar_s_chart(data, col_name, subgroup_col, subgroup_size, df)
 
 
 def _build_subgroups(data, df, col_name, subgroup_col, subgroup_size):
@@ -371,7 +373,7 @@ def _render_attributes_charts(df: pd.DataFrame):
     """p-chart, np-chart, c-chart, u-chart."""
     num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
     if not num_cols:
-        st.warning("No numeric columns found.")
+        empty_state("No numeric columns found.")
         return
 
     chart_type = st.selectbox("Attributes chart type:", [
@@ -432,8 +434,8 @@ def _p_chart(defectives, sample_n):
     fig = go.Figure()
     normal = ~violations
     fig.add_trace(go.Scatter(x=idx[normal], y=p[normal], mode="markers+lines",
-                             marker=dict(color="steelblue", size=5),
-                             line=dict(color="steelblue", width=1), name="p"))
+                             marker=dict(size=5),
+                             line=dict(width=1), name="p"))
     if violations.any():
         fig.add_trace(go.Scatter(x=idx[violations], y=p[violations], mode="markers",
                                  marker=dict(color="red", size=8, symbol="x"), name="OOC"))
@@ -466,8 +468,8 @@ def _np_chart(defectives, sample_n):
     fig = go.Figure()
     normal = ~violations
     fig.add_trace(go.Scatter(x=idx[normal], y=defectives[normal], mode="markers+lines",
-                             marker=dict(color="steelblue", size=5),
-                             line=dict(color="steelblue", width=1), name="np"))
+                             marker=dict(size=5),
+                             line=dict(width=1), name="np"))
     if violations.any():
         fig.add_trace(go.Scatter(x=idx[violations], y=defectives[violations], mode="markers",
                                  marker=dict(color="red", size=8, symbol="x"), name="OOC"))
@@ -497,8 +499,8 @@ def _c_chart(defects):
     fig = go.Figure()
     normal = ~violations
     fig.add_trace(go.Scatter(x=idx[normal], y=defects[normal], mode="markers+lines",
-                             marker=dict(color="steelblue", size=5),
-                             line=dict(color="steelblue", width=1), name="c"))
+                             marker=dict(size=5),
+                             line=dict(width=1), name="c"))
     if violations.any():
         fig.add_trace(go.Scatter(x=idx[violations], y=defects[violations], mode="markers",
                                  marker=dict(color="red", size=8, symbol="x"), name="OOC"))
@@ -530,8 +532,8 @@ def _u_chart(defects, units):
     fig = go.Figure()
     normal = ~violations
     fig.add_trace(go.Scatter(x=idx[normal], y=u[normal], mode="markers+lines",
-                             marker=dict(color="steelblue", size=5),
-                             line=dict(color="steelblue", width=1), name="u"))
+                             marker=dict(size=5),
+                             line=dict(width=1), name="u"))
     if violations.any():
         fig.add_trace(go.Scatter(x=idx[violations], y=u[violations], mode="markers",
                                  marker=dict(color="red", size=8, symbol="x"), name="OOC"))
@@ -557,7 +559,7 @@ def _render_process_capability(df: pd.DataFrame):
     """Process capability analysis: Cp, Cpk, Pp, Ppk, Cpm."""
     num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
     if not num_cols:
-        st.warning("No numeric columns found.")
+        empty_state("No numeric columns found.")
         return
 
     col_name = st.selectbox("Measurement column:", num_cols, key="spc_cap_col")
@@ -600,7 +602,14 @@ def _render_process_capability(df: pd.DataFrame):
         cpm = (usl - lsl) / (6 * tau) if tau > 0 else np.inf
 
         # -- Metrics display --
-        st.markdown("#### Capability Indices")
+        section_header("Capability Indices")
+        help_tip("Capability index interpretation", """
+- **Cpk >= 2.0:** Six Sigma capable
+- **Cpk >= 1.67:** Excellent capability
+- **Cpk >= 1.33:** Capable process
+- **Cpk >= 1.00:** Barely capable
+- **Cpk < 1.00:** Not capable — process improvement needed
+""")
         m1, m2, m3, m4, m5 = st.columns(5)
         m1.metric("Cp", f"{cp:.3f}")
         m2.metric("Cpk", f"{cpk:.3f}")
@@ -658,8 +667,8 @@ def _render_process_capability(df: pd.DataFrame):
         i_lcl = mean - 3 * mr_bar / d2
 
         fig.add_trace(go.Scatter(x=x_idx, y=data, mode="lines+markers",
-                                 marker=dict(size=3, color="steelblue"),
-                                 line=dict(width=1, color="steelblue"),
+                                 marker=dict(size=3),
+                                 line=dict(width=1),
                                  showlegend=False), row=1, col=1)
         fig.add_hline(y=mean, line_color="green", row=1, col=1)
         fig.add_hline(y=i_ucl, line_dash="dash", line_color="red", row=1, col=1)
@@ -669,8 +678,8 @@ def _render_process_capability(df: pd.DataFrame):
         mr_idx = np.arange(2, len(data) + 1)
         D4 = SPC_CONSTANTS[2]['D4']
         fig.add_trace(go.Scatter(x=mr_idx, y=mr, mode="lines+markers",
-                                 marker=dict(size=3, color="steelblue"),
-                                 line=dict(width=1, color="steelblue"),
+                                 marker=dict(size=3),
+                                 line=dict(width=1),
                                  showlegend=False), row=1, col=2)
         fig.add_hline(y=mr_bar, line_color="green", row=1, col=2)
         fig.add_hline(y=D4 * mr_bar, line_dash="dash", line_color="red", row=1, col=2)
@@ -678,7 +687,7 @@ def _render_process_capability(df: pd.DataFrame):
         # 3. Histogram with spec limits (top-right)
         hist_vals, bin_edges = np.histogram(data, bins=30)
         bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
-        fig.add_trace(go.Bar(x=bin_centers, y=hist_vals, marker_color="steelblue",
+        fig.add_trace(go.Bar(x=bin_centers, y=hist_vals,
                              opacity=0.7, showlegend=False), row=1, col=3)
         # Normal overlay
         x_norm = np.linspace(min(data.min(), lsl), max(data.max(), usl), 200)
@@ -695,7 +704,7 @@ def _render_process_capability(df: pd.DataFrame):
         n = len(sorted_data)
         theoretical_q = stats.norm.ppf((np.arange(1, n + 1) - 0.5) / n)
         fig.add_trace(go.Scatter(x=theoretical_q, y=sorted_data, mode="markers",
-                                 marker=dict(size=3, color="steelblue"),
+                                 marker=dict(size=3),
                                  showlegend=False), row=2, col=1)
         slope, intercept = np.polyfit(theoretical_q, sorted_data, 1)
         fig.add_trace(go.Scatter(x=theoretical_q, y=slope * theoretical_q + intercept,

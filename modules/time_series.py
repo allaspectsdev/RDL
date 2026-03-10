@@ -9,6 +9,7 @@ from scipy import stats
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+from modules.ui_helpers import section_header, empty_state
 
 try:
     import statsmodels.api as sm
@@ -48,7 +49,7 @@ def _auto_arima_search(values, index):
 def render_time_series(df: pd.DataFrame):
     """Render time series analysis interface."""
     if df is None or df.empty:
-        st.warning("No data loaded.")
+        empty_state("No data loaded.", "Upload a dataset from the sidebar to begin.")
         return
     if not HAS_SM:
         st.error("statsmodels is required for time series analysis.")
@@ -120,14 +121,14 @@ def _render_exploration(df: pd.DataFrame):
     # Main time series plot with range slider
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=ts.index, y=ts.values, mode="lines",
-                             name=value_col, line=dict(color="steelblue")))
+                             name=value_col))
     fig.update_layout(title=f"Time Series: {value_col}",
                       xaxis=dict(rangeslider=dict(visible=True)),
                       height=500)
     st.plotly_chart(fig, use_container_width=True)
 
     # Rolling statistics
-    st.markdown("#### Rolling Statistics")
+    section_header("Rolling Statistics")
     _max_w = max(2, min(100, len(ts) // 2))
     window = st.slider("Window size:", 2, _max_w, min(12, _max_w), key="exp_window")
 
@@ -136,7 +137,7 @@ def _render_exploration(df: pd.DataFrame):
 
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=ts.index, y=ts.values, name="Original",
-                             line=dict(color="steelblue", width=1), opacity=0.7))
+                             line=dict(width=1), opacity=0.7))
     fig.add_trace(go.Scatter(x=ts.index, y=rolling_mean.values, name=f"Rolling Mean ({window})",
                              line=dict(color="red", width=2)))
     fig.add_trace(go.Scatter(x=ts.index, y=rolling_std.values, name=f"Rolling Std ({window})",
@@ -189,8 +190,7 @@ def _render_decomposition(df: pd.DataFrame):
             fig = make_subplots(rows=4, cols=1, shared_xaxes=True,
                                 subplot_titles=("Observed", "Trend", "Seasonal", "Residual"),
                                 vertical_spacing=0.05)
-            fig.add_trace(go.Scatter(x=ts_clean.index, y=ts_clean.values, name="Observed",
-                                     line=dict(color="steelblue")), row=1, col=1)
+            fig.add_trace(go.Scatter(x=ts_clean.index, y=ts_clean.values, name="Observed"), row=1, col=1)
             fig.add_trace(go.Scatter(x=ts_clean.index, y=result.trend, name="Trend",
                                      line=dict(color="red")), row=2, col=1)
             fig.add_trace(go.Scatter(x=ts_clean.index, y=result.seasonal, name="Seasonal",
@@ -217,7 +217,7 @@ def _render_stationarity(df: pd.DataFrame):
 
         # ADF test
         adf_result = adfuller(ts_clean, autolag="AIC")
-        st.markdown("#### Augmented Dickey-Fuller Test")
+        section_header("Augmented Dickey-Fuller Test")
         st.write(f"**Test Statistic:** {adf_result[0]:.4f}")
         st.write(f"**p-value:** {adf_result[1]:.6f}")
         st.write(f"**Lags Used:** {adf_result[2]}")
@@ -229,7 +229,7 @@ def _render_stationarity(df: pd.DataFrame):
             st.warning("Series is non-stationary (cannot reject H₀ of unit root)")
 
         # KPSS test
-        st.markdown("#### KPSS Test")
+        section_header("KPSS Test")
         try:
             kpss_result = kpss(ts_clean, regression="c", nlags="auto")
             st.write(f"**Test Statistic:** {kpss_result[0]:.4f}")
@@ -244,7 +244,7 @@ def _render_stationarity(df: pd.DataFrame):
             st.warning(f"KPSS test error: {e}")
 
     # Differencing
-    st.markdown("#### Differencing")
+    section_header("Differencing")
     diff_order = st.selectbox("Order:", [1, 2], key="stat_diff")
     if st.button("Apply Differencing", key="apply_diff"):
         ts_clean = ts.dropna()
@@ -288,9 +288,9 @@ def _render_acf_pacf(df: pd.DataFrame):
         # ACF
         for i, val in enumerate(acf_vals):
             fig.add_trace(go.Scatter(x=[i, i], y=[0, val], mode="lines",
-                                     line=dict(color="steelblue", width=2), showlegend=False), row=1, col=1)
+                                     line=dict(color="#6366f1", width=2), showlegend=False), row=1, col=1)
         fig.add_trace(go.Scatter(x=list(range(len(acf_vals))), y=acf_vals, mode="markers",
-                                 marker=dict(color="steelblue", size=6), name="ACF"), row=1, col=1)
+                                 marker=dict(color="#6366f1", size=6), name="ACF"), row=1, col=1)
         fig.add_hline(y=ci, line_dash="dash", line_color="red", row=1, col=1)
         fig.add_hline(y=-ci, line_dash="dash", line_color="red", row=1, col=1)
         fig.add_hline(y=0, line_color="black", row=1, col=1)
@@ -298,9 +298,9 @@ def _render_acf_pacf(df: pd.DataFrame):
         # PACF
         for i, val in enumerate(pacf_vals):
             fig.add_trace(go.Scatter(x=[i, i], y=[0, val], mode="lines",
-                                     line=dict(color="steelblue", width=2), showlegend=False), row=2, col=1)
+                                     line=dict(color="#6366f1", width=2), showlegend=False), row=2, col=1)
         fig.add_trace(go.Scatter(x=list(range(len(pacf_vals))), y=pacf_vals, mode="markers",
-                                 marker=dict(color="steelblue", size=6), name="PACF"), row=2, col=1)
+                                 marker=dict(color="#6366f1", size=6), name="PACF"), row=2, col=1)
         fig.add_hline(y=ci, line_dash="dash", line_color="red", row=2, col=1)
         fig.add_hline(y=-ci, line_dash="dash", line_color="red", row=2, col=1)
         fig.add_hline(y=0, line_color="black", row=2, col=1)
@@ -323,7 +323,7 @@ def _render_acf_pacf(df: pd.DataFrame):
             """)
 
         # Ljung-Box test
-        st.markdown("#### Ljung-Box Test (White Noise)")
+        section_header("Ljung-Box Test (White Noise)")
         lb_lags = min(20, n_lags)
         lb_result = acorr_ljungbox(ts_clean, lags=lb_lags, return_df=True)
         st.dataframe(lb_result.round(4), use_container_width=True)
@@ -403,7 +403,7 @@ def _render_smoothing(df: pd.DataFrame):
 
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=ts_clean.index, y=ts_clean.values, name="Original",
-                             line=dict(color="steelblue", width=1), opacity=0.7))
+                             line=dict(color="#6366f1", width=1), opacity=0.7))
     fig.add_trace(go.Scatter(x=ts_clean.index, y=smoothed.values, name=label,
                              line=dict(color="red", width=2)))
     fig.update_layout(title=f"Smoothing: {label}", height=500)
@@ -420,7 +420,7 @@ def _render_arima(df: pd.DataFrame):
 
     ts_clean = ts.dropna()
 
-    st.markdown("#### ARIMA Order (p, d, q)")
+    section_header("ARIMA Order (p, d, q)")
     c1, c2, c3 = st.columns(3)
     p = c1.number_input("p (AR):", 0, 10, 1, key="arima_p")
     d = c2.number_input("d (diff):", 0, 3, 1, key="arima_d")
@@ -428,7 +428,7 @@ def _render_arima(df: pd.DataFrame):
 
     use_seasonal = st.checkbox("Seasonal (SARIMA)", value=False, key="arima_seasonal")
     if use_seasonal:
-        st.markdown("#### Seasonal Order (P, D, Q, s)")
+        section_header("Seasonal Order (P, D, Q, s)")
         c1, c2, c3, c4 = st.columns(4)
         P = c1.number_input("P:", 0, 5, 1, key="arima_P")
         D = c2.number_input("D:", 0, 2, 1, key="arima_D")
@@ -460,7 +460,7 @@ def _render_arima(df: pd.DataFrame):
                     model = ARIMA(train, order=(p, d, q)).fit()
 
             # Model summary
-            st.markdown("#### Model Summary")
+            section_header("Model Summary")
             c1, c2, c3 = st.columns(3)
             c1.metric("AIC", f"{model.aic:.2f}")
             c2.metric("BIC", f"{model.bic:.2f}")
@@ -494,7 +494,7 @@ def _render_arima(df: pd.DataFrame):
                 acf_vals = acf(resid, nlags=20)
                 for i, val in enumerate(acf_vals):
                     fig.add_trace(go.Scatter(x=[i, i], y=[0, val], mode="lines",
-                                             line=dict(color="steelblue"), showlegend=False), row=2, col=2)
+                                             line=dict(color="#6366f1"), showlegend=False), row=2, col=2)
 
                 fig.update_layout(height=600)
                 st.plotly_chart(fig, use_container_width=True)
@@ -521,7 +521,7 @@ def _render_arima(df: pd.DataFrame):
 
             fig = go.Figure()
             fig.add_trace(go.Scatter(x=train.index, y=train.values, name="Train",
-                                     line=dict(color="steelblue")))
+                                     line=dict(color="#6366f1")))
             if len(test) > 0:
                 fig.add_trace(go.Scatter(x=test.index, y=test.values, name="Test",
                                          line=dict(color="green")))
@@ -569,58 +569,59 @@ def _render_forecast_comparison(df: pd.DataFrame):
         results = []
         forecasts = {}
 
-        # Naive (last value)
-        naive_fc = pd.Series([train.iloc[-1]] * len(test), index=test.index)
-        forecasts["Naive"] = naive_fc
-        results.append(_eval_forecast("Naive", test, naive_fc))
+        with st.spinner("Comparing forecast models..."):
+            # Naive (last value)
+            naive_fc = pd.Series([train.iloc[-1]] * len(test), index=test.index)
+            forecasts["Naive"] = naive_fc
+            results.append(_eval_forecast("Naive", test, naive_fc))
 
-        # SMA
-        sma_fc = pd.Series([train.rolling(7).mean().iloc[-1]] * len(test), index=test.index)
-        forecasts["SMA(7)"] = sma_fc
-        results.append(_eval_forecast("SMA(7)", test, sma_fc))
+            # SMA
+            sma_fc = pd.Series([train.rolling(7).mean().iloc[-1]] * len(test), index=test.index)
+            forecasts["SMA(7)"] = sma_fc
+            results.append(_eval_forecast("SMA(7)", test, sma_fc))
 
-        # EMA
-        ema_val = train.ewm(span=12).mean().iloc[-1]
-        ema_fc = pd.Series([ema_val] * len(test), index=test.index)
-        forecasts["EMA(12)"] = ema_fc
-        results.append(_eval_forecast("EMA(12)", test, ema_fc))
+            # EMA
+            ema_val = train.ewm(span=12).mean().iloc[-1]
+            ema_fc = pd.Series([ema_val] * len(test), index=test.index)
+            forecasts["EMA(12)"] = ema_fc
+            results.append(_eval_forecast("EMA(12)", test, ema_fc))
 
-        # ARIMA(1,1,1)
-        try:
-            model = ARIMA(train, order=(1, 1, 1)).fit()
-            arima_fc = model.forecast(len(test))
-            forecasts["ARIMA(1,1,1)"] = arima_fc
-            results.append(_eval_forecast("ARIMA(1,1,1)", test, arima_fc, model.aic))
-        except Exception:
-            pass
+            # ARIMA(1,1,1)
+            try:
+                model = ARIMA(train, order=(1, 1, 1)).fit()
+                arima_fc = model.forecast(len(test))
+                forecasts["ARIMA(1,1,1)"] = arima_fc
+                results.append(_eval_forecast("ARIMA(1,1,1)", test, arima_fc, model.aic))
+            except Exception:
+                pass
 
-        # ARIMA(2,1,2)
-        try:
-            model = ARIMA(train, order=(2, 1, 2)).fit()
-            arima_fc = model.forecast(len(test))
-            forecasts["ARIMA(2,1,2)"] = arima_fc
-            results.append(_eval_forecast("ARIMA(2,1,2)", test, arima_fc, model.aic))
-        except Exception:
-            pass
+            # ARIMA(2,1,2)
+            try:
+                model = ARIMA(train, order=(2, 1, 2)).fit()
+                arima_fc = model.forecast(len(test))
+                forecasts["ARIMA(2,1,2)"] = arima_fc
+                results.append(_eval_forecast("ARIMA(2,1,2)", test, arima_fc, model.aic))
+            except Exception:
+                pass
 
-        # Holt
-        try:
-            model = ExponentialSmoothing(train, trend="add").fit(optimized=True)
-            holt_fc = model.forecast(len(test))
-            forecasts["Holt"] = holt_fc
-            results.append(_eval_forecast("Holt", test, holt_fc, model.aic))
-        except Exception:
-            pass
+            # Holt
+            try:
+                model = ExponentialSmoothing(train, trend="add").fit(optimized=True)
+                holt_fc = model.forecast(len(test))
+                forecasts["Holt"] = holt_fc
+                results.append(_eval_forecast("Holt", test, holt_fc, model.aic))
+            except Exception:
+                pass
 
         # Results table
         results_df = pd.DataFrame(results).sort_values("RMSE")
-        st.markdown("#### Model Comparison")
+        section_header("Model Comparison")
         st.dataframe(results_df.round(4), use_container_width=True, hide_index=True)
 
         # Plot
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=train.index, y=train.values, name="Train",
-                                 line=dict(color="steelblue")))
+                                 line=dict(color="#6366f1")))
         fig.add_trace(go.Scatter(x=test.index, y=test.values, name="Test",
                                  line=dict(color="black", width=2)))
         colors = px.colors.qualitative.Set1

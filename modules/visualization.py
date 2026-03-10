@@ -9,23 +9,13 @@ from scipy import stats
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-
-
-CHART_TYPES = [
-    "Scatter Plot", "Line Chart", "Bar Chart", "Histogram",
-    "Box Plot", "Violin Plot", "Strip Plot", "Heatmap",
-    "Bubble Chart", "Area Chart", "Pie / Donut", "Treemap",
-    "Sunburst", "Radar Chart", "Parallel Coordinates",
-    "3D Scatter", "3D Surface", "Contour Plot",
-    "Funnel Chart", "Waterfall Chart", "Candlestick (OHLC)",
-    "Joint Plot",
-]
+from modules.ui_helpers import grouped_chart_selector, empty_state
 
 
 def render_visualization(df: pd.DataFrame):
     """Render the visualization builder."""
     if df is None or df.empty:
-        st.warning("No data loaded.")
+        empty_state("No data loaded.", "Upload a dataset from the sidebar to begin.")
         return
 
     num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
@@ -33,10 +23,10 @@ def render_visualization(df: pd.DataFrame):
     all_cols = df.columns.tolist()
     date_cols = df.select_dtypes(include=["datetime64"]).columns.tolist()
 
-    chart_type = st.selectbox("Chart Type:", CHART_TYPES, key="viz_chart_type")
+    chart_type = grouped_chart_selector()
 
     # Common options
-    with st.expander("Chart Settings", expanded=False):
+    with st.expander("Chart Settings", expanded=True):
         title = st.text_input("Title:", chart_type, key="viz_title")
         height = st.slider("Height:", 300, 1000, 500, 50, key="viz_height")
         color_scale = st.selectbox("Color palette:", [

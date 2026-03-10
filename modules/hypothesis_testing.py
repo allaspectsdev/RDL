@@ -9,12 +9,13 @@ from scipy import stats
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+from modules.ui_helpers import significance_result, help_tip, empty_state, section_header
 
 
 def render_hypothesis_testing(df: pd.DataFrame):
     """Render hypothesis testing interface."""
     if df is None or df.empty:
-        st.warning("No data loaded.")
+        empty_state("No data loaded.", "Upload a dataset from the sidebar to begin.")
         return
 
     tabs = st.tabs([
@@ -22,6 +23,29 @@ def render_hypothesis_testing(df: pd.DataFrame):
         "Normality Tests", "Power Analysis", "Multiple Comparisons",
         "Bootstrap & Permutation",
     ])
+
+    help_tip("Which test should I use?", """
+**Continuous data:**
+- *One group vs known value* → One-Sample t-test (or Wilcoxon if non-normal)
+- *Two independent groups* → Independent t-test / Welch's t-test (or Mann-Whitney U)
+- *Two paired measurements* → Paired t-test (or Wilcoxon Signed-Rank)
+- *3+ groups* → Use the ANOVA module
+
+**Categorical data:**
+- *Two categorical variables* → Chi-Square Test of Independence
+- *Observed vs expected distribution* → Chi-Square Goodness of Fit
+
+**Non-parametric / resampling:**
+- *No distribution assumptions* → Bootstrap CI or Permutation Test
+""")
+
+    help_tip("Effect size interpretation", """
+| Measure | Small | Medium | Large |
+|---------|-------|--------|-------|
+| Cohen's d | 0.2 | 0.5 | 0.8 |
+| Cramér's V | 0.1 | 0.3 | 0.5 |
+| Effect size r | 0.1 | 0.3 | 0.5 |
+""")
 
     with tabs[0]:
         _render_one_sample(df)
@@ -70,7 +94,7 @@ def _render_one_sample(df: pd.DataFrame):
     """One-sample hypothesis tests."""
     num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
     if not num_cols:
-        st.warning("No numeric columns available.")
+        empty_state("No numeric columns available.")
         return
 
     test_type = st.selectbox("Test:", [
@@ -101,7 +125,7 @@ def _render_one_sample(df: pd.DataFrame):
             c3.metric("Cohen's d", f"{d:.4f} ({_effect_size_label(d)})")
             c4.metric("Sample Mean", f"{data.mean():.4f}")
             st.write(f"**{1 - alpha:.0%} CI for mean:** [{ci[0]:.4f}, {ci[1]:.4f}]")
-            st.markdown(_interpret_p(p, alpha))
+            significance_result(p, alpha, "One-Sample t-test", effect_size=d, effect_label="Cohen's d")
 
             # Visualization
             fig = make_subplots(rows=1, cols=2, subplot_titles=("Distribution", "t-Distribution"))
@@ -144,14 +168,14 @@ def _render_one_sample(df: pd.DataFrame):
             c1.metric("W-statistic", f"{stat:.4f}")
             c2.metric("p-value", f"{p:.6f}")
             c3.metric("Effect size r", f"{r:.4f}")
-            st.markdown(_interpret_p(p, alpha))
+            significance_result(p, alpha, "Wilcoxon Signed-Rank", effect_size=r, effect_label="Effect size r")
 
     elif test_type == "One-Sample Proportion":
         cat_cols = df.select_dtypes(include=["object", "category"]).columns.tolist()
         bin_cols = [c for c in num_cols if df[c].nunique() == 2]
         all_cols = cat_cols + bin_cols
         if not all_cols:
-            st.warning("No binary/categorical columns found.")
+            empty_state("No binary/categorical columns found.")
             return
 
         col_name = st.selectbox("Column:", all_cols, key="one_prop_col")
@@ -180,7 +204,7 @@ def _render_one_sample(df: pd.DataFrame):
             center = (p_hat + z_crit ** 2 / (2 * n)) / denom
             margin = z_crit * np.sqrt((p_hat * (1 - p_hat) + z_crit ** 2 / (4 * n)) / n) / denom
             st.write(f"**{1 - alpha:.0%} Wilson CI:** [{center - margin:.4f}, {center + margin:.4f}]")
-            st.markdown(_interpret_p(p_val, alpha))
+            significance_result(p_val, alpha, "One-Sample Proportion")
 
 
 def _render_two_sample(df: pd.DataFrame):
@@ -199,10 +223,10 @@ def _render_two_sample(df: pd.DataFrame):
     if test_type in ("Independent t-test", "Welch's t-test", "Mann-Whitney U", "Two-Sample KS Test"):
         # Need a grouping variable
         if not cat_cols:
-            st.warning("Need a categorical column to define groups.")
+            empty_state("Need a categorical column to define groups.")
             return
         if not num_cols:
-            st.warning("No numeric columns available.")
+            empty_state("No numeric columns available.")
             return
 
         value_col = st.selectbox("Value column:", num_cols, key="two_val_col")
@@ -243,7 +267,7 @@ def _render_two_sample(df: pd.DataFrame):
 
             st.write(f"**Group 1 ({g1_name}):** n={len(g1)}, mean={g1.mean():.4f}, sd={g1.std():.4f}")
             st.write(f"**Group 2 ({g2_name}):** n={len(g2)}, mean={g2.mean():.4f}, sd={g2.std():.4f}")
-            st.markdown(_interpret_p(p, alpha))
+            significance_result(p, alpha, test_type, effect_size=d, effect_label="Cohen's d")
 
             # Visualization
             fig = make_subplots(rows=1, cols=2, subplot_titles=("Distributions", "Box Plot"))
@@ -282,7 +306,7 @@ def _render_two_sample(df: pd.DataFrame):
             c2.metric("p-value", f"{p:.6f}")
             c3.metric("Effect size d", f"{d:.4f} ({_effect_size_label(d)})")
             st.write(f"**Mean difference:** {diff.mean():.4f} ± {diff.std():.4f}")
-            st.markdown(_interpret_p(p, alpha))
+            significance_result(p, alpha, test_type, effect_size=d, effect_label="Effect size d")
 
             fig = make_subplots(rows=1, cols=2, subplot_titles=("Paired Differences", "Before vs After"))
             fig.add_trace(go.Histogram(x=diff, name="Differences"), row=1, col=1)
@@ -308,7 +332,7 @@ def _render_chi_square(df: pd.DataFrame):
             cat_cols.append(c)
 
     if len(cat_cols) < 1:
-        st.warning("Need categorical columns for chi-square tests.")
+        empty_state("Need categorical columns for chi-square tests.")
         return
 
     test_type = st.selectbox("Test:", [
@@ -344,7 +368,7 @@ def _render_chi_square(df: pd.DataFrame):
             c2.metric("p-value", f"{p:.6f}")
             c3.metric("df", str(dof))
             c4.metric("Cramér's V", f"{cramers_v:.4f}")
-            st.markdown(_interpret_p(p, alpha))
+            significance_result(p, alpha, "Chi-Square Independence", effect_size=cramers_v, effect_label="Cramér's V")
 
             # Fisher's exact for 2x2
             if ct.shape == (2, 2):
@@ -387,7 +411,7 @@ def _render_chi_square(df: pd.DataFrame):
             c1.metric("χ²", f"{chi2:.4f}")
             c2.metric("p-value", f"{p:.6f}")
             c3.metric("df", str(len(observed) - 1))
-            st.markdown(_interpret_p(p, alpha))
+            significance_result(p, alpha, "Chi-Square Goodness of Fit")
 
             fig = go.Figure()
             fig.add_trace(go.Bar(x=observed.index.astype(str), y=observed.values, name="Observed"))
@@ -401,7 +425,7 @@ def _render_normality(df: pd.DataFrame):
     """Comprehensive normality tests."""
     num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
     if not num_cols:
-        st.warning("No numeric columns found.")
+        empty_state("No numeric columns found.")
         return
 
     selected = st.multiselect("Select columns:", num_cols, default=num_cols[:3], key="norm_cols")
@@ -455,7 +479,7 @@ def _render_normality(df: pd.DataFrame):
     st.dataframe(results_df, use_container_width=True, hide_index=True)
 
     # QQ plots
-    st.markdown("#### QQ Plots")
+    section_header("QQ Plots")
     n_plots = len(selected)
     cols_per_row = min(3, n_plots)
     rows = (n_plots + cols_per_row - 1) // cols_per_row
@@ -467,7 +491,7 @@ def _render_normality(df: pd.DataFrame):
         theoretical = stats.norm.ppf((np.arange(1, n + 1) - 0.5) / n)
         r, c = i // cols_per_row + 1, i % cols_per_row + 1
         fig.add_trace(go.Scatter(x=theoretical, y=data, mode="markers",
-                                 marker=dict(size=3, color="steelblue"),
+                                 marker=dict(size=3),
                                  showlegend=False), row=r, col=c)
         slope, intercept = np.polyfit(theoretical, data, 1)
         fig.add_trace(go.Scatter(x=theoretical, y=slope * theoretical + intercept,
@@ -648,7 +672,7 @@ def _render_bootstrap_permutation(df: pd.DataFrame):
     cat_cols = df.select_dtypes(include=["object", "category"]).columns.tolist()
 
     if not num_cols:
-        st.warning("No numeric columns available.")
+        empty_state("No numeric columns available.")
         return
 
     analysis = st.selectbox("Analysis:", [
@@ -682,13 +706,14 @@ def _render_bootstrap_permutation(df: pd.DataFrame):
             observed = stat_func(data)
 
             try:
-                result = stats.bootstrap(
-                    (data,), stat_func, n_resamples=n_resamples,
-                    confidence_level=alpha, method=ci_method,
-                    random_state=42,
-                )
-                ci_low, ci_high = result.confidence_interval.low, result.confidence_interval.high
-                se = result.standard_error
+                with st.spinner(f"Running bootstrap ({n_resamples} resamples)..."):
+                    result = stats.bootstrap(
+                        (data,), stat_func, n_resamples=n_resamples,
+                        confidence_level=alpha, method=ci_method,
+                        random_state=42,
+                    )
+                    ci_low, ci_high = result.confidence_interval.low, result.confidence_interval.high
+                    se = result.standard_error
 
                 c1, c2, c3, c4 = st.columns(4)
                 c1.metric(f"Observed {statistic_name}", f"{observed:.4f}")
@@ -700,7 +725,7 @@ def _render_bootstrap_permutation(df: pd.DataFrame):
                 boot_dist = result.bootstrap_distribution
                 fig = go.Figure()
                 fig.add_trace(go.Histogram(x=boot_dist, nbinsx=60, name="Bootstrap Distribution",
-                                           marker_color="steelblue", opacity=0.7))
+                                           opacity=0.7))
                 fig.add_vline(x=observed, line_dash="solid", line_color="red",
                               annotation_text=f"Observed={observed:.4f}")
                 fig.add_vline(x=ci_low, line_dash="dash", line_color="green",
@@ -747,12 +772,13 @@ def _render_bootstrap_permutation(df: pd.DataFrame):
                     return np.median(x, axis=axis) - np.median(y, axis=axis)
 
             try:
-                result = stats.permutation_test(
-                    (g1, g2), stat_func, n_resamples=n_resamples,
-                    alternative=alt, random_state=42,
-                )
-                observed_stat = result.statistic
-                p_val = result.pvalue
+                with st.spinner(f"Running permutation test ({n_resamples} permutations)..."):
+                    result = stats.permutation_test(
+                        (g1, g2), stat_func, n_resamples=n_resamples,
+                        alternative=alt, random_state=42,
+                    )
+                    observed_stat = result.statistic
+                    p_val = result.pvalue
 
                 c1, c2, c3, c4 = st.columns(4)
                 c1.metric("Observed Statistic", f"{observed_stat:.4f}")
@@ -760,13 +786,13 @@ def _render_bootstrap_permutation(df: pd.DataFrame):
                 c3.metric(f"Group 1 Mean ({g1_name})", f"{g1.mean():.4f}")
                 c4.metric(f"Group 2 Mean ({g2_name})", f"{g2.mean():.4f}")
 
-                st.markdown(_interpret_p(p_val, 0.05))
+                significance_result(p_val, 0.05, "Permutation Test")
 
                 # Null distribution
                 null_dist = result.null_distribution
                 fig = go.Figure()
                 fig.add_trace(go.Histogram(x=null_dist, nbinsx=60,
-                                           name="Null Distribution", marker_color="steelblue", opacity=0.7))
+                                           name="Null Distribution", opacity=0.7))
                 fig.add_vline(x=observed_stat, line_dash="solid", line_color="red",
                               annotation_text=f"Observed={observed_stat:.4f}")
                 fig.update_layout(

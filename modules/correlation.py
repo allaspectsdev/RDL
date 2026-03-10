@@ -12,6 +12,7 @@ from sklearn.preprocessing import StandardScaler
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+from modules.ui_helpers import section_header, empty_state
 
 
 @st.cache_data
@@ -38,7 +39,7 @@ def _compute_corr_and_pvals(df_subset, method):
 def render_correlation(df: pd.DataFrame):
     """Render correlation and multivariate analysis interface."""
     if df is None or df.empty:
-        st.warning("No data loaded.")
+        empty_state("No data loaded.", "Upload a dataset from the sidebar to begin.")
         return
 
     tabs = st.tabs([
@@ -66,7 +67,7 @@ def _render_corr_matrix(df: pd.DataFrame):
     """Correlation matrix with heatmap."""
     num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
     if len(num_cols) < 2:
-        st.warning("Need at least 2 numeric columns.")
+        empty_state("Need at least 2 numeric columns.")
         return
 
     selected = st.multiselect("Columns:", num_cols, default=num_cols[:8], key="corr_cols")
@@ -123,7 +124,7 @@ def _render_scatter_matrix(df: pd.DataFrame):
     cat_cols = df.select_dtypes(include=["object", "category"]).columns.tolist()
 
     if len(num_cols) < 2:
-        st.warning("Need at least 2 numeric columns.")
+        empty_state("Need at least 2 numeric columns.")
         return
 
     selected = st.multiselect("Columns:", num_cols, default=num_cols[:4], key="splom_cols")
@@ -146,7 +147,7 @@ def _render_pairwise(df: pd.DataFrame):
     cat_cols = df.select_dtypes(include=["object", "category"]).columns.tolist()
 
     if len(num_cols) < 2:
-        st.warning("Need at least 2 numeric columns.")
+        empty_state("Need at least 2 numeric columns.")
         return
 
     c1, c2 = st.columns(2)
@@ -196,7 +197,7 @@ def _render_pca(df: pd.DataFrame):
     cat_cols = df.select_dtypes(include=["object", "category"]).columns.tolist()
 
     if len(num_cols) < 2:
-        st.warning("Need at least 2 numeric columns.")
+        empty_state("Need at least 2 numeric columns.")
         return
 
     selected = st.multiselect("Variables:", num_cols, default=num_cols, key="pca_cols")
@@ -222,11 +223,10 @@ def _render_pca(df: pd.DataFrame):
         exp_var = pca.explained_variance_ratio_
         cum_var = np.cumsum(exp_var)
 
-        st.markdown("#### Explained Variance")
+        section_header("Explained Variance")
         fig = make_subplots(specs=[[{"secondary_y": True}]])
         fig.add_trace(go.Bar(x=[f"PC{i+1}" for i in range(n_components)],
-                             y=exp_var * 100, name="Individual %",
-                             marker_color="steelblue"), secondary_y=False)
+                             y=exp_var * 100, name="Individual %"), secondary_y=False)
         fig.add_trace(go.Scatter(x=[f"PC{i+1}" for i in range(n_components)],
                                  y=cum_var * 100, name="Cumulative %",
                                  line=dict(color="red", width=2),
@@ -253,14 +253,14 @@ def _render_pca(df: pd.DataFrame):
         st.dataframe(var_df, use_container_width=True, hide_index=True)
 
         # Loadings
-        st.markdown("#### Loadings")
+        section_header("Loadings")
         loadings = pd.DataFrame(pca.components_.T,
                                 columns=[f"PC{i+1}" for i in range(n_components)],
                                 index=selected).round(4)
         st.dataframe(loadings, use_container_width=True)
 
         # Biplot (PC1 vs PC2)
-        st.markdown("#### Biplot")
+        section_header("Biplot")
         scores_df = pd.DataFrame(scores[:, :2], columns=["PC1", "PC2"])
         if color_col and color_col in df.columns:
             scores_df["color"] = df[color_col].iloc[data.index].values
@@ -276,7 +276,7 @@ def _render_pca(df: pd.DataFrame):
         else:
             fig.add_trace(go.Scatter(x=scores_df["PC1"], y=scores_df["PC2"],
                                      mode="markers", name="Scores",
-                                     marker=dict(color="steelblue", size=6, opacity=0.7)))
+                                     marker=dict(size=6, opacity=0.7)))
 
         # Add loading vectors
         scale = max(scores_df["PC1"].abs().max(), scores_df["PC2"].abs().max()) * 0.8
@@ -304,7 +304,7 @@ def _render_tsne(df: pd.DataFrame):
     cat_cols = df.select_dtypes(include=["object", "category"]).columns.tolist()
 
     if len(num_cols) < 2:
-        st.warning("Need at least 2 numeric columns.")
+        empty_state("Need at least 2 numeric columns.")
         return
 
     selected = st.multiselect("Variables:", num_cols, default=num_cols, key="tsne_cols")
@@ -351,7 +351,7 @@ def _render_factor_analysis(df: pd.DataFrame):
     num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
 
     if len(num_cols) < 3:
-        st.warning("Need at least 3 numeric columns.")
+        empty_state("Need at least 3 numeric columns.")
         return
 
     selected = st.multiselect("Variables:", num_cols, default=num_cols[:6], key="fa_cols")
@@ -378,7 +378,7 @@ def _render_factor_analysis(df: pd.DataFrame):
         loadings = pd.DataFrame(fa.components_.T,
                                 columns=[f"Factor{i+1}" for i in range(n_factors)],
                                 index=selected).round(4)
-        st.markdown("#### Factor Loadings")
+        section_header("Factor Loadings")
         st.dataframe(loadings, use_container_width=True)
 
         # Communalities
@@ -386,7 +386,7 @@ def _render_factor_analysis(df: pd.DataFrame):
         # Actually communalities are sum of squared loadings for each variable
         comm = np.sum(fa.components_.T ** 2, axis=1)
         comm_df = pd.DataFrame({"Variable": selected, "Communality": comm.round(4)})
-        st.markdown("#### Communalities")
+        section_header("Communalities")
         st.dataframe(comm_df, use_container_width=True, hide_index=True)
 
         # Loadings heatmap
@@ -402,7 +402,7 @@ def _render_partial_corr(df: pd.DataFrame):
     num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
 
     if len(num_cols) < 3:
-        st.warning("Need at least 3 numeric columns.")
+        empty_state("Need at least 3 numeric columns.")
         return
 
     c1, c2 = st.columns(2)

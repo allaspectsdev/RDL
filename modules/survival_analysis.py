@@ -8,6 +8,7 @@ import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+from modules.ui_helpers import section_header, empty_state, help_tip
 
 try:
     from lifelines import (
@@ -26,7 +27,7 @@ except ImportError:
 def render_survival_analysis(df: pd.DataFrame):
     """Render survival analysis interface."""
     if df is None or df.empty:
-        st.warning("No data loaded.")
+        empty_state("No data loaded.", "Upload a dataset from the sidebar to begin.")
         return
     if not HAS_LIFELINES:
         st.error("The `lifelines` library is required for survival analysis. Install it with `pip install lifelines`.")
@@ -51,11 +52,12 @@ def _get_duration_event_cols(df, prefix):
     """Common column selectors for duration and event."""
     num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
     if len(num_cols) < 2:
-        st.warning("Need at least 2 numeric columns (duration and event).")
+        empty_state("Need at least 2 numeric columns (duration and event).")
         return None, None
     c1, c2 = st.columns(2)
     duration_col = c1.selectbox("Duration column:", num_cols, key=f"{prefix}_dur")
     event_col = c2.selectbox("Event column (0/1):", num_cols, key=f"{prefix}_evt")
+    help_tip("Survival data format", "**Event = 1** for observed events (e.g., death, failure). **Event = 0** for censored observations (e.g., lost to follow-up, study ended).")
     return duration_col, event_col
 
 
@@ -250,7 +252,7 @@ def _render_logrank(df: pd.DataFrame):
 
     cat_cols = df.select_dtypes(include=["object", "category"]).columns.tolist()
     if not cat_cols:
-        st.warning("Need at least one categorical column for group comparison.")
+        empty_state("Need at least one categorical column for group comparison.")
         return
 
     group_col = st.selectbox("Group column:", cat_cols, key="lr_group")
@@ -343,7 +345,7 @@ def _render_cox_ph(df: pd.DataFrame):
     covariate_options = [c for c in num_cols if c not in (duration_col, event_col)]
 
     if not covariate_options:
-        st.warning("No additional numeric columns available as covariates.")
+        empty_state("No additional numeric columns available as covariates.")
         return
 
     covariates = st.multiselect(
@@ -371,10 +373,11 @@ def _render_cox_ph(df: pd.DataFrame):
 
         try:
             cph = CoxPHFitter(penalizer=penalizer)
-            cph.fit(data, duration_col=duration_col, event_col=event_col)
+            with st.spinner("Fitting Cox model..."):
+                cph.fit(data, duration_col=duration_col, event_col=event_col)
 
             # Model-level metrics
-            st.markdown("#### Model Summary")
+            section_header("Model Summary")
             c1, c2, c3 = st.columns(3)
             c1.metric("Concordance Index", f"{cph.concordance_index_:.4f}")
             c2.metric("Partial AIC", f"{cph.AIC_partial_:.2f}")
@@ -382,7 +385,7 @@ def _render_cox_ph(df: pd.DataFrame):
                        f"{cph.log_likelihood_ratio_test().p_value:.6f}")
 
             # Coefficient table
-            st.markdown("#### Coefficients")
+            section_header("Coefficients")
             summary = cph.summary
             display_cols = ["coef", "exp(coef)", "se(coef)", "z", "p", "coef lower 95%", "coef upper 95%"]
             available_cols = [c for c in display_cols if c in summary.columns]
@@ -407,7 +410,7 @@ def _render_cox_ph(df: pd.DataFrame):
                     pass
 
             # Forest plot of hazard ratios
-            st.markdown("#### Forest Plot (Hazard Ratios)")
+            section_header("Forest Plot (Hazard Ratios)")
             _plot_forest(cph.summary)
 
         except Exception as e:
@@ -433,14 +436,14 @@ def _plot_forest(summary_df):
     for i, cov in enumerate(covariates):
         fig.add_trace(go.Scatter(
             x=[hr_lower[i], hr_upper[i]], y=[cov, cov],
-            mode="lines", line=dict(color="steelblue", width=2),
+            mode="lines", line=dict(color="#6366f1", width=2),
             showlegend=False, hoverinfo="skip",
         ))
 
     # Point estimates
     fig.add_trace(go.Scatter(
         x=hr, y=covariates, mode="markers",
-        marker=dict(color="steelblue", size=10, symbol="diamond"),
+        marker=dict(color="#6366f1", size=10, symbol="diamond"),
         name="Hazard Ratio",
         text=[f"HR={h:.3f} [{l:.3f}, {u:.3f}]" for h, l, u in zip(hr, hr_lower, hr_upper)],
         hoverinfo="text",
@@ -514,7 +517,7 @@ def _render_parametric(df: pd.DataFrame):
             return
 
         # AIC comparison table
-        st.markdown("#### Model Comparison")
+        section_header("Model Comparison")
         aic_df = pd.DataFrame(aic_rows).sort_values("AIC")
         st.dataframe(aic_df.round(4), use_container_width=True, hide_index=True)
 
@@ -523,11 +526,11 @@ def _render_parametric(df: pd.DataFrame):
 
         # Best model coefficients
         best_model = fitted_models[best_name]
-        st.markdown(f"#### {best_name} Coefficients")
+        section_header(f"{best_name} Coefficients")
         st.dataframe(best_model.summary.round(4), use_container_width=True)
 
         # Plot fitted survival curves from each model
-        st.markdown("#### Fitted Survival Curves")
+        section_header("Fitted Survival Curves")
         fig = go.Figure()
         colors = px.colors.qualitative.Set1
         t_max = data[duration_col].max()

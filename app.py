@@ -466,6 +466,93 @@ st.markdown("""<style>
 [data-testid="stSlider"] [data-baseweb="slider"] [role="slider"] {
     background: var(--rdl-accent) !important;
 }
+
+/* ── Significance Result Cards ── */
+.rdl-sig-card {
+    background: var(--rdl-bg-card);
+    border: 1px solid var(--rdl-border);
+    border-left: 4px solid var(--rdl-success);
+    border-radius: var(--rdl-radius-sm);
+    padding: 1rem 1.25rem;
+    margin: 0.75rem 0;
+    box-shadow: var(--rdl-shadow-sm);
+}
+.rdl-sig-card--reject {
+    border-left-color: var(--rdl-error);
+}
+.rdl-sig-card--accept {
+    border-left-color: var(--rdl-success);
+}
+.rdl-sig-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+}
+.rdl-sig-test {
+    font-weight: 700;
+    font-size: 0.88rem;
+    color: var(--rdl-text);
+}
+.rdl-sig-badge {
+    display: inline-block;
+    padding: 0.2rem 0.6rem;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+.rdl-sig-card--reject .rdl-sig-badge {
+    background: rgba(239,68,68,0.1);
+    color: var(--rdl-error);
+}
+.rdl-sig-card--accept .rdl-sig-badge {
+    background: rgba(34,197,94,0.1);
+    color: var(--rdl-success);
+}
+.rdl-sig-body {
+    font-size: 0.88rem;
+    color: var(--rdl-text-secondary);
+    line-height: 1.6;
+}
+.rdl-sig-effect {
+    display: inline-block;
+    margin-left: 0.75rem;
+    padding: 0.15rem 0.5rem;
+    background: var(--rdl-accent-subtle);
+    border-radius: var(--rdl-radius-xs);
+    font-size: 0.8rem;
+    color: var(--rdl-accent);
+    font-weight: 500;
+}
+
+/* ── Empty State ── */
+.rdl-empty-state {
+    text-align: center;
+    padding: 2rem 1rem;
+    margin: 1rem 0;
+    border: 1px dashed var(--rdl-border);
+    border-radius: var(--rdl-radius-sm);
+    background: var(--rdl-bg-card);
+}
+.rdl-empty-msg {
+    font-size: 0.92rem;
+    font-weight: 500;
+    color: var(--rdl-text-secondary);
+    margin: 0 0 0.25rem 0;
+}
+.rdl-empty-suggestion {
+    font-size: 0.8rem;
+    color: var(--rdl-text-muted);
+    margin: 0;
+}
+
+/* ── Metric hover enhancement ── */
+[data-testid="stMetric"]:hover {
+    transform: translateY(-3px) !important;
+    border-left: 3px solid var(--rdl-accent) !important;
+}
 </style>""", unsafe_allow_html=True)
 
 # ─── LANDING PAGE STYLES ────────────────────────────────────────────────────
@@ -594,7 +681,32 @@ st.markdown("""<style>
     animation: rdl-fade-up 0.5s 0.24s var(--rdl-ease) both;
 }
 .rdl-module-item {
-    padding: 0.75rem 0;
+    background: var(--rdl-bg-card);
+    border: 1px solid var(--rdl-border);
+    border-radius: var(--rdl-radius);
+    padding: 1.25rem 1.5rem;
+    position: relative;
+    overflow: hidden;
+    transition: box-shadow 0.25s var(--rdl-ease),
+                transform 0.25s var(--rdl-ease),
+                border-color 0.25s var(--rdl-ease);
+}
+.rdl-module-item::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, var(--rdl-accent), #a78bfa);
+    opacity: 0;
+    transition: opacity 0.25s var(--rdl-ease);
+}
+.rdl-module-item:hover {
+    box-shadow: var(--rdl-shadow-lg);
+    transform: translateY(-3px);
+    border-color: rgba(99,102,241,0.2);
+}
+.rdl-module-item:hover::before {
+    opacity: 1;
 }
 .rdl-module-item h4 {
     font-size: 0.85rem !important;
@@ -668,6 +780,7 @@ st.markdown("""<style>
 
 
 # ─── MODULE IMPORTS ──────────────────────────────────────────────────────────
+import modules.ui_helpers  # noqa: F401  — registers RDL Plotly template
 from modules.data_manager import render_upload, render_data_manager
 from modules.descriptive_stats import render_descriptive_stats
 from modules.hypothesis_testing import render_hypothesis_testing
@@ -927,6 +1040,24 @@ def main():
             label_visibility="collapsed",
         )
 
+        _MODULE_DESCRIPTIONS = {
+            "Data Manager": "Upload, clean, transform, filter, encode, and export datasets.",
+            "Descriptive Statistics": "Summary statistics, distributions, normality tests, outlier detection.",
+            "Visualization Builder": "22+ interactive chart types with full customization.",
+            "Hypothesis Testing": "t-tests, chi-square, bootstrap CIs, permutation tests, power analysis.",
+            "Correlation & Multivariate": "Correlation matrices, PCA, t-SNE, UMAP, factor analysis.",
+            "Regression Analysis": "Linear, GLM, robust, quantile, mixed models, and curve fitting.",
+            "ANOVA": "One-way, two-way, repeated measures, ANCOVA, Kruskal-Wallis.",
+            "Time Series Analysis": "Decomposition, ARIMA/SARIMA, smoothing, and forecasting.",
+            "Machine Learning": "XGBoost, LightGBM, SHAP, clustering, and model comparison.",
+            "Survival Analysis": "Kaplan-Meier, log-rank test, Cox PH, parametric AFT models.",
+            "Quality & SPC": "Control charts (I-MR, X-bar), attributes charts, process capability.",
+            "Design of Experiments": "Factorial, CCD, Box-Behnken, response surface, effect analysis.",
+        }
+        desc = _MODULE_DESCRIPTIONS.get(module, "")
+        if desc:
+            st.caption(desc)
+
         if "df" in st.session_state and st.session_state["df"] is not None:
             st.divider()
             st.subheader("Active Dataset")
@@ -1027,51 +1158,51 @@ def main():
 
             <div class="rdl-modules-grid">
                 <div class="rdl-module-item">
-                    <h4>Data Management</h4>
+                    <h4>📂 Data Management</h4>
                     <p>Upload, clean, transform, filter, encode, export CSV/Excel/JSON.</p>
                 </div>
                 <div class="rdl-module-item">
-                    <h4>Descriptive Statistics</h4>
+                    <h4>📊 Descriptive Statistics</h4>
                     <p>Summary stats, distributions, normality tests, outlier detection.</p>
                 </div>
                 <div class="rdl-module-item">
-                    <h4>Visualization Builder</h4>
+                    <h4>📈 Visualization Builder</h4>
                     <p>Scatter, bar, heatmap, 3D, treemap, radar, candlestick, and more.</p>
                 </div>
                 <div class="rdl-module-item">
-                    <h4>Hypothesis Testing</h4>
+                    <h4>🧪 Hypothesis Testing</h4>
                     <p>t-tests, chi-square, bootstrap CIs, permutation tests, power analysis.</p>
                 </div>
                 <div class="rdl-module-item">
-                    <h4>Correlation & PCA</h4>
+                    <h4>🔗 Correlation & PCA</h4>
                     <p>Correlation matrices, PCA, t-SNE, UMAP, factor analysis.</p>
                 </div>
                 <div class="rdl-module-item">
-                    <h4>Regression Analysis</h4>
+                    <h4>📐 Regression Analysis</h4>
                     <p>Linear, GLM, robust, quantile, mixed models, curve fitting.</p>
                 </div>
                 <div class="rdl-module-item">
-                    <h4>ANOVA</h4>
+                    <h4>⚖️ ANOVA</h4>
                     <p>One-way, two-way, repeated measures, ANCOVA, Kruskal-Wallis.</p>
                 </div>
                 <div class="rdl-module-item">
-                    <h4>Time Series</h4>
+                    <h4>⏳ Time Series</h4>
                     <p>Decomposition, ARIMA/SARIMA, smoothing, forecasting.</p>
                 </div>
                 <div class="rdl-module-item">
-                    <h4>Machine Learning</h4>
+                    <h4>🤖 Machine Learning</h4>
                     <p>XGBoost, LightGBM, SHAP, clustering, model comparison.</p>
                 </div>
                 <div class="rdl-module-item">
-                    <h4>Survival Analysis</h4>
+                    <h4>🏥 Survival Analysis</h4>
                     <p>Kaplan-Meier, log-rank test, Cox PH, parametric AFT models.</p>
                 </div>
                 <div class="rdl-module-item">
-                    <h4>Quality & SPC</h4>
+                    <h4>🏭 Quality & SPC</h4>
                     <p>Control charts (I-MR, X-bar), attributes charts, process capability.</p>
                 </div>
                 <div class="rdl-module-item">
-                    <h4>Design of Experiments</h4>
+                    <h4>🔬 Design of Experiments</h4>
                     <p>Factorial, CCD, Box-Behnken, response surface, effect analysis.</p>
                 </div>
             </div>

@@ -10,6 +10,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from itertools import combinations
+from modules.ui_helpers import section_header, empty_state
 
 try:
     import pyDOE2
@@ -28,7 +29,7 @@ except ImportError:
 def render_doe(df: pd.DataFrame):
     """Render design of experiments interface."""
     if df is None or df.empty:
-        st.warning("No data loaded.")
+        empty_state("No data loaded.", "Upload a dataset from the sidebar to begin.")
         return
 
     tabs = st.tabs([
@@ -53,7 +54,7 @@ def _render_design_generation(df: pd.DataFrame):
         st.warning("pyDOE2 required for design generation. Install with: pip install pyDOE2")
         return
 
-    st.markdown("#### Design Parameters")
+    section_header("Design Parameters")
 
     n_factors = st.slider("Number of factors:", 2, 8, 3, key="doe_n_factors")
 
@@ -68,7 +69,7 @@ def _render_design_generation(df: pd.DataFrame):
     ], key="doe_design_type")
 
     # Factor definitions
-    st.markdown("#### Factor Definitions")
+    section_header("Factor Definitions")
     factor_names = []
     factor_lows = []
     factor_highs = []
@@ -112,11 +113,11 @@ def _render_design_generation(df: pd.DataFrame):
             actual_df[name] = coded_df[name] * half_range + mid
 
         # Display coded design
-        st.markdown("#### Coded Design Matrix (-1 / +1)")
+        section_header("Coded Design Matrix (-1 / +1)")
         st.dataframe(coded_df.round(4), use_container_width=True)
 
         # Display actual values
-        st.markdown("#### Actual Values Design Matrix")
+        section_header("Actual Values Design Matrix")
         st.dataframe(actual_df.round(4), use_container_width=True)
 
         # Summary metrics
@@ -251,7 +252,7 @@ def _render_design_analysis(df: pd.DataFrame):
     num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
 
     if len(num_cols) < 3:
-        st.warning("Need at least 3 numeric columns (2+ factors and 1 response).")
+        empty_state("Need at least 3 numeric columns (2+ factors and 1 response).")
         return
 
     # Check if a design was generated in Tab 1
@@ -267,7 +268,7 @@ def _render_design_analysis(df: pd.DataFrame):
     )
     remaining = [c for c in num_cols if c not in factor_cols]
     if not remaining:
-        st.warning("Need at least one column for the response variable.")
+        empty_state("Need at least one column for the response variable.")
         return
     response_col = st.selectbox("Response column:", remaining, key="doe_analysis_response")
 
@@ -288,14 +289,15 @@ def _render_design_analysis(df: pd.DataFrame):
         all_terms = main_terms + interaction_terms
         formula = f"Q('{response_col}') ~ " + " + ".join(all_terms)
 
-        try:
-            model = smf.ols(formula, data=data).fit()
-        except Exception as e:
-            st.error(f"Model fitting failed: {e}")
-            return
+        with st.spinner("Analyzing design..."):
+            try:
+                model = smf.ols(formula, data=data).fit()
+            except Exception as e:
+                st.error(f"Model fitting failed: {e}")
+                return
 
         # Model fit metrics
-        st.markdown("#### Model Fit")
+        section_header("Model Fit")
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("R\u00b2", f"{model.rsquared:.4f}")
         c2.metric("Adj R\u00b2", f"{model.rsquared_adj:.4f}")
@@ -303,7 +305,7 @@ def _render_design_analysis(df: pd.DataFrame):
         c4.metric("p (F-test)", f"{model.f_pvalue:.6f}")
 
         # ANOVA table
-        st.markdown("#### ANOVA Table")
+        section_header("ANOVA Table")
         anova_table = sm.stats.anova_lm(model, typ=2)
         anova_table = anova_table.rename(columns={
             "sum_sq": "SS", "df": "df", "F": "F", "PR(>F)": "p-value",
@@ -324,20 +326,20 @@ def _render_design_analysis(df: pd.DataFrame):
             st.dataframe(coef_df, use_container_width=True, hide_index=True)
 
         # Pareto chart of effects
-        st.markdown("#### Pareto Chart of Effects")
+        section_header("Pareto Chart of Effects")
         _plot_pareto_chart(model)
 
         # Main effects plot
-        st.markdown("#### Main Effects Plot")
+        section_header("Main Effects Plot")
         _plot_main_effects(data, factor_cols, response_col)
 
         # Interaction plots
         if len(factor_cols) >= 2:
-            st.markdown("#### Interaction Plots")
+            section_header("Interaction Plots")
             _plot_interactions(data, factor_cols, response_col)
 
         # Half-normal plot
-        st.markdown("#### Half-Normal Plot of Effects")
+        section_header("Half-Normal Plot of Effects")
         _plot_half_normal(model)
 
 
@@ -421,8 +423,8 @@ def _plot_main_effects(data: pd.DataFrame, factor_cols: list, response_col: str)
         fig.add_trace(go.Scatter(
             x=[str(lv) for lv in levels], y=means,
             mode="lines+markers",
-            marker=dict(size=10, color="steelblue"),
-            line=dict(color="steelblue", width=2),
+            marker=dict(size=10),
+            line=dict(width=2),
             showlegend=False,
         ), row=row, col=c)
 
@@ -464,7 +466,7 @@ def _plot_interactions(data: pd.DataFrame, factor_cols: list, response_col: str)
         })
         means = temp.groupby(["A", "B"])["Y"].mean().reset_index()
 
-        for b_label, color in [("Low", "steelblue"), ("High", "#EF553B")]:
+        for b_label, color in [("Low", "#6366f1"), ("High", "#EF553B")]:
             sub = means[means["B"] == b_label]
             if not sub.empty:
                 fig.add_trace(go.Scatter(
@@ -511,7 +513,7 @@ def _plot_half_normal(model):
         text=display_names,
         textposition="top right",
         textfont=dict(size=9),
-        marker=dict(size=8, color="steelblue"),
+        marker=dict(size=8),
         name="Effects",
     ))
 
@@ -551,7 +553,7 @@ def _render_response_surface(df: pd.DataFrame):
     num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
 
     if len(num_cols) < 3:
-        st.warning("Need at least 3 numeric columns (2 factors + 1 response).")
+        empty_state("Need at least 3 numeric columns (2 factors + 1 response).")
         return
 
     c1, c2 = st.columns(2)
@@ -604,7 +606,7 @@ def _render_response_surface(df: pd.DataFrame):
             return
 
         b = model.params
-        st.markdown("#### Quadratic Model Fit")
+        section_header("Quadratic Model Fit")
         c1m, c2m, c3m = st.columns(3)
         c1m.metric("R\u00b2", f"{model.rsquared:.4f}")
         c2m.metric("Adj R\u00b2", f"{model.rsquared_adj:.4f}")
@@ -638,7 +640,7 @@ def _render_response_surface(df: pd.DataFrame):
                   b[5] * x1_grid * x2_grid)
 
         # 3D Surface plot
-        st.markdown("#### 3D Response Surface")
+        section_header("3D Response Surface")
         fig_3d = go.Figure()
         fig_3d.add_trace(go.Surface(
             x=x1_range, y=x2_range, z=z_grid,
@@ -663,7 +665,7 @@ def _render_response_surface(df: pd.DataFrame):
         st.plotly_chart(fig_3d, use_container_width=True)
 
         # 2D Contour plot
-        st.markdown("#### Contour Plot")
+        section_header("Contour Plot")
         fig_contour = go.Figure()
         fig_contour.add_trace(go.Contour(
             x=x1_range, y=x2_range, z=z_grid,
@@ -685,7 +687,7 @@ def _render_response_surface(df: pd.DataFrame):
         st.plotly_chart(fig_contour, use_container_width=True)
 
         # Find optimal factor settings
-        st.markdown("#### Optimal Factor Settings")
+        section_header("Optimal Factor Settings")
         _find_optimum(b, x1_col, x2_col, response_col, x1, x2,
                       optimize_goal, hold_values, other_factors)
 

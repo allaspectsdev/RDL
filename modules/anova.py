@@ -9,6 +9,7 @@ from scipy import stats
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+from modules.ui_helpers import significance_result, help_tip, section_header, empty_state
 
 try:
     import statsmodels.api as sm
@@ -29,7 +30,7 @@ except ImportError:
 def render_anova(df: pd.DataFrame):
     """Render ANOVA interface."""
     if df is None or df.empty:
-        st.warning("No data loaded.")
+        empty_state("No data loaded.", "Upload a dataset from the sidebar to begin.")
         return
 
     tabs = st.tabs([
@@ -65,7 +66,7 @@ def _render_one_way(df: pd.DataFrame):
     cat_cols = _get_cat_cols(df)
 
     if not num_cols or not cat_cols:
-        st.warning("Need numeric and categorical columns.")
+        empty_state("Need numeric and categorical columns.")
         return
 
     dep_var = st.selectbox("Dependent variable (numeric):", num_cols, key="ow_dep")
@@ -111,7 +112,7 @@ def _render_one_way(df: pd.DataFrame):
             "F": [f_stat, np.nan, np.nan],
             "p-value": [p_value, np.nan, np.nan],
         }).round(4)
-        st.markdown("#### ANOVA Table")
+        section_header("ANOVA Table")
         st.dataframe(anova_table, use_container_width=True, hide_index=True)
 
         c1, c2, c3 = st.columns(3)
@@ -119,10 +120,17 @@ def _render_one_way(df: pd.DataFrame):
         c2.metric("η² (eta-squared)", f"{eta_sq:.4f}")
         c3.metric("ω² (omega-squared)", f"{omega_sq:.4f}")
 
-        if p_value < alpha:
-            st.success(f"**Significant** (p = {p_value:.6f} < α = {alpha}). Groups differ.")
-        else:
-            st.info(f"**Not significant** (p = {p_value:.6f} ≥ α = {alpha}).")
+        significance_result(p_value, alpha, "One-Way ANOVA", effect_size=eta_sq, effect_label="η²")
+
+        # Show Levene's warning prominently when violated
+        lev_stat_check, lev_p_check = stats.levene(*groups)
+        if lev_p_check < 0.05:
+            st.warning(f"⚠️ **Variance homogeneity violated** (Levene's p = {lev_p_check:.4f}). Consider Welch's ANOVA or Kruskal-Wallis.")
+
+        help_tip("Effect size interpretation", """
+- **η² (eta-squared):** Proportion of total variance explained. Small = 0.01, Medium = 0.06, Large = 0.14
+- **ω² (omega-squared):** Less biased estimate. Same thresholds apply.
+""")
 
         # Assumption checks
         with st.expander("Assumption Checks"):
@@ -151,7 +159,7 @@ def _render_one_way(df: pd.DataFrame):
 
         # Post-hoc tests
         if p_value < alpha:
-            st.markdown("#### Post-Hoc Tests")
+            section_header("Post-Hoc Tests")
             posthoc_type = st.selectbox("Method:", ["Tukey HSD", "Bonferroni (pairwise t-tests)"], key="ow_posthoc")
 
             if posthoc_type == "Tukey HSD":
@@ -184,8 +192,8 @@ def _render_one_way(df: pd.DataFrame):
             fig.add_trace(go.Scatter(
                 x=means[factor].astype(str), y=means["mean"],
                 error_y=dict(type="data", array=1.96 * means["se"].values),
-                mode="markers+lines", marker=dict(size=10, color="steelblue"),
-                line=dict(color="steelblue"),
+                mode="markers+lines", marker=dict(size=10),
+                line=dict(),
             ))
             fig.update_layout(title="Means Plot (±95% CI)", xaxis_title=factor,
                               yaxis_title=f"Mean {dep_var}", height=400)
@@ -195,14 +203,14 @@ def _render_one_way(df: pd.DataFrame):
 def _render_two_way(df: pd.DataFrame):
     """Two-way ANOVA."""
     if not HAS_SM:
-        st.warning("statsmodels required for two-way ANOVA.")
+        empty_state("statsmodels required for two-way ANOVA.")
         return
 
     num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
     cat_cols = _get_cat_cols(df)
 
     if not num_cols or len(cat_cols) < 2:
-        st.warning("Need numeric column and at least 2 categorical columns.")
+        empty_state("Need numeric column and at least 2 categorical columns.")
         return
 
     dep_var = st.selectbox("Dependent variable:", num_cols, key="tw_dep")
@@ -221,7 +229,7 @@ def _render_two_way(df: pd.DataFrame):
             model = ols(formula, data=data).fit()
             anova_table = anova_lm(model, typ=ss_type)
             anova_table = anova_table.round(4)
-            st.markdown("#### Two-Way ANOVA Table")
+            section_header("Two-Way ANOVA Table")
             st.dataframe(anova_table, use_container_width=True)
 
             # Effect sizes
@@ -243,7 +251,7 @@ def _render_two_way(df: pd.DataFrame):
 def _render_repeated_measures(df: pd.DataFrame):
     """Repeated measures ANOVA."""
     if not HAS_PG:
-        st.warning("pingouin required for repeated measures ANOVA. Install with: pip install pingouin")
+        empty_state("pingouin required for repeated measures ANOVA.", "Install with: pip install pingouin")
         return
 
     num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
@@ -258,7 +266,7 @@ def _render_repeated_measures(df: pd.DataFrame):
         data = df[[subject_col, within_col, dep_var]].dropna()
         try:
             rm_anova = pg.rm_anova(data=data, dv=dep_var, within=within_col, subject=subject_col)
-            st.markdown("#### Repeated Measures ANOVA")
+            section_header("Repeated Measures ANOVA")
             st.dataframe(rm_anova.round(4), use_container_width=True, hide_index=True)
 
             # Check sphericity
@@ -272,7 +280,7 @@ def _render_repeated_measures(df: pd.DataFrame):
 
             # Post-hoc paired comparisons
             if rm_anova['p-unc'].values[0] < 0.05:
-                st.markdown("#### Post-Hoc Paired Comparisons")
+                section_header("Post-Hoc Paired Comparisons")
                 posthoc = pg.pairwise_tests(data=data, dv=dep_var, within=within_col,
                                             subject=subject_col, padjust="bonf")
                 st.dataframe(posthoc.round(4), use_container_width=True, hide_index=True)
@@ -292,7 +300,7 @@ def _render_kruskal_wallis(df: pd.DataFrame):
     cat_cols = _get_cat_cols(df)
 
     if not num_cols or not cat_cols:
-        st.warning("Need numeric and categorical columns.")
+        empty_state("Need numeric and categorical columns.")
         return
 
     dep_var = st.selectbox("Dependent variable:", num_cols, key="kw_dep")
@@ -325,7 +333,7 @@ def _render_kruskal_wallis(df: pd.DataFrame):
 
         # Dunn's post-hoc test
         if p_value < 0.05 and HAS_PG:
-            st.markdown("#### Dunn's Post-Hoc Test")
+            section_header("Dunn's Post-Hoc Test")
             try:
                 dunn = pg.pairwise_tests(data=data, dv=dep_var, between=factor,
                                          parametric=False, padjust="bonf")
@@ -343,7 +351,7 @@ def _render_friedman(df: pd.DataFrame):
     num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
 
     if len(num_cols) < 3:
-        st.warning("Need at least 3 numeric columns for Friedman test.")
+        empty_state("Need at least 3 numeric columns for Friedman test.")
         return
 
     st.markdown("Select columns representing repeated measurements on the same subjects.")
@@ -383,14 +391,14 @@ def _render_friedman(df: pd.DataFrame):
 def _render_ancova(df: pd.DataFrame):
     """Analysis of Covariance."""
     if not HAS_PG:
-        st.warning("pingouin required for ANCOVA.")
+        empty_state("pingouin required for ANCOVA.")
         return
 
     num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
     cat_cols = _get_cat_cols(df)
 
     if not num_cols or not cat_cols:
-        st.warning("Need numeric and categorical columns.")
+        empty_state("Need numeric and categorical columns.")
         return
 
     dep_var = st.selectbox("Dependent variable:", num_cols, key="anc_dep")
@@ -407,18 +415,18 @@ def _render_ancova(df: pd.DataFrame):
 
         try:
             ancova_result = pg.ancova(data=data, dv=dep_var, between=factor, covar=covariates)
-            st.markdown("#### ANCOVA Table")
+            section_header("ANCOVA Table")
             st.dataframe(ancova_result.round(4), use_container_width=True, hide_index=True)
 
             # Homogeneity of regression slopes check
-            st.markdown("#### Homogeneity of Regression Slopes")
+            section_header("Homogeneity of Regression Slopes")
             for cov in covariates:
                 fig = px.scatter(data, x=cov, y=dep_var, color=factor,
                                  trendline="ols", title=f"{dep_var} vs {cov} by {factor}")
                 st.plotly_chart(fig, use_container_width=True)
 
             # Adjusted means
-            st.markdown("#### Group Means")
+            section_header("Group Means")
             means = data.groupby(factor)[dep_var].agg(["mean", "std", "count"]).round(4)
             st.dataframe(means, use_container_width=True)
 

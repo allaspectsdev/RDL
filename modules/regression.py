@@ -9,6 +9,7 @@ from scipy import stats, optimize
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+from modules.ui_helpers import section_header, empty_state, help_tip
 
 try:
     import statsmodels.api as sm
@@ -24,7 +25,7 @@ except ImportError:
 def render_regression(df: pd.DataFrame):
     """Render regression analysis interface."""
     if df is None or df.empty:
-        st.warning("No data loaded.")
+        empty_state("No data loaded.", "Upload a dataset from the sidebar to begin.")
         return
 
     tabs = st.tabs([
@@ -75,7 +76,7 @@ def _render_simple_linear(df: pd.DataFrame):
             X = sm.add_constant(x)
             model = sm.OLS(y, X).fit()
 
-            st.markdown("#### Regression Summary")
+            section_header("Regression Summary")
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("R²", f"{model.rsquared:.4f}")
             c2.metric("Adj R²", f"{model.rsquared_adj:.4f}")
@@ -94,8 +95,9 @@ def _render_simple_linear(df: pd.DataFrame):
             st.dataframe(coef_df, use_container_width=True, hide_index=True)
 
             b0, b1 = model.params
-            st.markdown(f"**Equation:** y = {b0:.4f} + {b1:.4f} · x")
+            st.latex(f"y = {b0:.4f} + {b1:.4f} \\cdot x")
             st.markdown(f"**AIC:** {model.aic:.2f}  |  **BIC:** {model.bic:.2f}  |  **RMSE:** {np.sqrt(model.mse_resid):.4f}")
+            help_tip("AIC vs BIC", "Both measure model fit penalized for complexity. **AIC** favors predictive accuracy; **BIC** penalizes complexity more heavily. Lower is better for both.")
 
             # Plot
             x_line = np.linspace(x.min(), x.max(), 200)
@@ -106,7 +108,7 @@ def _render_simple_linear(df: pd.DataFrame):
 
             fig = go.Figure()
             fig.add_trace(go.Scatter(x=x, y=y, mode="markers", name="Data",
-                                     marker=dict(color="steelblue", size=6, opacity=0.7)))
+                                     marker=dict(size=6, opacity=0.7)))
             fig.add_trace(go.Scatter(x=x_line, y=y_pred, mode="lines", name="Fit",
                                      line=dict(color="red", width=2)))
             if show_ci:
@@ -159,7 +161,7 @@ def _render_multiple_linear(df: pd.DataFrame):
         X = sm.add_constant(data[x_cols].values)
         model = sm.OLS(y, X).fit()
 
-        st.markdown("#### Model Summary")
+        section_header("Model Summary")
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("R²", f"{model.rsquared:.4f}")
         c2.metric("Adj R²", f"{model.rsquared_adj:.4f}")
@@ -181,7 +183,7 @@ def _render_multiple_linear(df: pd.DataFrame):
         st.markdown(f"**AIC:** {model.aic:.2f}  |  **BIC:** {model.bic:.2f}  |  **RMSE:** {np.sqrt(model.mse_resid):.4f}")
 
         # VIF
-        st.markdown("#### Variance Inflation Factors")
+        section_header("Variance Inflation Factors")
         X_no_const = data[x_cols].values
         if X_no_const.shape[1] > 1:
             vif_data = []
@@ -196,6 +198,7 @@ def _render_multiple_linear(df: pd.DataFrame):
             high_vif = vif_df[vif_df["VIF"] > 10]
             if not high_vif.empty:
                 st.warning(f"High multicollinearity detected (VIF > 10): {', '.join(high_vif['Variable'].tolist())}")
+        help_tip("VIF interpretation", "VIF > 5 suggests moderate multicollinearity. VIF > 10 indicates severe multicollinearity — consider removing or combining correlated predictors.")
 
         # Coefficient plot
         fig = go.Figure()
@@ -204,7 +207,7 @@ def _render_multiple_linear(df: pd.DataFrame):
         ci_lower = ci[1:, 0]
         ci_upper = ci[1:, 1]
         fig.add_trace(go.Scatter(x=coefs, y=x_cols, mode="markers",
-                                 marker=dict(size=10, color="steelblue"),
+                                 marker=dict(size=10),
                                  error_x=dict(type="data",
                                               symmetric=False,
                                               array=ci_upper - coefs,
@@ -261,23 +264,23 @@ def _render_polynomial(df: pd.DataFrame):
         c2.metric("Adjusted R²", f"{adj_r2:.4f}")
         c3.metric("RMSE", f"{rmse:.4f}")
 
-        # Equation
-        terms = []
+        # Build LaTeX equation
+        latex_terms = []
         for i, c in enumerate(coeffs):
             power = degree - i
             if power == 0:
-                terms.append(f"{c:.4f}")
+                latex_terms.append(f"{c:.4f}")
             elif power == 1:
-                terms.append(f"{c:.4f}x")
+                latex_terms.append(f"{c:.4f}x")
             else:
-                terms.append(f"{c:.4f}x^{power}")
-        st.markdown(f"**Equation:** y = {' + '.join(terms)}")
+                latex_terms.append(f"{c:.4f}x^{{{power}}}")
+        st.latex("y = " + " + ".join(latex_terms))
 
         # Plot
         x_line = np.linspace(x.min(), x.max(), 300)
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=x, y=y, mode="markers", name="Data",
-                                 marker=dict(color="steelblue", size=6, opacity=0.7)))
+                                 marker=dict(size=6, opacity=0.7)))
         fig.add_trace(go.Scatter(x=x_line, y=poly_func(x_line), mode="lines",
                                  name=f"Degree {degree}", line=dict(color="red", width=2)))
         fig.update_layout(title=f"Polynomial Regression (degree={degree})",
@@ -356,7 +359,7 @@ def _render_logistic(df: pd.DataFrame):
             X_sm_test = sm.add_constant(X_test)
             try:
                 logit_model = sm.Logit(y_train, X_sm_train).fit(disp=0)
-                st.markdown("#### Model Summary")
+                section_header("Model Summary")
 
                 coef_names = ["Intercept"] + features
                 coef_df = pd.DataFrame({
@@ -405,7 +408,7 @@ def _render_logistic(df: pd.DataFrame):
         roc_auc = auc(fpr, tpr)
         fig_roc = go.Figure()
         fig_roc.add_trace(go.Scatter(x=fpr, y=tpr, name=f"ROC (AUC={roc_auc:.4f})",
-                                     line=dict(color="steelblue", width=2)))
+                                     line=dict(color="#6366f1", width=2)))
         fig_roc.add_trace(go.Scatter(x=[0, 1], y=[0, 1], name="Random",
                                      line=dict(color="gray", dash="dash")))
         fig_roc.update_layout(title="ROC Curve (Test Set)", xaxis_title="False Positive Rate",
@@ -501,7 +504,7 @@ def _render_curve_fitting(df: pd.DataFrame):
             x_line = np.linspace(x.min(), x.max(), 300)
             fig = go.Figure()
             fig.add_trace(go.Scatter(x=x, y=y, mode="markers", name="Data",
-                                     marker=dict(color="steelblue", size=6, opacity=0.7)))
+                                     marker=dict(color="#6366f1", size=6, opacity=0.7)))
             fig.add_trace(go.Scatter(x=x_line, y=func(x_line, *popt), mode="lines",
                                      name="Fit", line=dict(color="red", width=2)))
             fig.update_layout(title=f"Curve Fit: {model_type.split('(')[0].strip()}",
@@ -512,7 +515,7 @@ def _render_curve_fitting(df: pd.DataFrame):
             residuals = y - y_pred
             fig_res = go.Figure()
             fig_res.add_trace(go.Scatter(x=y_pred, y=residuals, mode="markers",
-                                          marker=dict(color="steelblue", size=5)))
+                                          marker=dict(color="#6366f1", size=5)))
             fig_res.add_hline(y=0, line_dash="dash", line_color="red")
             fig_res.update_layout(title="Residuals vs Fitted", xaxis_title="Fitted",
                                   yaxis_title="Residuals", height=350)
@@ -547,7 +550,7 @@ def _render_diagnostics(df: pd.DataFrame):
         X = sm.add_constant(data[x_cols].values)
         model = sm.OLS(y, X).fit()
 
-        st.markdown("#### Diagnostic Tests")
+        section_header("Diagnostic Tests")
         results = []
 
         # Durbin-Watson
@@ -585,7 +588,7 @@ def _render_diagnostics(df: pd.DataFrame):
         st.dataframe(results_df, use_container_width=True, hide_index=True)
 
         # Influence measures
-        st.markdown("#### Influence Measures")
+        section_header("Influence Measures")
         influence = model.get_influence()
         cooks_d = influence.cooks_distance[0]
         leverage = influence.hat_matrix_diag
@@ -598,9 +601,9 @@ def _render_diagnostics(df: pd.DataFrame):
         c2.metric("Influential Points (Cook's D > 4/n)", int(np.sum(cooks_d > 4 / n)))
 
         fig = make_subplots(rows=1, cols=2, subplot_titles=("Cook's Distance", "Leverage"))
-        fig.add_trace(go.Bar(y=cooks_d, name="Cook's D", marker_color="steelblue"), row=1, col=1)
+        fig.add_trace(go.Bar(y=cooks_d, name="Cook's D", marker_color="#6366f1"), row=1, col=1)
         fig.add_hline(y=4 / n, line_dash="dash", line_color="red", row=1, col=1)
-        fig.add_trace(go.Bar(y=leverage, name="Leverage", marker_color="steelblue"), row=1, col=2)
+        fig.add_trace(go.Bar(y=leverage, name="Leverage", marker_color="#6366f1"), row=1, col=2)
         fig.add_hline(y=2 * k / n, line_dash="dash", line_color="red", row=1, col=2)
         fig.update_layout(height=400)
         st.plotly_chart(fig, use_container_width=True)
@@ -620,7 +623,7 @@ def _plot_residuals(model, x_label, y_label):
 
     # Residuals vs Fitted
     fig.add_trace(go.Scatter(x=fitted, y=resid, mode="markers",
-                             marker=dict(color="steelblue", size=4),
+                             marker=dict(color="#6366f1", size=4),
                              showlegend=False), row=1, col=1)
     fig.add_hline(y=0, line_dash="dash", line_color="red", row=1, col=1)
 
@@ -629,7 +632,7 @@ def _plot_residuals(model, x_label, y_label):
     n = len(sorted_resid)
     theoretical = stats.norm.ppf((np.arange(1, n + 1) - 0.5) / n)
     fig.add_trace(go.Scatter(x=theoretical, y=sorted_resid, mode="markers",
-                             marker=dict(color="steelblue", size=4),
+                             marker=dict(color="#6366f1", size=4),
                              showlegend=False), row=1, col=2)
     fig.add_trace(go.Scatter(x=[-3, 3], y=[-3, 3], mode="lines",
                              line=dict(color="red", dash="dash"),
@@ -637,13 +640,13 @@ def _plot_residuals(model, x_label, y_label):
 
     # Scale-Location
     fig.add_trace(go.Scatter(x=fitted, y=np.sqrt(np.abs(std_resid)), mode="markers",
-                             marker=dict(color="steelblue", size=4),
+                             marker=dict(color="#6366f1", size=4),
                              showlegend=False), row=2, col=1)
 
     # Residuals vs Order
     fig.add_trace(go.Scatter(y=resid, mode="lines+markers",
-                             marker=dict(color="steelblue", size=3),
-                             line=dict(color="steelblue", width=1),
+                             marker=dict(color="#6366f1", size=3),
+                             line=dict(color="#6366f1", width=1),
                              showlegend=False), row=2, col=2)
     fig.add_hline(y=0, line_dash="dash", line_color="red", row=2, col=2)
 
@@ -719,9 +722,10 @@ def _render_glm(df: pd.DataFrame):
         family = family_map[family_name]
 
         try:
-            model = StatsGLM(y, X, family=family).fit()
+            with st.spinner("Fitting GLM..."):
+                model = StatsGLM(y, X, family=family).fit()
 
-            st.markdown("#### GLM Summary")
+            section_header("GLM Summary")
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("AIC", f"{model.aic:.2f}")
             c2.metric("BIC", f"{model.bic_deviance:.2f}")
@@ -747,7 +751,7 @@ def _render_glm(df: pd.DataFrame):
             # Deviance table
             null_dev = model.null_deviance
             resid_dev = model.deviance
-            st.markdown("#### Deviance Table")
+            section_header("Deviance Table")
             dev_df = pd.DataFrame({
                 "Source": ["Null", "Residual", "Model"],
                 "Deviance": [null_dev, resid_dev, null_dev - resid_dev],
@@ -761,14 +765,14 @@ def _render_glm(df: pd.DataFrame):
             fig = make_subplots(rows=1, cols=2,
                                 subplot_titles=("Deviance Residuals vs Fitted", "QQ Plot of Deviance Residuals"))
             fig.add_trace(go.Scatter(x=fitted, y=resid, mode="markers",
-                                     marker=dict(color="steelblue", size=4), showlegend=False),
+                                     marker=dict(color="#6366f1", size=4), showlegend=False),
                           row=1, col=1)
             fig.add_hline(y=0, line_dash="dash", line_color="red", row=1, col=1)
             sorted_resid = np.sort(resid)
             n = len(sorted_resid)
             theoretical = stats.norm.ppf((np.arange(1, n + 1) - 0.5) / n)
             fig.add_trace(go.Scatter(x=theoretical, y=sorted_resid, mode="markers",
-                                     marker=dict(color="steelblue", size=4), showlegend=False),
+                                     marker=dict(color="#6366f1", size=4), showlegend=False),
                           row=1, col=2)
             fig.add_trace(go.Scatter(x=[-3, 3], y=[-3, 3], mode="lines",
                                      line=dict(color="red", dash="dash"), showlegend=False),
@@ -820,9 +824,10 @@ def _render_robust_quantile(df: pd.DataFrame):
             }
 
             try:
-                model = RLM(y, X, M=norm_map[m_estimator]).fit()
+                with st.spinner("Fitting robust model..."):
+                    model = RLM(y, X, M=norm_map[m_estimator]).fit()
 
-                st.markdown("#### Robust Regression Summary")
+                section_header("Robust Regression Summary")
                 coef_names = ["Intercept"] + x_cols
                 coef_df = pd.DataFrame({
                     "Variable": coef_names,
@@ -841,14 +846,14 @@ def _render_robust_quantile(df: pd.DataFrame):
                     "Robust Coef": model.params.round(6),
                     "Difference": (model.params - ols_model.params).round(6),
                 })
-                st.markdown("#### OLS vs Robust Comparison")
+                section_header("OLS vs Robust Comparison")
                 st.dataframe(comp_df, use_container_width=True, hide_index=True)
 
                 # Weights plot
                 weights = model.weights
                 fig = go.Figure()
                 fig.add_trace(go.Scatter(y=weights, mode="markers",
-                                         marker=dict(color="steelblue", size=4), name="Weights"))
+                                         marker=dict(color="#6366f1", size=4), name="Weights"))
                 fig.add_hline(y=1, line_dash="dash", line_color="red")
                 fig.update_layout(title="Robustness Weights (low = downweighted outlier)",
                                   xaxis_title="Observation", yaxis_title="Weight", height=350)
@@ -890,7 +895,7 @@ def _render_robust_quantile(df: pd.DataFrame):
                     pass
 
             if all_results:
-                st.markdown("#### Quantile Regression Coefficients")
+                section_header("Quantile Regression Coefficients")
                 st.dataframe(pd.DataFrame(all_results), use_container_width=True, hide_index=True)
 
                 # Plot quantile regression lines (if 1 predictor)
@@ -948,7 +953,7 @@ def _render_robust_quantile(df: pd.DataFrame):
                 if len(x_cols) == 1:
                     fig = go.Figure()
                     fig.add_trace(go.Scatter(x=X[inlier_mask, 0], y=y[inlier_mask], mode="markers",
-                                             name="Inliers", marker=dict(color="steelblue", size=5)))
+                                             name="Inliers", marker=dict(color="#6366f1", size=5)))
                     fig.add_trace(go.Scatter(x=X[~inlier_mask, 0], y=y[~inlier_mask], mode="markers",
                                              name="Outliers", marker=dict(color="red", size=7, symbol="x")))
                     x_line = np.linspace(X[:, 0].min(), X[:, 0].max(), 200).reshape(-1, 1)
@@ -1002,13 +1007,14 @@ def _render_mixed_models(df: pd.DataFrame):
         groups = data[group_col]
 
         try:
-            if random_slope_col:
-                exog_re = data[[random_slope_col]]
-                model = MixedLM(y, X, groups=groups, exog_re=exog_re).fit(reml=True)
-            else:
-                model = MixedLM(y, X, groups=groups).fit(reml=True)
+            with st.spinner("Fitting mixed model..."):
+                if random_slope_col:
+                    exog_re = data[[random_slope_col]]
+                    model = MixedLM(y, X, groups=groups, exog_re=exog_re).fit(reml=True)
+                else:
+                    model = MixedLM(y, X, groups=groups).fit(reml=True)
 
-            st.markdown("#### Mixed Model Summary")
+            section_header("Mixed Model Summary")
 
             # Fixed effects
             st.markdown("**Fixed Effects:**")
@@ -1084,7 +1090,7 @@ def _render_mixed_models(df: pd.DataFrame):
                 group_names = [row["Group"] for row in re_rows]
                 group_var = list(re_rows[0].keys())[1] if len(re_rows[0]) > 1 else "Intercept"
                 values = [row.get(group_var, 0) for row in re_rows]
-                fig.add_trace(go.Bar(x=group_names, y=values, marker_color="steelblue"))
+                fig.add_trace(go.Bar(x=group_names, y=values, marker_color="#6366f1"))
                 fig.update_layout(title=f"Random {group_var} by Group",
                                   xaxis_title=group_col, yaxis_title=f"Random {group_var}", height=350)
                 st.plotly_chart(fig, use_container_width=True)

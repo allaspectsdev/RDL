@@ -9,12 +9,13 @@ from scipy import stats
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+from modules.ui_helpers import section_header, empty_state
 
 
 def render_descriptive_stats(df: pd.DataFrame):
     """Render descriptive statistics interface."""
     if df is None or df.empty:
-        st.warning("No data loaded.")
+        empty_state("No data loaded.", "Upload a dataset from the sidebar to begin.")
         return
 
     tabs = st.tabs([
@@ -38,7 +39,7 @@ def _render_summary_stats(df: pd.DataFrame):
     """Comprehensive summary statistics table."""
     num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
     if not num_cols:
-        st.warning("No numeric columns found.")
+        empty_state("No numeric columns found.")
         return
 
     selected = st.multiselect("Select columns:", num_cols, default=num_cols[:5], key="summ_cols")
@@ -82,12 +83,28 @@ def _render_summary_stats(df: pd.DataFrame):
         })
 
     stats_df = pd.DataFrame(records)
-    # Format numeric columns
     float_cols = stats_df.select_dtypes(include=[np.number]).columns
     stats_df[float_cols] = stats_df[float_cols].round(4)
-    st.dataframe(stats_df, use_container_width=True, hide_index=True)
 
-    with st.expander("Percentiles"):
+    # Sub-tabs for organized display
+    sub_tabs = st.tabs(["Overview", "Spread & Shape", "Percentiles & CI", "Full Table"])
+
+    with sub_tabs[0]:
+        overview_cols = ["Column", "Count", "Missing", "Unique", "Mean", "Median", "Std Dev", "Min", "Max"]
+        st.dataframe(stats_df[[c for c in overview_cols if c in stats_df.columns]],
+                     use_container_width=True, hide_index=True)
+
+    with sub_tabs[1]:
+        spread_cols = ["Column", "Variance", "SEM", "Range", "IQR", "CV (%)", "Skewness", "Kurtosis"]
+        st.dataframe(stats_df[[c for c in spread_cols if c in stats_df.columns]],
+                     use_container_width=True, hide_index=True)
+
+    with sub_tabs[2]:
+        ci_cols = [c for c in stats_df.columns if c.startswith("CI") or c in ["Column", "Q1", "Q3"]]
+        st.dataframe(stats_df[ci_cols], use_container_width=True, hide_index=True)
+
+        # Percentiles table
+        section_header("Percentiles")
         percentiles = [1, 5, 10, 25, 50, 75, 90, 95, 99]
         pct_records = []
         for col_name in selected:
@@ -98,12 +115,15 @@ def _render_summary_stats(df: pd.DataFrame):
             pct_records.append(row)
         st.dataframe(pd.DataFrame(pct_records), use_container_width=True, hide_index=True)
 
+    with sub_tabs[3]:
+        st.dataframe(stats_df, use_container_width=True, hide_index=True)
+
 
 def _render_distribution(df: pd.DataFrame):
     """Distribution analysis with plots and normality tests."""
     num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
     if not num_cols:
-        st.warning("No numeric columns found.")
+        empty_state("No numeric columns found.")
         return
 
     col_name = st.selectbox("Select column:", num_cols, key="dist_col")
@@ -128,7 +148,7 @@ def _render_distribution(df: pd.DataFrame):
     hist_vals, bin_edges = np.histogram(col_data, bins=n_bins)
     bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
     fig.add_trace(go.Bar(x=bin_centers, y=hist_vals, name="Histogram",
-                         marker_color="steelblue", opacity=0.7), row=1, col=1)
+                         opacity=0.7), row=1, col=1)
 
     if show_kde:
         kde_x = np.linspace(col_data.min(), col_data.max(), 200)
@@ -147,7 +167,7 @@ def _render_distribution(df: pd.DataFrame):
                                  line=dict(color="green", width=2, dash="dash")), row=1, col=1)
 
     # Box plot
-    fig.add_trace(go.Box(y=col_data, name=col_name, marker_color="steelblue",
+    fig.add_trace(go.Box(y=col_data, name=col_name,
                          boxpoints="outliers"), row=1, col=2)
 
     # QQ plot
@@ -155,7 +175,7 @@ def _render_distribution(df: pd.DataFrame):
     n = len(sorted_data)
     theoretical_q = stats.norm.ppf((np.arange(1, n + 1) - 0.5) / n)
     fig.add_trace(go.Scatter(x=theoretical_q, y=sorted_data, mode="markers",
-                             name="QQ Points", marker=dict(color="steelblue", size=4)),
+                             name="QQ Points", marker=dict(size=4)),
                   row=2, col=1)
     # Reference line
     slope, intercept = np.polyfit(theoretical_q, sorted_data, 1)
@@ -168,7 +188,7 @@ def _render_distribution(df: pd.DataFrame):
     ecdf_x = np.sort(col_data)
     ecdf_y = np.arange(1, len(ecdf_x) + 1) / len(ecdf_x)
     fig.add_trace(go.Scatter(x=ecdf_x, y=ecdf_y, mode="lines",
-                             name="ECDF", line=dict(color="steelblue", width=2)),
+                             name="ECDF", line=dict(width=2)),
                   row=2, col=2)
     # Theoretical normal CDF
     ecdf_norm_y = stats.norm.cdf(ecdf_x, col_data.mean(), col_data.std())
@@ -193,7 +213,7 @@ def _render_distribution(df: pd.DataFrame):
         st.plotly_chart(fig_violin, use_container_width=True)
 
     # Normality tests
-    st.markdown("#### Normality Tests")
+    section_header("Normality Tests")
     test_results = []
 
     # Shapiro-Wilk (max 5000 samples)
@@ -262,7 +282,7 @@ def _render_frequency(df: pd.DataFrame):
             cat_cols.append(col)
 
     if not cat_cols:
-        st.warning("No categorical columns (or numeric with ≤20 unique values) found.")
+        empty_state("No categorical columns (or numeric with ≤20 unique values) found.")
         return
 
     col_name = st.selectbox("Select column:", cat_cols, key="freq_col")
@@ -293,7 +313,7 @@ def _render_frequency(df: pd.DataFrame):
     elif chart_type == "Pareto":
         fig = make_subplots(specs=[[{"secondary_y": True}]])
         fig.add_trace(go.Bar(x=freq.index.astype(str), y=freq.values,
-                             name="Count", marker_color="steelblue"), secondary_y=False)
+                             name="Count"), secondary_y=False)
         cum_pct = freq.cumsum() / freq.sum() * 100
         fig.add_trace(go.Scatter(x=freq.index.astype(str), y=cum_pct.values,
                                  name="Cumulative %", line=dict(color="red", width=2),
@@ -316,7 +336,7 @@ def _render_grouped_stats(df: pd.DataFrame):
     num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
 
     if not cat_cols or not num_cols:
-        st.warning("Need both categorical and numeric columns for grouped statistics.")
+        empty_state("Need both categorical and numeric columns for grouped statistics.")
         return
 
     group_col = st.selectbox("Group by:", cat_cols, key="group_col")
@@ -349,7 +369,7 @@ def _render_outliers(df: pd.DataFrame):
     """Outlier detection methods."""
     num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
     if not num_cols:
-        st.warning("No numeric columns found.")
+        empty_state("No numeric columns found.")
         return
 
     col_name = st.selectbox("Select column:", num_cols, key="outlier_col")
@@ -396,7 +416,7 @@ def _render_outliers(df: pd.DataFrame):
     fig = go.Figure()
     fig.add_trace(go.Box(y=col_data, name=col_name, boxpoints="all",
                          jitter=0.3, pointpos=-1.5,
-                         marker=dict(color="steelblue", size=4)))
+                         marker=dict(size=4)))
     if len(outliers) > 0:
         fig.add_trace(go.Scatter(y=outliers, x=[col_name] * len(outliers),
                                  mode="markers", name="Outliers",
