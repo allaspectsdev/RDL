@@ -1,0 +1,17 @@
+__pycache__
+*.pyc
+*.pyo
+.git
+.gitignore
+.DS_Store
+*.md
+.env
+.venv
+venv
+node_modules
+scripts/
+nginx/
+docker-compose.yml
+.dockerignore
+Dockerfile
+RESEARCH.md
