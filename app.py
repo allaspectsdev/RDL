@@ -7,6 +7,7 @@ Run with: streamlit run app.py
 """
 
 import streamlit as st
+import streamlit.components.v1 as _components
 import pandas as pd
 import numpy as np
 import html as _html
@@ -215,6 +216,9 @@ st.markdown("""<style>
     gap: 0.75rem;
     padding: 0 0.5rem;
     margin-bottom: 0.25rem;
+    cursor: pointer;
+    border-radius: 8px;
+    transition: background 0.2s;
 }
 .rdl-brand-mark {
     display: flex;
@@ -977,6 +981,28 @@ def main():
                 </div>
             </div>
         """, unsafe_allow_html=True)
+        _components.html("""
+        <script>
+        (function() {
+            const doc = window.parent.document;
+            const brand = doc.querySelector('.rdl-brand');
+            if (brand && !brand.dataset.homeWired) {
+                brand.dataset.homeWired = '1';
+                brand.addEventListener('click', function() {
+                    const labels = doc.querySelectorAll(
+                        '[data-testid="stSidebar"] [role="radiogroup"] label'
+                    );
+                    for (const lbl of labels) {
+                        if (lbl.textContent.trim() === 'Home') {
+                            lbl.click();
+                            break;
+                        }
+                    }
+                });
+            }
+        })();
+        </script>
+        """, height=0)
         st.divider()
 
         st.subheader("Data Source")
@@ -1024,6 +1050,7 @@ def main():
         module = st.radio(
             "Select module:",
             [
+                "Home",
                 "Data Manager",
                 "Descriptive Statistics",
                 "Visualization Builder",
@@ -1037,10 +1064,12 @@ def main():
                 "Quality & SPC",
                 "Design of Experiments",
             ],
+            key="module_radio",
             label_visibility="collapsed",
         )
 
         _MODULE_DESCRIPTIONS = {
+            "Home": "Overview of Ryan's Data Lab and available modules.",
             "Data Manager": "Upload, clean, transform, filter, encode, and export datasets.",
             "Descriptive Statistics": "Summary statistics, distributions, normality tests, outlier detection.",
             "Visualization Builder": "22+ interactive chart types with full customization.",
@@ -1094,7 +1123,7 @@ def main():
             """, unsafe_allow_html=True)
 
     # Main content
-    if "df" not in st.session_state or st.session_state["df"] is None:
+    if module == "Home" or "df" not in st.session_state or st.session_state["df"] is None:
         st.markdown("""
             <div class="rdl-hero">
                 <h1>Ryan's <span class="rdl-accent-text">Data Lab</span></h1>
@@ -1213,6 +1242,12 @@ def main():
                 </span>
             </div>
         """, unsafe_allow_html=True)
+
+        # Show active dataset summary on Home if data is loaded
+        if "df" in st.session_state and st.session_state["df"] is not None:
+            df_home = st.session_state["df"]
+            data_name_home = st.session_state.get("data_name", "Unknown")
+            st.info(f"**{data_name_home}** is loaded ({df_home.shape[0]:,} rows, {df_home.shape[1]} columns). Select a module from the sidebar to analyze.")
         return
 
     df = st.session_state["df"]
