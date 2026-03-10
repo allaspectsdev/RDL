@@ -30,6 +30,7 @@ def render_regression(df: pd.DataFrame):
     tabs = st.tabs([
         "Simple Linear", "Multiple Linear", "Polynomial",
         "Logistic", "Curve Fitting", "Diagnostics",
+        "GLM", "Robust & Quantile", "Mixed Models",
     ])
 
     with tabs[0]:
@@ -44,6 +45,12 @@ def render_regression(df: pd.DataFrame):
         _render_curve_fitting(df)
     with tabs[5]:
         _render_diagnostics(df)
+    with tabs[6]:
+        _render_glm(df)
+    with tabs[7]:
+        _render_robust_quantile(df)
+    with tabs[8]:
+        _render_mixed_models(df)
 
 
 def _render_simple_linear(df: pd.DataFrame):
@@ -650,3 +657,437 @@ def _plot_residuals(model, x_label, y_label):
     fig.update_xaxes(title_text="Observation Order", row=2, col=2)
     fig.update_yaxes(title_text="Residuals", row=2, col=2)
     st.plotly_chart(fig, use_container_width=True)
+
+
+def _render_glm(df: pd.DataFrame):
+    """Generalized Linear Models."""
+    if not HAS_SM:
+        st.warning("statsmodels required for GLM.")
+        return
+
+    num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    if len(num_cols) < 2:
+        st.warning("Need at least 2 numeric columns.")
+        return
+
+    y_col = st.selectbox("Response (Y):", num_cols, key="glm_y")
+    x_cols = st.multiselect("Predictors (X):", [c for c in num_cols if c != y_col], key="glm_x")
+
+    if not x_cols:
+        st.info("Select predictor variables.")
+        return
+
+    family_name = st.selectbox("Family:", [
+        "Gaussian", "Poisson", "Negative Binomial", "Gamma", "Binomial",
+    ], key="glm_family")
+
+    link_options = {
+        "Gaussian": ["identity", "log"],
+        "Poisson": ["log", "identity"],
+        "Negative Binomial": ["log", "identity"],
+        "Gamma": ["inverse", "log", "identity"],
+        "Binomial": ["logit", "probit", "cloglog"],
+    }
+    link_name = st.selectbox("Link function:", link_options[family_name], key="glm_link")
+
+    if st.button("Fit GLM", key="fit_glm"):
+        from statsmodels.genmod.generalized_linear_model import GLM as StatsGLM
+        import statsmodels.genmod.families as fam
+        import statsmodels.genmod.families.links as lnk
+
+        data = df[[y_col] + x_cols].dropna()
+        y = data[y_col].values
+        X = sm.add_constant(data[x_cols].values)
+
+        link_map = {
+            "identity": lnk.Identity(),
+            "log": lnk.Log(),
+            "inverse": lnk.InversePower(),
+            "logit": lnk.Logit(),
+            "probit": lnk.Probit(),
+            "cloglog": lnk.CLogLog(),
+        }
+        link = link_map[link_name]
+
+        family_map = {
+            "Gaussian": fam.Gaussian(link=link),
+            "Poisson": fam.Poisson(link=link),
+            "Negative Binomial": fam.NegativeBinomial(link=link),
+            "Gamma": fam.Gamma(link=link),
+            "Binomial": fam.Binomial(link=link),
+        }
+        family = family_map[family_name]
+
+        try:
+            model = StatsGLM(y, X, family=family).fit()
+
+            st.markdown("#### GLM Summary")
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("AIC", f"{model.aic:.2f}")
+            c2.metric("BIC", f"{model.bic_deviance:.2f}")
+            c3.metric("Deviance", f"{model.deviance:.4f}")
+            c4.metric("Pearson χ²", f"{model.pearson_chi2:.4f}")
+
+            coef_names = ["Intercept"] + x_cols
+            coef_df = pd.DataFrame({
+                "Variable": coef_names,
+                "Coefficient": model.params,
+                "Std Error": model.bse,
+                "z-value": model.tvalues,
+                "p-value": model.pvalues,
+                "CI Lower": model.conf_int()[:, 0],
+                "CI Upper": model.conf_int()[:, 1],
+            }).round(6)
+
+            if family_name in ("Poisson", "Negative Binomial", "Gamma"):
+                coef_df["exp(Coef)"] = np.exp(model.params).round(6)
+
+            st.dataframe(coef_df, use_container_width=True, hide_index=True)
+
+            # Deviance table
+            null_dev = model.null_deviance
+            resid_dev = model.deviance
+            st.markdown("#### Deviance Table")
+            dev_df = pd.DataFrame({
+                "Source": ["Null", "Residual", "Model"],
+                "Deviance": [null_dev, resid_dev, null_dev - resid_dev],
+                "df": [model.df_model + model.df_resid, model.df_resid, model.df_model],
+            }).round(4)
+            st.dataframe(dev_df, use_container_width=True, hide_index=True)
+
+            # Deviance residual plot
+            resid = model.resid_deviance
+            fitted = model.fittedvalues
+            fig = make_subplots(rows=1, cols=2,
+                                subplot_titles=("Deviance Residuals vs Fitted", "QQ Plot of Deviance Residuals"))
+            fig.add_trace(go.Scatter(x=fitted, y=resid, mode="markers",
+                                     marker=dict(color="steelblue", size=4), showlegend=False),
+                          row=1, col=1)
+            fig.add_hline(y=0, line_dash="dash", line_color="red", row=1, col=1)
+            sorted_resid = np.sort(resid)
+            n = len(sorted_resid)
+            theoretical = stats.norm.ppf((np.arange(1, n + 1) - 0.5) / n)
+            fig.add_trace(go.Scatter(x=theoretical, y=sorted_resid, mode="markers",
+                                     marker=dict(color="steelblue", size=4), showlegend=False),
+                          row=1, col=2)
+            fig.add_trace(go.Scatter(x=[-3, 3], y=[-3, 3], mode="lines",
+                                     line=dict(color="red", dash="dash"), showlegend=False),
+                          row=1, col=2)
+            fig.update_layout(height=400)
+            st.plotly_chart(fig, use_container_width=True)
+
+        except Exception as e:
+            st.error(f"GLM fitting failed: {e}")
+
+
+def _render_robust_quantile(df: pd.DataFrame):
+    """Robust and quantile regression."""
+    if not HAS_SM:
+        st.warning("statsmodels required.")
+        return
+
+    num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    if len(num_cols) < 2:
+        st.warning("Need at least 2 numeric columns.")
+        return
+
+    reg_type = st.selectbox("Method:", [
+        "Robust Regression (RLM)", "Quantile Regression", "RANSAC",
+    ], key="rq_type")
+
+    y_col = st.selectbox("Y (response):", num_cols, key="rq_y")
+    x_cols = st.multiselect("X (predictors):", [c for c in num_cols if c != y_col], key="rq_x")
+
+    if not x_cols:
+        st.info("Select predictor variables.")
+        return
+
+    if reg_type == "Robust Regression (RLM)":
+        m_estimator = st.selectbox("M-estimator:", ["Huber", "Tukey Bisquare", "Andrew's Wave"], key="rq_mest")
+
+        if st.button("Fit Robust Model", key="fit_rlm"):
+            from statsmodels.robust import RLM
+            import statsmodels.robust.norms as norms
+
+            data = df[[y_col] + x_cols].dropna()
+            y = data[y_col].values
+            X = sm.add_constant(data[x_cols].values)
+
+            norm_map = {
+                "Huber": norms.HuberT(),
+                "Tukey Bisquare": norms.TukeyBiweight(),
+                "Andrew's Wave": norms.AndrewWave(),
+            }
+
+            try:
+                model = RLM(y, X, M=norm_map[m_estimator]).fit()
+
+                st.markdown("#### Robust Regression Summary")
+                coef_names = ["Intercept"] + x_cols
+                coef_df = pd.DataFrame({
+                    "Variable": coef_names,
+                    "Coefficient": model.params,
+                    "Std Error": model.bse,
+                    "z-value": model.tvalues,
+                    "p-value": model.pvalues,
+                }).round(6)
+                st.dataframe(coef_df, use_container_width=True, hide_index=True)
+
+                # Compare with OLS
+                ols_model = sm.OLS(y, X).fit()
+                comp_df = pd.DataFrame({
+                    "Variable": coef_names,
+                    "OLS Coef": ols_model.params.round(6),
+                    "Robust Coef": model.params.round(6),
+                    "Difference": (model.params - ols_model.params).round(6),
+                })
+                st.markdown("#### OLS vs Robust Comparison")
+                st.dataframe(comp_df, use_container_width=True, hide_index=True)
+
+                # Weights plot
+                weights = model.weights
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(y=weights, mode="markers",
+                                         marker=dict(color="steelblue", size=4), name="Weights"))
+                fig.add_hline(y=1, line_dash="dash", line_color="red")
+                fig.update_layout(title="Robustness Weights (low = downweighted outlier)",
+                                  xaxis_title="Observation", yaxis_title="Weight", height=350)
+                st.plotly_chart(fig, use_container_width=True)
+
+                n_downweighted = (weights < 0.9).sum()
+                st.write(f"**{n_downweighted}** observations downweighted (weight < 0.9)")
+
+            except Exception as e:
+                st.error(f"Robust regression failed: {e}")
+
+    elif reg_type == "Quantile Regression":
+        quantiles_input = st.text_input("Quantiles (comma-separated):", "0.25, 0.50, 0.75", key="rq_quantiles")
+
+        if st.button("Fit Quantile Models", key="fit_quantreg"):
+            from statsmodels.regression.quantile_regression import QuantReg
+
+            data = df[[y_col] + x_cols].dropna()
+            y = data[y_col].values
+            X = sm.add_constant(data[x_cols].values)
+            coef_names = ["Intercept"] + x_cols
+
+            try:
+                quantiles = [float(q.strip()) for q in quantiles_input.split(",")]
+            except ValueError:
+                st.error("Invalid quantile format.")
+                return
+
+            all_results = []
+            for q in quantiles:
+                try:
+                    model = QuantReg(y, X).fit(q=q)
+                    row = {"Quantile": q}
+                    for i, name in enumerate(coef_names):
+                        row[f"{name}"] = round(model.params[i], 6)
+                    row["Pseudo R²"] = round(model.prsquared, 4)
+                    all_results.append(row)
+                except Exception:
+                    pass
+
+            if all_results:
+                st.markdown("#### Quantile Regression Coefficients")
+                st.dataframe(pd.DataFrame(all_results), use_container_width=True, hide_index=True)
+
+                # Plot quantile regression lines (if 1 predictor)
+                if len(x_cols) == 1:
+                    x_data = data[x_cols[0]].values
+                    x_line = np.linspace(x_data.min(), x_data.max(), 200)
+                    X_line = sm.add_constant(x_line)
+
+                    fig = go.Figure()
+                    fig.add_trace(go.Scatter(x=x_data, y=y, mode="markers", name="Data",
+                                             marker=dict(color="gray", size=4, opacity=0.5)))
+                    colors = px.colors.qualitative.Set1
+                    for i, q in enumerate(quantiles):
+                        model = QuantReg(y, X).fit(q=q)
+                        y_line = model.predict(X_line)
+                        fig.add_trace(go.Scatter(x=x_line, y=y_line, mode="lines",
+                                                 name=f"Q={q}",
+                                                 line=dict(color=colors[i % len(colors)], width=2)))
+                    # OLS for comparison
+                    ols_model = sm.OLS(y, X).fit()
+                    fig.add_trace(go.Scatter(x=x_line, y=ols_model.predict(X_line), mode="lines",
+                                             name="OLS", line=dict(color="black", dash="dash", width=2)))
+                    fig.update_layout(title="Quantile Regression Lines",
+                                      xaxis_title=x_cols[0], yaxis_title=y_col, height=500)
+                    st.plotly_chart(fig, use_container_width=True)
+
+    elif reg_type == "RANSAC":
+        from sklearn.linear_model import RANSACRegressor
+
+        residual_threshold = st.slider("Residual threshold:", 0.1, 50.0, 5.0, 0.5, key="rq_ransac_thresh")
+        min_samples = st.slider("Min samples (fraction):", 0.1, 0.9, 0.5, 0.05, key="rq_ransac_min")
+
+        if st.button("Fit RANSAC", key="fit_ransac"):
+            data = df[[y_col] + x_cols].dropna()
+            X = data[x_cols].values
+            y = data[y_col].values
+
+            try:
+                model = RANSACRegressor(
+                    residual_threshold=residual_threshold,
+                    min_samples=min_samples,
+                    random_state=42,
+                )
+                model.fit(X, y)
+                inlier_mask = model.inlier_mask_
+                n_inliers = inlier_mask.sum()
+                n_outliers = (~inlier_mask).sum()
+
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Inliers", n_inliers)
+                c2.metric("Outliers", n_outliers)
+                from sklearn.metrics import r2_score as r2s
+                c3.metric("R² (inliers)", f"{r2s(y[inlier_mask], model.predict(X[inlier_mask])):.4f}")
+
+                if len(x_cols) == 1:
+                    fig = go.Figure()
+                    fig.add_trace(go.Scatter(x=X[inlier_mask, 0], y=y[inlier_mask], mode="markers",
+                                             name="Inliers", marker=dict(color="steelblue", size=5)))
+                    fig.add_trace(go.Scatter(x=X[~inlier_mask, 0], y=y[~inlier_mask], mode="markers",
+                                             name="Outliers", marker=dict(color="red", size=7, symbol="x")))
+                    x_line = np.linspace(X[:, 0].min(), X[:, 0].max(), 200).reshape(-1, 1)
+                    fig.add_trace(go.Scatter(x=x_line.ravel(), y=model.predict(x_line), mode="lines",
+                                             name="RANSAC", line=dict(color="green", width=2)))
+                    from sklearn.linear_model import LinearRegression as LR
+                    ols = LR().fit(X, y)
+                    fig.add_trace(go.Scatter(x=x_line.ravel(), y=ols.predict(x_line), mode="lines",
+                                             name="OLS", line=dict(color="orange", dash="dash", width=2)))
+                    fig.update_layout(title="RANSAC vs OLS", xaxis_title=x_cols[0], yaxis_title=y_col, height=500)
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.write(f"**RANSAC Coefficients:** {model.estimator_.coef_.round(6)}")
+                    st.write(f"**Intercept:** {model.estimator_.intercept_:.6f}")
+
+            except Exception as e:
+                st.error(f"RANSAC failed: {e}")
+
+
+def _render_mixed_models(df: pd.DataFrame):
+    """Mixed / multilevel models."""
+    if not HAS_SM:
+        st.warning("statsmodels required for mixed models.")
+        return
+
+    num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    cat_cols = df.select_dtypes(include=["object", "category"]).columns.tolist()
+
+    if not num_cols or not cat_cols:
+        st.warning("Need numeric and categorical columns for mixed models.")
+        return
+
+    y_col = st.selectbox("Dependent variable:", num_cols, key="mm_y")
+    fixed_effects = st.multiselect("Fixed effects:", [c for c in num_cols if c != y_col], key="mm_fixed")
+    group_col = st.selectbox("Grouping variable (random intercept):", cat_cols, key="mm_group")
+    random_slope_col = st.selectbox("Random slope variable (optional):", [None] + [c for c in num_cols if c != y_col], key="mm_rslope")
+
+    if not fixed_effects:
+        st.info("Select fixed effect variables.")
+        return
+
+    if st.button("Fit Mixed Model", key="fit_mm"):
+        from statsmodels.regression.mixed_linear_model import MixedLM
+
+        data = df[[y_col] + fixed_effects + [group_col]].dropna()
+        if random_slope_col:
+            data = data.dropna(subset=[random_slope_col])
+
+        y = data[y_col]
+        X = sm.add_constant(data[fixed_effects])
+        groups = data[group_col]
+
+        try:
+            if random_slope_col:
+                exog_re = data[[random_slope_col]]
+                model = MixedLM(y, X, groups=groups, exog_re=exog_re).fit(reml=True)
+            else:
+                model = MixedLM(y, X, groups=groups).fit(reml=True)
+
+            st.markdown("#### Mixed Model Summary")
+
+            # Fixed effects
+            st.markdown("**Fixed Effects:**")
+            fe_df = pd.DataFrame({
+                "Variable": model.fe_params.index,
+                "Coefficient": model.fe_params.values,
+                "Std Error": model.bse_fe.values,
+                "z-value": model.tvalues[:len(model.fe_params)].values,
+                "p-value": model.pvalues[:len(model.fe_params)].values,
+            }).round(6)
+            st.dataframe(fe_df, use_container_width=True, hide_index=True)
+
+            # Random effects variance
+            st.markdown("**Random Effects Variance:**")
+            re_params = model.cov_re
+            if hasattr(re_params, 'values'):
+                re_df = pd.DataFrame(re_params).round(6)
+            else:
+                re_df = pd.DataFrame({"Variance": [re_params]}).round(6)
+            st.dataframe(re_df, use_container_width=True)
+
+            # Model fit
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Log-Likelihood", f"{model.llf:.2f}")
+            c2.metric("AIC", f"{model.aic:.2f}")
+            c3.metric("BIC", f"{model.bic:.2f}")
+
+            # ICC (for random intercept model)
+            if not random_slope_col:
+                re_var = float(model.cov_re.iloc[0, 0]) if hasattr(model.cov_re, 'iloc') else float(model.cov_re)
+                resid_var = model.scale
+                icc = re_var / (re_var + resid_var)
+                st.metric("ICC (Intraclass Correlation)", f"{icc:.4f}")
+                st.write(f"**{icc*100:.1f}%** of variance is explained by group membership ({group_col}).")
+
+            # Compare with OLS
+            with st.expander("Compare with OLS"):
+                ols_model = sm.OLS(y, X).fit()
+                comp_df = pd.DataFrame({
+                    "Variable": model.fe_params.index,
+                    "OLS Coef": ols_model.params.values[:len(model.fe_params)],
+                    "Mixed Coef": model.fe_params.values,
+                    "OLS SE": ols_model.bse.values[:len(model.fe_params)],
+                    "Mixed SE": model.bse_fe.values,
+                }).round(6)
+                st.dataframe(comp_df, use_container_width=True, hide_index=True)
+                st.write(f"**OLS AIC:** {ols_model.aic:.2f}  |  **Mixed AIC:** {model.aic:.2f}")
+
+                # LRT
+                lr_stat = -2 * (ols_model.llf - model.llf)
+                lr_df = 1 if not random_slope_col else 2
+                lr_p = 1 - stats.chi2.cdf(max(0, lr_stat), lr_df)
+                st.write(f"**Likelihood Ratio Test:** χ² = {lr_stat:.4f}, df = {lr_df}, p = {lr_p:.6f}")
+                if lr_p < 0.05:
+                    st.write("Mixed model significantly improves over OLS — random effects are warranted.")
+                else:
+                    st.write("No significant improvement — OLS may be sufficient.")
+
+            # Random effects by group
+            with st.expander("Random Effects by Group"):
+                re = model.random_effects
+                re_rows = []
+                for grp, vals in re.items():
+                    row = {"Group": grp}
+                    for k, v in vals.items():
+                        row[k] = round(v, 6)
+                    re_rows.append(row)
+                re_df = pd.DataFrame(re_rows)
+                st.dataframe(re_df, use_container_width=True, hide_index=True)
+
+                fig = go.Figure()
+                intercepts = [row.get("Group", 0) for row in re_rows]
+                group_names = [row["Group"] for row in re_rows]
+                group_var = list(re_rows[0].keys())[1] if len(re_rows[0]) > 1 else "Intercept"
+                values = [row.get(group_var, 0) for row in re_rows]
+                fig.add_trace(go.Bar(x=group_names, y=values, marker_color="steelblue"))
+                fig.update_layout(title=f"Random {group_var} by Group",
+                                  xaxis_title=group_col, yaxis_title=f"Random {group_var}", height=350)
+                st.plotly_chart(fig, use_container_width=True)
+
+        except Exception as e:
+            st.error(f"Mixed model failed: {e}")

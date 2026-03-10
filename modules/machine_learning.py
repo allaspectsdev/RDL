@@ -46,6 +46,17 @@ def _compare_classifiers(X, y):
         "Naive Bayes": GaussianNB(),
         "Decision Tree": DecisionTreeClassifier(random_state=42),
     }
+    try:
+        from xgboost import XGBClassifier
+        models["XGBoost"] = XGBClassifier(random_state=42, eval_metric="logloss",
+                                           use_label_encoder=False, verbosity=0)
+    except ImportError:
+        pass
+    try:
+        from lightgbm import LGBMClassifier
+        models["LightGBM"] = LGBMClassifier(random_state=42, verbose=-1)
+    except ImportError:
+        pass
     results = []
     for name, model in models.items():
         try:
@@ -75,6 +86,16 @@ def _compare_regressors(X, y):
         "Gradient Boosting": GradientBoostingRegressor(random_state=42),
         "KNN": KNeighborsRegressor(),
     }
+    try:
+        from xgboost import XGBRegressor
+        models["XGBoost"] = XGBRegressor(random_state=42, verbosity=0)
+    except ImportError:
+        pass
+    try:
+        from lightgbm import LGBMRegressor
+        models["LightGBM"] = LGBMRegressor(random_state=42, verbose=-1)
+    except ImportError:
+        pass
     results = []
     for name, model in models.items():
         try:
@@ -255,10 +276,21 @@ def _render_classification(df: pd.DataFrame):
         st.info("Select feature variables.")
         return
 
-    algorithm = st.selectbox("Algorithm:", [
+    _clf_algos = [
         "Logistic Regression", "Random Forest", "Gradient Boosting",
         "SVM", "KNN", "Naive Bayes", "Decision Tree",
-    ], key="clf_algo")
+    ]
+    try:
+        import xgboost  # noqa: F401
+        _clf_algos.append("XGBoost")
+    except ImportError:
+        pass
+    try:
+        import lightgbm  # noqa: F401
+        _clf_algos.append("LightGBM")
+    except ImportError:
+        pass
+    algorithm = st.selectbox("Algorithm:", _clf_algos, key="clf_algo")
 
     c1, c2, c3 = st.columns(3)
     test_size = c1.slider("Test size:", 0.1, 0.5, 0.2, 0.05, key="clf_test")
@@ -282,6 +314,14 @@ def _render_classification(df: pd.DataFrame):
             params["n_neighbors"] = st.slider("n_neighbors:", 1, 30, 5, key="clf_knn_k")
         elif algorithm == "Decision Tree":
             params["max_depth"] = st.slider("max_depth:", 1, 30, 10, key="clf_dt_d")
+        elif algorithm == "XGBoost":
+            params["n_estimators"] = st.slider("n_estimators:", 10, 500, 100, key="clf_xgb_n")
+            params["learning_rate"] = st.slider("learning_rate:", 0.01, 1.0, 0.1, key="clf_xgb_lr")
+            params["max_depth"] = st.slider("max_depth:", 1, 15, 6, key="clf_xgb_d")
+        elif algorithm == "LightGBM":
+            params["n_estimators"] = st.slider("n_estimators:", 10, 500, 100, key="clf_lgb_n")
+            params["learning_rate"] = st.slider("learning_rate:", 0.01, 1.0, 0.1, key="clf_lgb_lr")
+            params["max_depth"] = st.slider("max_depth:", -1, 15, -1, key="clf_lgb_d")
 
     if st.button("Train Model", key="train_clf"):
         data = df[features + [target]].dropna()
@@ -364,6 +404,33 @@ def _render_classification(df: pd.DataFrame):
             fig.update_layout(height=max(300, len(features) * 25))
             st.plotly_chart(fig, use_container_width=True)
 
+        # SHAP analysis
+        try:
+            import shap
+            with st.expander("SHAP Explainability"):
+                try:
+                    if algorithm in ("Random Forest", "Gradient Boosting", "Decision Tree", "XGBoost", "LightGBM"):
+                        explainer = shap.TreeExplainer(model)
+                    else:
+                        background = shap.sample(pd.DataFrame(X_train, columns=features), min(100, len(X_train)))
+                        explainer = shap.Explainer(model.predict, background, feature_names=features)
+                    shap_values = explainer(pd.DataFrame(X_test, columns=features))
+
+                    # Mean absolute SHAP values
+                    if shap_values.values.ndim == 3:
+                        vals = np.abs(shap_values.values[:, :, 1]).mean(axis=0)
+                    else:
+                        vals = np.abs(shap_values.values).mean(axis=0)
+                    shap_imp = pd.DataFrame({"Feature": features, "Mean |SHAP|": vals}).sort_values("Mean |SHAP|", ascending=True)
+                    fig = px.bar(shap_imp, x="Mean |SHAP|", y="Feature", orientation="h",
+                                 title="SHAP Feature Importance")
+                    fig.update_layout(height=max(300, len(features) * 30))
+                    st.plotly_chart(fig, use_container_width=True)
+                except Exception as e:
+                    st.warning(f"SHAP analysis failed: {e}")
+        except ImportError:
+            pass
+
 
 def _build_classifier(algorithm, params, random_state):
     """Build classifier from algorithm name and params."""
@@ -381,6 +448,13 @@ def _build_classifier(algorithm, params, random_state):
         return GaussianNB()
     elif algorithm == "Decision Tree":
         return DecisionTreeClassifier(random_state=random_state, **params)
+    elif algorithm == "XGBoost":
+        from xgboost import XGBClassifier
+        return XGBClassifier(random_state=random_state, eval_metric="logloss",
+                             use_label_encoder=False, verbosity=0, **params)
+    elif algorithm == "LightGBM":
+        from lightgbm import LGBMClassifier
+        return LGBMClassifier(random_state=random_state, verbose=-1, **params)
 
 
 def _render_ml_regression(df: pd.DataFrame):
@@ -398,10 +472,21 @@ def _render_ml_regression(df: pd.DataFrame):
         st.info("Select feature variables.")
         return
 
-    algorithm = st.selectbox("Algorithm:", [
+    _reg_algos = [
         "Linear Regression", "Ridge", "Lasso", "ElasticNet",
         "Random Forest", "Gradient Boosting", "SVR", "KNN",
-    ], key="reg_algo")
+    ]
+    try:
+        import xgboost  # noqa: F401
+        _reg_algos.append("XGBoost")
+    except ImportError:
+        pass
+    try:
+        import lightgbm  # noqa: F401
+        _reg_algos.append("LightGBM")
+    except ImportError:
+        pass
+    algorithm = st.selectbox("Algorithm:", _reg_algos, key="reg_algo")
 
     c1, c2, c3 = st.columns(3)
     test_size = c1.slider("Test size:", 0.1, 0.5, 0.2, 0.05, key="reg_test")
@@ -429,6 +514,14 @@ def _render_ml_regression(df: pd.DataFrame):
             params["kernel"] = st.selectbox("Kernel:", ["rbf", "linear", "poly"], key="reg_svr_k")
         elif algorithm == "KNN":
             params["n_neighbors"] = st.slider("n_neighbors:", 1, 30, 5, key="reg_knn_k")
+        elif algorithm == "XGBoost":
+            params["n_estimators"] = st.slider("n_estimators:", 10, 500, 100, key="reg_xgb_n")
+            params["learning_rate"] = st.slider("learning_rate:", 0.01, 1.0, 0.1, key="reg_xgb_lr")
+            params["max_depth"] = st.slider("max_depth:", 1, 15, 6, key="reg_xgb_d")
+        elif algorithm == "LightGBM":
+            params["n_estimators"] = st.slider("n_estimators:", 10, 500, 100, key="reg_lgb_n")
+            params["learning_rate"] = st.slider("learning_rate:", 0.01, 1.0, 0.1, key="reg_lgb_lr")
+            params["max_depth"] = st.slider("max_depth:", -1, 15, -1, key="reg_lgb_d")
 
     if st.button("Train Model", key="train_reg"):
         data = df[features + [target]].dropna()
@@ -507,6 +600,28 @@ def _render_ml_regression(df: pd.DataFrame):
             fig.update_layout(height=max(300, len(features) * 25))
             st.plotly_chart(fig, use_container_width=True)
 
+        # SHAP analysis for regression
+        try:
+            import shap
+            with st.expander("SHAP Explainability"):
+                try:
+                    if algorithm in ("Random Forest", "Gradient Boosting", "XGBoost", "LightGBM"):
+                        explainer = shap.TreeExplainer(model)
+                    else:
+                        background = shap.sample(pd.DataFrame(X_train, columns=features), min(100, len(X_train)))
+                        explainer = shap.Explainer(model.predict, background, feature_names=features)
+                    shap_values = explainer(pd.DataFrame(X_test, columns=features))
+                    vals = np.abs(shap_values.values).mean(axis=0)
+                    shap_imp = pd.DataFrame({"Feature": features, "Mean |SHAP|": vals}).sort_values("Mean |SHAP|", ascending=True)
+                    fig = px.bar(shap_imp, x="Mean |SHAP|", y="Feature", orientation="h",
+                                 title="SHAP Feature Importance")
+                    fig.update_layout(height=max(300, len(features) * 30))
+                    st.plotly_chart(fig, use_container_width=True)
+                except Exception as e:
+                    st.warning(f"SHAP analysis failed: {e}")
+        except ImportError:
+            pass
+
 
 def _build_regressor(algorithm, params, random_state):
     """Build regressor from algorithm name and params."""
@@ -526,6 +641,12 @@ def _build_regressor(algorithm, params, random_state):
         return SVR(**params)
     elif algorithm == "KNN":
         return KNeighborsRegressor(**params)
+    elif algorithm == "XGBoost":
+        from xgboost import XGBRegressor
+        return XGBRegressor(random_state=random_state, verbosity=0, **params)
+    elif algorithm == "LightGBM":
+        from lightgbm import LGBMRegressor
+        return LGBMRegressor(random_state=random_state, verbose=-1, **params)
 
 
 def _render_dim_reduction(df: pd.DataFrame):
@@ -541,9 +662,16 @@ def _render_dim_reduction(df: pd.DataFrame):
     if len(features) < 3:
         return
 
-    method = st.selectbox("Method:", ["PCA", "t-SNE"], key="dr_method")
+    method = st.selectbox("Method:", ["PCA", "t-SNE", "UMAP"], key="dr_method")
     color_col = st.selectbox("Color by:", [None] + cat_cols, key="dr_color")
     n_dims = st.selectbox("Dimensions:", [2, 3], key="dr_dims")
+
+    # UMAP-specific parameters
+    if method == "UMAP":
+        with st.expander("UMAP Parameters"):
+            umap_n_neighbors = st.slider("n_neighbors:", 2, 200, 15, key="dr_umap_nn")
+            umap_min_dist = st.slider("min_dist:", 0.0, 1.0, 0.1, 0.05, key="dr_umap_md")
+            umap_metric = st.selectbox("Metric:", ["euclidean", "manhattan", "cosine", "correlation"], key="dr_umap_metric")
 
     if st.button("Run", key="run_dr"):
         data = df[features].dropna()
@@ -553,7 +681,7 @@ def _render_dim_reduction(df: pd.DataFrame):
             reducer = PCA(n_components=n_dims)
             embedding = reducer.fit_transform(X)
             labels = [f"PC{i+1} ({reducer.explained_variance_ratio_[i]*100:.1f}%)" for i in range(n_dims)]
-        else:
+        elif method == "t-SNE":
             max_n = min(len(data), 5000)
             if len(data) > max_n:
                 idx = np.random.choice(len(data), max_n, replace=False)
@@ -563,6 +691,21 @@ def _render_dim_reduction(df: pd.DataFrame):
             reducer = TSNE(n_components=n_dims, perplexity=perplexity, random_state=42)
             embedding = reducer.fit_transform(X)
             labels = [f"Dim{i+1}" for i in range(n_dims)]
+        elif method == "UMAP":
+            try:
+                import umap
+            except ImportError:
+                st.error("umap-learn not installed. Run: `pip install umap-learn`")
+                return
+            max_n = min(len(data), 10000)
+            if len(data) > max_n:
+                idx = np.random.choice(len(data), max_n, replace=False)
+                X = X[idx]
+                data = data.iloc[idx]
+            reducer = umap.UMAP(n_components=n_dims, n_neighbors=umap_n_neighbors,
+                                min_dist=umap_min_dist, metric=umap_metric, random_state=42)
+            embedding = reducer.fit_transform(X)
+            labels = [f"UMAP{i+1}" for i in range(n_dims)]
 
         emb_df = pd.DataFrame(embedding, columns=labels)
         if color_col and color_col in df.columns:

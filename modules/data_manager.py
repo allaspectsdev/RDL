@@ -5,6 +5,7 @@ Data Manager Module - Upload, preview, clean, and transform datasets.
 import streamlit as st
 import pandas as pd
 import numpy as np
+import io
 
 
 def render_upload():
@@ -38,7 +39,7 @@ def render_data_manager(df: pd.DataFrame) -> pd.DataFrame:
 
     tabs = st.tabs([
         "Preview", "Column Info", "Missing Values",
-        "Transform", "Filter & Sort", "Column Operations",
+        "Transform", "Filter & Sort", "Column Operations", "Export",
     ])
 
     # ── Tab 1: Preview ──
@@ -64,6 +65,10 @@ def render_data_manager(df: pd.DataFrame) -> pd.DataFrame:
     # ── Tab 6: Column Operations ──
     with tabs[5]:
         df = _render_column_operations(df)
+
+    # ── Tab 7: Export ──
+    with tabs[6]:
+        _render_export(df)
 
     return df
 
@@ -410,3 +415,69 @@ def _render_column_operations(df: pd.DataFrame) -> pd.DataFrame:
             st.error(f"Expression error: {e}")
 
     return df
+
+
+def _render_export(df: pd.DataFrame):
+    """Export data in various formats."""
+    st.markdown("#### Export Dataset")
+
+    data_name = st.session_state.get("data_name", "data")
+    base_name = data_name.rsplit(".", 1)[0] if "." in data_name else data_name
+
+    c1, c2, c3 = st.columns(3)
+
+    # CSV
+    csv_data = df.to_csv(index=False)
+    c1.download_button(
+        label="Download CSV",
+        data=csv_data,
+        file_name=f"{base_name}.csv",
+        mime="text/csv",
+        key="export_csv",
+        use_container_width=True,
+    )
+
+    # Excel
+    excel_buffer = io.BytesIO()
+    with pd.ExcelWriter(excel_buffer, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="Data")
+    c2.download_button(
+        label="Download Excel",
+        data=excel_buffer.getvalue(),
+        file_name=f"{base_name}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        key="export_xlsx",
+        use_container_width=True,
+    )
+
+    # JSON
+    json_data = df.to_json(orient="records", indent=2)
+    c3.download_button(
+        label="Download JSON",
+        data=json_data,
+        file_name=f"{base_name}.json",
+        mime="application/json",
+        key="export_json",
+        use_container_width=True,
+    )
+
+    st.divider()
+
+    # Export subset
+    st.markdown("#### Export Subset")
+    export_cols = st.multiselect(
+        "Select columns to export:", df.columns.tolist(),
+        default=df.columns.tolist(), key="export_cols",
+    )
+    if export_cols:
+        subset = df[export_cols]
+        c1, c2 = st.columns(2)
+        c1.write(f"**Rows:** {len(subset):,}  |  **Columns:** {len(export_cols)}")
+        csv_subset = subset.to_csv(index=False)
+        c2.download_button(
+            label="Download Subset (CSV)",
+            data=csv_subset,
+            file_name=f"{base_name}_subset.csv",
+            mime="text/csv",
+            key="export_subset_csv",
+        )

@@ -20,6 +20,7 @@ def render_hypothesis_testing(df: pd.DataFrame):
     tabs = st.tabs([
         "One-Sample Tests", "Two-Sample Tests", "Chi-Square Tests",
         "Normality Tests", "Power Analysis", "Multiple Comparisons",
+        "Bootstrap & Permutation",
     ])
 
     with tabs[0]:
@@ -34,6 +35,8 @@ def render_hypothesis_testing(df: pd.DataFrame):
         _render_power_analysis()
     with tabs[5]:
         _render_multiple_comparisons(df)
+    with tabs[6]:
+        _render_bootstrap_permutation(df)
 
 
 def _interpret_p(p_value, alpha):
@@ -637,3 +640,140 @@ def _render_multiple_comparisons(df: pd.DataFrame):
         st.write(f"**Bonferroni:** {(bonf < alpha).sum()}/{m} significant")
         st.write(f"**Holm:** {(holm < alpha).sum()}/{m} significant")
         st.write(f"**BH (FDR):** {(bh_result < alpha).sum()}/{m} significant")
+
+
+def _render_bootstrap_permutation(df: pd.DataFrame):
+    """Bootstrap confidence intervals and permutation tests."""
+    num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    cat_cols = df.select_dtypes(include=["object", "category"]).columns.tolist()
+
+    if not num_cols:
+        st.warning("No numeric columns available.")
+        return
+
+    analysis = st.selectbox("Analysis:", [
+        "Bootstrap Confidence Interval",
+        "Permutation Test (Two-Sample)",
+    ], key="bp_analysis")
+
+    if analysis == "Bootstrap Confidence Interval":
+        col_name = st.selectbox("Column:", num_cols, key="bp_boot_col")
+        statistic_name = st.selectbox("Statistic:", [
+            "Mean", "Median", "Standard Deviation", "Variance",
+            "Trimmed Mean (10%)", "IQR",
+        ], key="bp_stat")
+        ci_method = st.selectbox("CI Method:", ["percentile", "BCa"], key="bp_ci_method")
+        n_resamples = st.slider("Number of bootstrap resamples:", 1000, 20000, 9999, 1000, key="bp_n_boot")
+        alpha = st.slider("Confidence level:", 0.80, 0.99, 0.95, 0.01, key="bp_ci_level")
+
+        if st.button("Run Bootstrap", key="run_bootstrap"):
+            data = df[col_name].dropna().values
+            n = len(data)
+
+            stat_funcs = {
+                "Mean": np.mean,
+                "Median": np.median,
+                "Standard Deviation": np.std,
+                "Variance": np.var,
+                "Trimmed Mean (10%)": lambda x, axis=None: stats.trim_mean(x, 0.1) if axis is None else np.apply_along_axis(lambda a: stats.trim_mean(a, 0.1), axis, x),
+                "IQR": lambda x, axis=None: stats.iqr(x) if axis is None else np.apply_along_axis(stats.iqr, axis, x),
+            }
+            stat_func = stat_funcs[statistic_name]
+            observed = stat_func(data)
+
+            try:
+                result = stats.bootstrap(
+                    (data,), stat_func, n_resamples=n_resamples,
+                    confidence_level=alpha, method=ci_method,
+                    random_state=42,
+                )
+                ci_low, ci_high = result.confidence_interval.low, result.confidence_interval.high
+                se = result.standard_error
+
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric(f"Observed {statistic_name}", f"{observed:.4f}")
+                c2.metric("Bootstrap SE", f"{se:.4f}")
+                c3.metric(f"CI Lower ({alpha:.0%})", f"{ci_low:.4f}")
+                c4.metric(f"CI Upper ({alpha:.0%})", f"{ci_high:.4f}")
+
+                # Bootstrap distribution
+                boot_dist = result.bootstrap_distribution
+                fig = go.Figure()
+                fig.add_trace(go.Histogram(x=boot_dist, nbinsx=60, name="Bootstrap Distribution",
+                                           marker_color="steelblue", opacity=0.7))
+                fig.add_vline(x=observed, line_dash="solid", line_color="red",
+                              annotation_text=f"Observed={observed:.4f}")
+                fig.add_vline(x=ci_low, line_dash="dash", line_color="green",
+                              annotation_text=f"CI Low={ci_low:.4f}")
+                fig.add_vline(x=ci_high, line_dash="dash", line_color="green",
+                              annotation_text=f"CI High={ci_high:.4f}")
+                fig.update_layout(title=f"Bootstrap Distribution of {statistic_name} (n={n_resamples})",
+                                  xaxis_title=statistic_name, yaxis_title="Frequency", height=450)
+                st.plotly_chart(fig, use_container_width=True)
+
+            except Exception as e:
+                st.error(f"Bootstrap failed: {e}")
+
+    elif analysis == "Permutation Test (Two-Sample)":
+        if not cat_cols:
+            st.warning("Need a categorical grouping column.")
+            return
+
+        value_col = st.selectbox("Value column:", num_cols, key="bp_perm_val")
+        group_col = st.selectbox("Group column:", cat_cols, key="bp_perm_grp")
+        groups = df[group_col].dropna().unique()
+        if len(groups) < 2:
+            st.warning("Need at least 2 groups.")
+            return
+
+        g1_name = st.selectbox("Group 1:", groups, index=0, key="bp_perm_g1")
+        g2_name = st.selectbox("Group 2:", groups, index=min(1, len(groups) - 1), key="bp_perm_g2")
+
+        test_stat = st.selectbox("Test statistic:", [
+            "Difference of Means", "Difference of Medians",
+        ], key="bp_perm_stat")
+        n_resamples = st.slider("Number of permutations:", 1000, 20000, 9999, 1000, key="bp_n_perm")
+        alt = st.selectbox("Alternative:", ["two-sided", "less", "greater"], key="bp_perm_alt")
+
+        if st.button("Run Permutation Test", key="run_perm"):
+            g1 = df[df[group_col] == g1_name][value_col].dropna().values
+            g2 = df[df[group_col] == g2_name][value_col].dropna().values
+
+            if test_stat == "Difference of Means":
+                def stat_func(x, y, axis):
+                    return np.mean(x, axis=axis) - np.mean(y, axis=axis)
+            else:
+                def stat_func(x, y, axis):
+                    return np.median(x, axis=axis) - np.median(y, axis=axis)
+
+            try:
+                result = stats.permutation_test(
+                    (g1, g2), stat_func, n_resamples=n_resamples,
+                    alternative=alt, random_state=42,
+                )
+                observed_stat = result.statistic
+                p_val = result.pvalue
+
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric("Observed Statistic", f"{observed_stat:.4f}")
+                c2.metric("p-value", f"{p_val:.6f}")
+                c3.metric(f"Group 1 Mean ({g1_name})", f"{g1.mean():.4f}")
+                c4.metric(f"Group 2 Mean ({g2_name})", f"{g2.mean():.4f}")
+
+                st.markdown(_interpret_p(p_val, 0.05))
+
+                # Null distribution
+                null_dist = result.null_distribution
+                fig = go.Figure()
+                fig.add_trace(go.Histogram(x=null_dist, nbinsx=60,
+                                           name="Null Distribution", marker_color="steelblue", opacity=0.7))
+                fig.add_vline(x=observed_stat, line_dash="solid", line_color="red",
+                              annotation_text=f"Observed={observed_stat:.4f}")
+                fig.update_layout(
+                    title=f"Permutation Null Distribution (n={n_resamples})",
+                    xaxis_title=test_stat, yaxis_title="Frequency", height=450,
+                )
+                st.plotly_chart(fig, use_container_width=True)
+
+            except Exception as e:
+                st.error(f"Permutation test failed: {e}")

@@ -677,6 +677,9 @@ from modules.correlation import render_correlation
 from modules.visualization import render_visualization
 from modules.time_series import render_time_series
 from modules.machine_learning import render_machine_learning
+from modules.survival_analysis import render_survival_analysis
+from modules.quality import render_quality
+from modules.doe import render_doe
 
 
 @st.cache_data
@@ -781,6 +784,61 @@ def load_sample_dataset(name: str) -> pd.DataFrame:
         df["media"] = pd.Categorical(df["media"])
         df["scale"] = pd.Categorical(df["scale"])
         return df
+    elif name == "Lung Cancer (Survival)":
+        rng = np.random.default_rng(123)
+        n = 228
+        treatment = rng.choice(["Drug A", "Drug B", "Placebo"], size=n, p=[0.35, 0.35, 0.30])
+        age = rng.normal(62, 10, n).astype(int).clip(30, 90)
+        sex = rng.choice(["Male", "Female"], size=n, p=[0.6, 0.4])
+        ecog = rng.choice([0, 1, 2, 3], size=n, p=[0.15, 0.45, 0.30, 0.10])
+
+        # Survival times depend on treatment and covariates
+        base_time = np.where(treatment == "Drug A", 420, np.where(treatment == "Drug B", 360, 250))
+        time_mod = -2 * age + -80 * ecog + np.where(sex == "Female", 40, 0) + rng.normal(0, 80, n)
+        time = (base_time + time_mod).clip(10, 1000).astype(int)
+        event = rng.binomial(1, 0.72, n)
+
+        df = pd.DataFrame({
+            "time": time, "event": event, "treatment": pd.Categorical(treatment),
+            "age": age, "sex": pd.Categorical(sex), "ecog_score": ecog,
+        })
+        return df
+    elif name == "DOE Reactor":
+        rng = np.random.default_rng(99)
+        temps = [-1, 1]
+        pressures = [-1, 1]
+        catalysts = [-1, 1]
+        concs = [-1, 1]
+        rows = []
+        for t in temps:
+            for p in pressures:
+                for cat in catalysts:
+                    for conc in concs:
+                        for rep in range(2):
+                            yield_val = (70 + 5*t + 3*p + 4*cat + 2*conc
+                                         + 2*t*p + 1.5*t*cat - 1*p*conc
+                                         + rng.normal(0, 1.5))
+                            rows.append({
+                                "Temperature": t, "Pressure": p,
+                                "Catalyst": cat, "Concentration": conc,
+                                "Yield": round(yield_val, 2),
+                            })
+        return pd.DataFrame(rows)
+    elif name == "SPC Manufacturing":
+        rng = np.random.default_rng(77)
+        n_samples = 100
+        # Process with a shift at sample 60
+        values = np.concatenate([
+            rng.normal(50.0, 1.0, 60),
+            rng.normal(51.2, 1.2, 40),
+        ])
+        df = pd.DataFrame({
+            "Sample": np.arange(1, n_samples + 1),
+            "Measurement": values.round(3),
+            "Batch": pd.Categorical([f"B{i//10+1:02d}" for i in range(n_samples)]),
+            "Operator": pd.Categorical(rng.choice(["Op_A", "Op_B", "Op_C"], n_samples)),
+        })
+        return df
     return None
 
 
@@ -839,7 +897,8 @@ def main():
             sample = st.selectbox(
                 "Select dataset:",
                 ["Iris", "Wine", "Boston-style Housing", "Diabetes",
-                 "Tips", "Gapminder", "Stocks", "Bioprocess"],
+                 "Tips", "Gapminder", "Stocks", "Bioprocess",
+                 "Lung Cancer (Survival)", "DOE Reactor", "SPC Manufacturing"],
             )
             if st.button("Load Dataset", use_container_width=True):
                 st.session_state["df"] = load_sample_dataset(sample)
@@ -861,6 +920,9 @@ def main():
                 "ANOVA",
                 "Time Series Analysis",
                 "Machine Learning",
+                "Survival Analysis",
+                "Quality & SPC",
+                "Design of Experiments",
             ],
             label_visibility="collapsed",
         )
@@ -918,15 +980,15 @@ def main():
                     <span class="rdl-stat-label">Chart Types</span>
                 </div>
                 <div class="rdl-stat">
-                    <span class="rdl-stat-value">9</span>
+                    <span class="rdl-stat-value">12</span>
                     <span class="rdl-stat-label">Modules</span>
                 </div>
                 <div class="rdl-stat">
-                    <span class="rdl-stat-value">50+</span>
+                    <span class="rdl-stat-value">70+</span>
                     <span class="rdl-stat-label">Statistical Tests</span>
                 </div>
                 <div class="rdl-stat">
-                    <span class="rdl-stat-value">7</span>
+                    <span class="rdl-stat-value">9+</span>
                     <span class="rdl-stat-label">ML Algorithms</span>
                 </div>
             </div>
@@ -934,29 +996,27 @@ def main():
             <div class="rdl-features-grid">
                 <div class="rdl-feature-card">
                     <div class="rdl-feature-card-bar"></div>
-                    <h3>Upload & Explore</h3>
+                    <h3>Upload, Explore & Export</h3>
                     <p>
-                        Import CSV, Excel, TSV, or JSON files. Preview your
-                        data, handle missing values, apply transforms, and
-                        prepare for analysis.
+                        Import CSV, Excel, TSV, or JSON files. Preview, clean,
+                        transform, and export data in multiple formats.
                     </p>
                 </div>
                 <div class="rdl-feature-card">
                     <div class="rdl-feature-card-bar"></div>
                     <h3>Analyze & Test</h3>
                     <p>
-                        Comprehensive statistical suite including hypothesis
-                        testing, ANOVA, regression, correlation analysis, and
-                        time series forecasting.
+                        Comprehensive statistical suite: hypothesis testing,
+                        ANOVA, GLM, mixed models, bootstrap, survival analysis,
+                        and DOE.
                     </p>
                 </div>
                 <div class="rdl-feature-card">
                     <div class="rdl-feature-card-bar"></div>
                     <h3>Visualize & Model</h3>
                     <p>
-                        22+ interactive Plotly chart types plus machine
-                        learning with clustering, classification, regression,
-                        and model comparison.
+                        22+ chart types, XGBoost, SHAP, UMAP, SPC control charts,
+                        response surfaces, and model comparison.
                     </p>
                 </div>
             </div>
@@ -968,7 +1028,7 @@ def main():
             <div class="rdl-modules-grid">
                 <div class="rdl-module-item">
                     <h4>Data Management</h4>
-                    <p>Upload, clean, transform, filter, encode, and compute new columns.</p>
+                    <p>Upload, clean, transform, filter, encode, export CSV/Excel/JSON.</p>
                 </div>
                 <div class="rdl-module-item">
                     <h4>Descriptive Statistics</h4>
@@ -980,15 +1040,15 @@ def main():
                 </div>
                 <div class="rdl-module-item">
                     <h4>Hypothesis Testing</h4>
-                    <p>t-tests, chi-square, Mann-Whitney, power analysis, corrections.</p>
+                    <p>t-tests, chi-square, bootstrap CIs, permutation tests, power analysis.</p>
                 </div>
                 <div class="rdl-module-item">
                     <h4>Correlation & PCA</h4>
-                    <p>Correlation matrices, PCA, t-SNE, factor analysis, partial correlation.</p>
+                    <p>Correlation matrices, PCA, t-SNE, UMAP, factor analysis.</p>
                 </div>
                 <div class="rdl-module-item">
                     <h4>Regression Analysis</h4>
-                    <p>Linear, polynomial, logistic, curve fitting, full diagnostics.</p>
+                    <p>Linear, GLM, robust, quantile, mixed models, curve fitting.</p>
                 </div>
                 <div class="rdl-module-item">
                     <h4>ANOVA</h4>
@@ -1000,7 +1060,19 @@ def main():
                 </div>
                 <div class="rdl-module-item">
                     <h4>Machine Learning</h4>
-                    <p>Clustering, classification, regression, model comparison dashboard.</p>
+                    <p>XGBoost, LightGBM, SHAP, clustering, model comparison.</p>
+                </div>
+                <div class="rdl-module-item">
+                    <h4>Survival Analysis</h4>
+                    <p>Kaplan-Meier, log-rank test, Cox PH, parametric AFT models.</p>
+                </div>
+                <div class="rdl-module-item">
+                    <h4>Quality & SPC</h4>
+                    <p>Control charts (I-MR, X-bar), attributes charts, process capability.</p>
+                </div>
+                <div class="rdl-module-item">
+                    <h4>Design of Experiments</h4>
+                    <p>Factorial, CCD, Box-Behnken, response surface, effect analysis.</p>
                 </div>
             </div>
 
@@ -1070,6 +1142,24 @@ def main():
             render_machine_learning(df)
         except Exception as e:
             st.error(f"An error occurred in Machine Learning: {e}")
+    elif module == "Survival Analysis":
+        st.markdown("## Survival Analysis")
+        try:
+            render_survival_analysis(df)
+        except Exception as e:
+            st.error(f"An error occurred in Survival Analysis: {e}")
+    elif module == "Quality & SPC":
+        st.markdown("## Quality & Statistical Process Control")
+        try:
+            render_quality(df)
+        except Exception as e:
+            st.error(f"An error occurred in Quality & SPC: {e}")
+    elif module == "Design of Experiments":
+        st.markdown("## Design of Experiments")
+        try:
+            render_doe(df)
+        except Exception as e:
+            st.error(f"An error occurred in Design of Experiments: {e}")
 
 
 if __name__ == "__main__":
