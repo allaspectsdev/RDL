@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# DataLens Deployment Script for Linux Server
+# Ryan's Data Lab (RDL) Deployment Script for Linux Server
 #
 # Usage:
 #   ./scripts/deploy.sh                  # Full Docker deployment
@@ -44,7 +44,7 @@ if $SETUP_SSL; then
     log "Setting up SSL for $DOMAIN ..."
 
     # Replace domain placeholder in nginx config
-    sed -i "s/YOUR_DOMAIN.com/$DOMAIN/g" nginx/datalens.conf
+    sed -i "s/YOUR_DOMAIN.com/$DOMAIN/g" nginx/rdl.conf
     log "Updated nginx config with domain: $DOMAIN"
 
     if $USE_DOCKER; then
@@ -59,9 +59,9 @@ if $SETUP_SSL; then
 
         # Enable HTTPS block and HTTP redirect in nginx config
         # Uncomment the HTTPS server block and HTTP redirect
-        sed -i 's/^# \(.*listen 443\)/\1/' nginx/datalens.conf
-        sed -i 's/^# \(.*ssl_\)/\1/' nginx/datalens.conf
-        sed -i 's/^# \(.*add_header Strict\)/\1/' nginx/datalens.conf
+        sed -i 's/^# \(.*listen 443\)/\1/' nginx/rdl.conf
+        sed -i 's/^# \(.*ssl_\)/\1/' nginx/rdl.conf
+        sed -i 's/^# \(.*add_header Strict\)/\1/' nginx/rdl.conf
 
         docker compose restart nginx
         log "SSL enabled! Site available at https://$DOMAIN"
@@ -134,19 +134,19 @@ if $USE_DOCKER; then
     sleep 5
 
     if curl -sf http://localhost:8501/_stcore/health > /dev/null 2>&1; then
-        log "DataLens is running!"
+        log "Ryan's Data Lab is running!"
     else
-        warn "App may still be starting. Check: docker compose logs datalens"
+        warn "App may still be starting. Check: docker compose logs rdl"
     fi
 
     echo ""
     log "========================================="
-    log " DataLens deployed successfully!"
+    log " Ryan's Data Lab deployed successfully!"
     log " HTTP:  http://$(hostname -I | awk '{print $1}')"
     log ""
     log " Next steps:"
     log "   1. Point your domain DNS to this server IP"
-    log "   2. Edit nginx/datalens.conf — replace YOUR_DOMAIN.com"
+    log "   2. Edit nginx/rdl.conf — replace YOUR_DOMAIN.com"
     log "   3. Run: ./scripts/deploy.sh --ssl yourdomain.com"
     log "========================================="
     exit 0
@@ -155,7 +155,7 @@ fi
 # ---------------------------------------------------------------------------
 # Systemd Deployment (no Docker)
 # ---------------------------------------------------------------------------
-APP_DIR="/opt/datalens"
+APP_DIR="/opt/rdl"
 VENV_DIR="$APP_DIR/venv"
 
 log "Setting up application at $APP_DIR ..."
@@ -175,9 +175,9 @@ log "Python dependencies installed."
 
 # Create systemd service
 log "Creating systemd service..."
-sudo tee /etc/systemd/system/datalens.service > /dev/null << 'SERVICEEOF'
+sudo tee /etc/systemd/system/rdl.service > /dev/null << 'SERVICEEOF'
 [Unit]
-Description=DataLens Visual Data Analysis Tool
+Description=Ryan's Data Lab (RDL) Visual Data Analysis Tool
 After=network.target
 Wants=network-online.target
 
@@ -185,9 +185,9 @@ Wants=network-online.target
 Type=simple
 User=www-data
 Group=www-data
-WorkingDirectory=/opt/datalens
-Environment="PATH=/opt/datalens/venv/bin:/usr/bin:/bin"
-ExecStart=/opt/datalens/venv/bin/streamlit run app.py \
+WorkingDirectory=/opt/rdl
+Environment="PATH=/opt/rdl/venv/bin:/usr/bin:/bin"
+ExecStart=/opt/rdl/venv/bin/streamlit run app.py \
     --server.port=8501 \
     --server.address=127.0.0.1 \
     --server.headless=true \
@@ -197,13 +197,13 @@ Restart=always
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=datalens
+SyslogIdentifier=rdl
 
 # Security hardening
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict
-ReadWritePaths=/opt/datalens
+ReadWritePaths=/opt/rdl
 
 [Install]
 WantedBy=multi-user.target
@@ -211,12 +211,12 @@ SERVICEEOF
 
 # Configure nginx
 log "Configuring nginx..."
-sudo cp "$APP_DIR/nginx/datalens.conf" /etc/nginx/sites-available/datalens.conf
+sudo cp "$APP_DIR/nginx/rdl.conf" /etc/nginx/sites-available/rdl.conf
 
 # Adjust upstream for non-Docker (localhost instead of container name)
-sudo sed -i 's/server datalens:8501/server 127.0.0.1:8501/' /etc/nginx/sites-available/datalens.conf
+sudo sed -i 's/server rdl:8501/server 127.0.0.1:8501/' /etc/nginx/sites-available/rdl.conf
 
-sudo ln -sf /etc/nginx/sites-available/datalens.conf /etc/nginx/sites-enabled/
+sudo ln -sf /etc/nginx/sites-available/rdl.conf /etc/nginx/sites-enabled/
 sudo rm -f /etc/nginx/sites-enabled/default
 
 # Test nginx config
@@ -225,32 +225,32 @@ sudo nginx -t || error "Nginx configuration test failed!"
 # Start services
 log "Starting services..."
 sudo systemctl daemon-reload
-sudo systemctl enable datalens
-sudo systemctl start datalens
+sudo systemctl enable rdl
+sudo systemctl start rdl
 sudo systemctl restart nginx
 
 log "Waiting for app to start..."
 sleep 5
 
 if curl -sf http://localhost:8501/_stcore/health > /dev/null 2>&1; then
-    log "DataLens is running!"
+    log "Ryan's Data Lab is running!"
 else
-    warn "App may still be starting. Check: sudo journalctl -u datalens -f"
+    warn "App may still be starting. Check: sudo journalctl -u rdl -f"
 fi
 
 echo ""
 log "========================================="
-log " DataLens deployed successfully!"
+log " Ryan's Data Lab deployed successfully!"
 log " HTTP:  http://$(hostname -I | awk '{print $1}')"
 log ""
 log " Next steps:"
 log "   1. Point your domain DNS to this server IP"
-log "   2. Edit /etc/nginx/sites-available/datalens.conf"
+log "   2. Edit /etc/nginx/sites-available/rdl.conf"
 log "      Replace YOUR_DOMAIN.com with your domain"
 log "   3. Run: ./scripts/deploy.sh --ssl yourdomain.com"
 log ""
 log " Management commands:"
-log "   sudo systemctl status datalens"
-log "   sudo systemctl restart datalens"
-log "   sudo journalctl -u datalens -f"
+log "   sudo systemctl status rdl"
+log "   sudo systemctl restart rdl"
+log "   sudo journalctl -u rdl -f"
 log "========================================="

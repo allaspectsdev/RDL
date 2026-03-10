@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# DataLens Update Script — pull latest code and restart
+# Ryan's Data Lab (RDL) Update Script — pull latest code and restart
 # =============================================================================
 
 set -euo pipefail
@@ -9,10 +9,10 @@ GREEN='\033[0;32m'
 NC='\033[0m'
 log() { echo -e "${GREEN}[UPDATE]${NC} $1"; }
 
-APP_DIR="/opt/datalens"
+APP_DIR="/opt/rdl"
 
 # Detect deployment type
-if docker compose version &> /dev/null && docker ps --format '{{.Names}}' | grep -q datalens-app; then
+if docker compose version &> /dev/null && docker ps --format '{{.Names}}' | grep -q rdl-app; then
     log "Docker deployment detected."
 
     log "Pulling latest code..."
@@ -25,10 +25,10 @@ if docker compose version &> /dev/null && docker ps --format '{{.Names}}' | grep
     log "Updated! Checking health..."
     sleep 5
     if curl -sf http://localhost:8501/_stcore/health > /dev/null 2>&1; then
-        log "DataLens is healthy."
+        log "Ryan's Data Lab is healthy."
     fi
 
-elif systemctl is-active --quiet datalens; then
+elif systemctl is-active --quiet rdl; then
     log "Systemd deployment detected."
 
     log "Pulling latest code..."
@@ -39,13 +39,13 @@ elif systemctl is-active --quiet datalens; then
     sudo -u www-data "$APP_DIR/venv/bin/pip" install -r requirements.txt
 
     log "Restarting service..."
-    sudo systemctl restart datalens
+    sudo systemctl restart rdl
 
     sleep 3
-    if systemctl is-active --quiet datalens; then
-        log "DataLens restarted successfully."
+    if systemctl is-active --quiet rdl; then
+        log "Ryan's Data Lab restarted successfully."
     fi
 else
-    echo "No running DataLens deployment found."
+    echo "No running Ryan's Data Lab deployment found."
     exit 1
 fi

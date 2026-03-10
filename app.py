@@ -1,5 +1,5 @@
 """
-DataLens - Visual Data Analysis Tool
+Ryan's Data Lab (RDL) - Visual Data Analysis Tool
 A comprehensive, interactive data analysis platform modeled after
 JMP, MATLAB, and other leading statistical analysis tools.
 
@@ -12,7 +12,7 @@ import numpy as np
 
 # Page configuration
 st.set_page_config(
-    page_title="DataLens - Visual Data Analysis",
+    page_title="Ryan's Data Lab - Visual Data Analysis",
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -117,7 +117,7 @@ def load_sample_dataset(name: str) -> pd.DataFrame:
 def main():
     # Sidebar navigation
     with st.sidebar:
-        st.markdown('<p class="main-header">DataLens</p>', unsafe_allow_html=True)
+        st.markdown('<p class="main-header">Ryan\'s Data Lab</p>', unsafe_allow_html=True)
         st.markdown('<p class="sub-header">Visual Data Analysis Tool</p>', unsafe_allow_html=True)
         st.divider()
 
@@ -197,7 +197,7 @@ def main():
     # Main content area
     if "df" not in st.session_state or st.session_state["df"] is None:
         # Landing page when no data is loaded
-        st.markdown('<p class="main-header">Welcome to DataLens</p>', unsafe_allow_html=True)
+        st.markdown('<p class="main-header">Welcome to Ryan\'s Data Lab</p>', unsafe_allow_html=True)
         st.markdown('<p class="sub-header">A comprehensive visual data analysis platform</p>', unsafe_allow_html=True)
         st.markdown("---")
 

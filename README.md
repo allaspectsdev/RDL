@@ -1,4 +1,4 @@
-# DataLens — Visual Data Analysis Tool
+# Ryan's Data Lab — Visual Data Analysis Tool
 
 A comprehensive, interactive data analysis platform built in Python. Modeled after the capabilities of JMP, MATLAB, Tableau, and other leading statistical analysis tools — accessible from any web browser.
 
@@ -138,7 +138,7 @@ cd RDL
 ./scripts/deploy.sh
 
 # After DNS is configured, add SSL:
-# First edit nginx/datalens.conf and replace YOUR_DOMAIN.com
+# First edit nginx/rdl.conf and replace YOUR_DOMAIN.com
 ./scripts/deploy.sh --ssl yourdomain.com
 ```
 
@@ -159,12 +159,12 @@ cd RDL
 
 ```bash
 # Docker
-docker compose logs -f datalens
+docker compose logs -f rdl
 docker compose restart
 
 # Systemd
-sudo systemctl status datalens
-sudo journalctl -u datalens -f
+sudo systemctl status rdl
+sudo journalctl -u rdl -f
 ```
 
 ---
@@ -190,7 +190,7 @@ RDL/
 │   └── machine_learning.py       # Clustering, classification, regression, comparison
 ├── nginx/
 │   ├── nginx.conf                # Main nginx config
-│   └── datalens.conf             # Reverse proxy + WebSocket config
+│   └── rdl.conf             # Reverse proxy + WebSocket config
 └── scripts/
     ├── deploy.sh                 # One-command deployment
     └── update.sh                 # Pull & restart
