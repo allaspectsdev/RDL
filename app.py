@@ -62,28 +62,23 @@ st.markdown("""<style>
 
 html, body,
 .stMarkdown, .stText, p, label, li, td, th,
-span:not(.material-symbols-rounded):not(.material-symbols-outlined),
+span:not([style]),
 [data-testid="stSidebar"],
 [data-testid="stSidebar"] p,
-[data-testid="stSidebar"] span:not(.material-symbols-rounded):not(.material-symbols-outlined),
+[data-testid="stSidebar"] span:not([style]),
 [data-testid="stSidebar"] label,
-[data-testid="stSidebar"] div,
-button, input, select, textarea,
+[data-testid="stSidebar"] div:not(:has(> span[style])),
+button:not([style]), input, select, textarea,
 .stSelectbox label, .stMultiSelect label,
 .stRadio label, .stCheckbox label,
 [data-baseweb="select"],
 [data-baseweb="select"] div,
-[data-baseweb="select"] span:not(.material-symbols-rounded):not(.material-symbols-outlined),
+[data-baseweb="select"] span:not([style]),
 [data-baseweb="radio"],
 [data-baseweb="radio"] div,
-[data-baseweb="radio"] span:not(.material-symbols-rounded):not(.material-symbols-outlined),
+[data-baseweb="radio"] span:not([style]),
 [data-baseweb="tab"] {
     font-family: var(--rdl-font) !important;
-}
-
-.material-symbols-rounded,
-.material-symbols-outlined {
-    font-family: 'Material Symbols Rounded', 'Material Symbols Outlined' !important;
 }
 
 h1, h2, h3, h4, h5, h6,
