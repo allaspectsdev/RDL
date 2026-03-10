@@ -715,6 +715,72 @@ def load_sample_dataset(name: str) -> pd.DataFrame:
     elif name == "Stocks":
         import plotly.express as px
         return px.data.stocks()
+    elif name == "Bioprocess":
+        rng = np.random.default_rng(42)
+        organisms = ["E. coli", "S. cerevisiae", "CHO", "P. pastoris"]
+        media = ["LB", "YPD", "DMEM", "BMGY"]
+        scales = ["Flask", "Bench (2L)", "Pilot (50L)"]
+        rows = []
+        run_id = 0
+        for org_idx, organism in enumerate(organisms):
+            preferred_media = media[org_idx]
+            for scale in scales:
+                for replicate in range(1, 4):
+                    run_id += 1
+                    # Growth parameters vary by organism
+                    mu_max = {"E. coli": 0.7, "S. cerevisiae": 0.45,
+                              "CHO": 0.03, "P. pastoris": 0.25}[organism]
+                    temp_set = {"E. coli": 37.0, "S. cerevisiae": 30.0,
+                                "CHO": 37.0, "P. pastoris": 28.0}[organism]
+                    ph_set = {"E. coli": 7.0, "S. cerevisiae": 5.5,
+                              "CHO": 7.2, "P. pastoris": 5.0}[organism]
+                    max_biomass = {"E. coli": 12, "S. cerevisiae": 8,
+                                   "CHO": 6, "P. pastoris": 90}[organism]
+                    hours = 48 if organism != "CHO" else 168
+                    n_points = hours // 2
+                    scale_factor = {"Flask": 0.8, "Bench (2L)": 1.0,
+                                    "Pilot (50L)": 1.1}[scale]
+                    for i in range(n_points):
+                        t = i * 2
+                        # Logistic growth with noise
+                        x0 = 0.1
+                        K = max_biomass * scale_factor * rng.normal(1, 0.05)
+                        biomass = K / (1 + ((K - x0) / x0) * np.exp(-mu_max * t))
+                        biomass *= rng.normal(1, 0.03)
+                        biomass = max(0.05, biomass)
+                        # Substrate depletion (Monod-like)
+                        substrate_0 = 20.0
+                        substrate = max(0, substrate_0 * (1 - biomass / K) + rng.normal(0, 0.3))
+                        # Product formation (growth-associated + maintenance)
+                        product = 0.35 * biomass + 0.01 * t + rng.normal(0, 0.1)
+                        product = max(0, product)
+                        # Process parameters with noise
+                        temp = temp_set + rng.normal(0, 0.3)
+                        ph = ph_set + rng.normal(0, 0.1) - 0.005 * t
+                        do2 = max(0, min(100, 80 - 2.5 * biomass + rng.normal(0, 3)))
+                        agitation = min(1200, 200 + 15 * biomass + rng.normal(0, 10))
+                        viability = min(100, max(0, 98 - 0.3 * t + rng.normal(0, 2)))
+                        rows.append({
+                            "run_id": f"R{run_id:03d}",
+                            "organism": organism,
+                            "media": preferred_media,
+                            "scale": scale,
+                            "replicate": replicate,
+                            "time_h": t,
+                            "temperature_C": round(temp, 1),
+                            "pH": round(ph, 2),
+                            "dissolved_O2_pct": round(do2, 1),
+                            "agitation_rpm": int(agitation),
+                            "substrate_g_L": round(substrate, 2),
+                            "biomass_g_L": round(biomass, 2),
+                            "product_g_L": round(product, 2),
+                            "viability_pct": round(viability, 1),
+                        })
+        df = pd.DataFrame(rows)
+        df["organism"] = pd.Categorical(df["organism"])
+        df["media"] = pd.Categorical(df["media"])
+        df["scale"] = pd.Categorical(df["scale"])
+        return df
     return None
 
 
@@ -772,7 +838,7 @@ def main():
             sample = st.selectbox(
                 "Select dataset:",
                 ["Iris", "Wine", "Boston-style Housing", "Diabetes",
-                 "Tips", "Gapminder", "Stocks"],
+                 "Tips", "Gapminder", "Stocks", "Bioprocess"],
             )
             if st.button("Load Dataset", use_container_width=True):
                 st.session_state["df"] = load_sample_dataset(sample)

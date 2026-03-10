@@ -10,7 +10,7 @@ Upload a dataset and graphically explore your data with 22+ chart types, full st
 
 ### Data Management
 - Upload CSV, Excel (.xlsx/.xls), TSV, and JSON files
-- 7 built-in sample datasets (Iris, Wine, Housing, Diabetes, Tips, Gapminder, Stocks)
+- 8 built-in sample datasets (Iris, Wine, Housing, Diabetes, Tips, Gapminder, Stocks, Bioprocess)
 - Data preview, cleaning, type conversion, missing value handling
 - Column transforms (log, z-score, normalize, binning), encoding (one-hot, label), computed columns
 
