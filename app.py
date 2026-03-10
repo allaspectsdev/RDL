@@ -62,21 +62,14 @@ st.markdown("""<style>
 
 html, body,
 .stMarkdown, .stText, p, label, li, td, th,
-span:not([style]),
 [data-testid="stSidebar"],
 [data-testid="stSidebar"] p,
-[data-testid="stSidebar"] span:not([style]),
 [data-testid="stSidebar"] label,
-[data-testid="stSidebar"] div:not(:has(> span[style])),
-button:not([style]), input, select, textarea,
+button, input, select, textarea,
 .stSelectbox label, .stMultiSelect label,
 .stRadio label, .stCheckbox label,
 [data-baseweb="select"],
-[data-baseweb="select"] div,
-[data-baseweb="select"] span:not([style]),
 [data-baseweb="radio"],
-[data-baseweb="radio"] div,
-[data-baseweb="radio"] span:not([style]),
 [data-baseweb="tab"] {
     font-family: var(--rdl-font) !important;
 }
