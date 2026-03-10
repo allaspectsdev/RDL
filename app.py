@@ -61,10 +61,11 @@ st.markdown("""<style>
 }
 
 html, body,
-.stMarkdown, .stText, p, span, label, li, td, th,
+.stMarkdown, .stText, p, label, li, td, th,
+span:not(.material-symbols-rounded):not(.material-symbols-outlined),
 [data-testid="stSidebar"],
 [data-testid="stSidebar"] p,
-[data-testid="stSidebar"] span,
+[data-testid="stSidebar"] span:not(.material-symbols-rounded):not(.material-symbols-outlined),
 [data-testid="stSidebar"] label,
 [data-testid="stSidebar"] div,
 button, input, select, textarea,
@@ -72,12 +73,17 @@ button, input, select, textarea,
 .stRadio label, .stCheckbox label,
 [data-baseweb="select"],
 [data-baseweb="select"] div,
-[data-baseweb="select"] span,
+[data-baseweb="select"] span:not(.material-symbols-rounded):not(.material-symbols-outlined),
 [data-baseweb="radio"],
 [data-baseweb="radio"] div,
-[data-baseweb="radio"] span,
+[data-baseweb="radio"] span:not(.material-symbols-rounded):not(.material-symbols-outlined),
 [data-baseweb="tab"] {
     font-family: var(--rdl-font) !important;
+}
+
+.material-symbols-rounded,
+.material-symbols-outlined {
+    font-family: 'Material Symbols Rounded', 'Material Symbols Outlined' !important;
 }
 
 h1, h2, h3, h4, h5, h6,
