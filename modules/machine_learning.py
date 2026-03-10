@@ -12,6 +12,7 @@ from plotly.subplots import make_subplots
 
 from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.pipeline import Pipeline
 from sklearn.metrics import (
     confusion_matrix, classification_report, roc_curve, auc,
     mean_squared_error, r2_score, mean_absolute_error, silhouette_score,
@@ -35,7 +36,7 @@ from sklearn.manifold import TSNE
 
 @st.cache_data(show_spinner="Training classifiers...")
 def _compare_classifiers(X, y):
-    """Compare all classifiers with 5-fold CV (cached)."""
+    """Compare all classifiers with 5-fold CV (cached). Uses Pipeline to scale inside each fold."""
     models = {
         "Logistic Regression": LogisticRegression(max_iter=1000, random_state=42),
         "Random Forest": RandomForestClassifier(random_state=42, n_estimators=100),
@@ -48,7 +49,8 @@ def _compare_classifiers(X, y):
     results = []
     for name, model in models.items():
         try:
-            scores = cross_val_score(model, X, y, cv=5, scoring="accuracy")
+            pipe = Pipeline([("scaler", StandardScaler()), ("model", model)])
+            scores = cross_val_score(pipe, X, y, cv=5, scoring="accuracy")
             results.append({
                 "Model": name,
                 "Mean Accuracy": scores.mean(),
@@ -63,7 +65,7 @@ def _compare_classifiers(X, y):
 
 @st.cache_data(show_spinner="Training regressors...")
 def _compare_regressors(X, y):
-    """Compare all regressors with 5-fold CV (cached)."""
+    """Compare all regressors with 5-fold CV (cached). Uses Pipeline to scale inside each fold."""
     models = {
         "Linear": LinearRegression(),
         "Ridge": Ridge(),
@@ -76,8 +78,9 @@ def _compare_regressors(X, y):
     results = []
     for name, model in models.items():
         try:
-            r2_scores = cross_val_score(model, X, y, cv=5, scoring="r2")
-            neg_rmse = cross_val_score(model, X, y, cv=5, scoring="neg_root_mean_squared_error")
+            pipe = Pipeline([("scaler", StandardScaler()), ("model", model)])
+            r2_scores = cross_val_score(pipe, X, y, cv=5, scoring="r2")
+            neg_rmse = cross_val_score(pipe, X, y, cv=5, scoring="neg_root_mean_squared_error")
             results.append({
                 "Model": name,
                 "Mean R²": r2_scores.mean(),
@@ -289,9 +292,6 @@ def _render_classification(df: pd.DataFrame):
         y = le.fit_transform(y_raw)
         classes = le.classes_
 
-        scaler = StandardScaler()
-        X = scaler.fit_transform(X)
-
         try:
             X_train, X_test, y_train, y_test = train_test_split(
                 X, y, test_size=test_size, random_state=random_state, stratify=y)
@@ -300,14 +300,20 @@ def _render_classification(df: pd.DataFrame):
             X_train, X_test, y_train, y_test = train_test_split(
                 X, y, test_size=test_size, random_state=random_state)
 
+        # Scale after split to prevent data leakage
+        scaler = StandardScaler()
+        X_train = scaler.fit_transform(X_train)
+        X_test = scaler.transform(X_test)
+
         # Build model
         model = _build_classifier(algorithm, params, random_state)
         model.fit(X_train, y_train)
         y_pred = model.predict(X_test)
 
-        # Metrics
+        # Metrics — use Pipeline for CV so scaling is done inside each fold
         accuracy = (y_pred == y_test).mean()
-        cv_scores = cross_val_score(model, X, y, cv=cv_folds, scoring="accuracy")
+        cv_pipe = Pipeline([("scaler", StandardScaler()), ("model", _build_classifier(algorithm, params, random_state))])
+        cv_scores = cross_val_score(cv_pipe, X, y, cv=cv_folds, scoring="accuracy")
 
         c1, c2, c3 = st.columns(3)
         c1.metric("Test Accuracy", f"{accuracy:.4f}")
@@ -429,11 +435,13 @@ def _render_ml_regression(df: pd.DataFrame):
         X = data[features].values
         y = data[target].values
 
-        scaler = StandardScaler()
-        X_scaled = scaler.fit_transform(X)
-
         X_train, X_test, y_train, y_test = train_test_split(
-            X_scaled, y, test_size=test_size, random_state=random_state)
+            X, y, test_size=test_size, random_state=random_state)
+
+        # Scale after split to prevent data leakage
+        scaler = StandardScaler()
+        X_train = scaler.fit_transform(X_train)
+        X_test = scaler.transform(X_test)
 
         # Build model
         model = _build_regressor(algorithm, params, random_state)
@@ -441,13 +449,14 @@ def _render_ml_regression(df: pd.DataFrame):
         y_pred = model.predict(X_test)
         y_train_pred = model.predict(X_train)
 
-        # Metrics
+        # Metrics — use Pipeline for CV so scaling is done inside each fold
         r2 = r2_score(y_test, y_pred)
         adj_r2 = 1 - (1 - r2) * (len(y_test) - 1) / (len(y_test) - len(features) - 1)
         rmse = np.sqrt(mean_squared_error(y_test, y_pred))
         mae = mean_absolute_error(y_test, y_pred)
         mape = np.mean(np.abs((y_test - y_pred) / y_test)) * 100 if (y_test != 0).all() else np.nan
-        cv_scores = cross_val_score(model, X_scaled, y, cv=cv_folds, scoring="r2")
+        cv_pipe = Pipeline([("scaler", StandardScaler()), ("model", _build_regressor(algorithm, params, random_state))])
+        cv_scores = cross_val_score(cv_pipe, X, y, cv=cv_folds, scoring="r2")
 
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("R²", f"{r2:.4f}")
@@ -591,7 +600,7 @@ def _render_model_comparison(df: pd.DataFrame):
 
         if st.button("Compare All Classifiers", key="run_mc_clf"):
             data = df[features + [target]].dropna()
-            X = StandardScaler().fit_transform(data[features].values)
+            X = data[features].values
             y = LabelEncoder().fit_transform(data[target])
 
             results = _compare_classifiers(X, y)
@@ -617,7 +626,7 @@ def _render_model_comparison(df: pd.DataFrame):
 
         if st.button("Compare All Regressors", key="run_mc_reg"):
             data = df[features + [target]].dropna()
-            X = StandardScaler().fit_transform(data[features].values)
+            X = data[features].values
             y = data[target].values
 
             results = _compare_regressors(X, y)

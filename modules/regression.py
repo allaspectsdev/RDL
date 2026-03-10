@@ -324,6 +324,7 @@ def _render_logistic(df: pd.DataFrame):
         from sklearn.linear_model import LogisticRegression
         from sklearn.metrics import confusion_matrix, classification_report, roc_curve, auc
         from sklearn.preprocessing import LabelEncoder
+        from sklearn.model_selection import train_test_split
 
         data = df[[target] + features].dropna()
         X = data[features].values
@@ -338,11 +339,16 @@ def _render_logistic(df: pd.DataFrame):
             y = y_raw.values.astype(int)
             classes = np.unique(y)
 
-        # Fit with statsmodels for proper inference
+        # Train/test split for honest evaluation
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.2, random_state=42, stratify=y)
+
+        # Fit with statsmodels for proper inference (on training data)
         if HAS_SM:
-            X_sm = sm.add_constant(X)
+            X_sm_train = sm.add_constant(X_train)
+            X_sm_test = sm.add_constant(X_test)
             try:
-                logit_model = sm.Logit(y, X_sm).fit(disp=0)
+                logit_model = sm.Logit(y_train, X_sm_train).fit(disp=0)
                 st.markdown("#### Model Summary")
 
                 coef_names = ["Intercept"] + features
@@ -361,41 +367,41 @@ def _render_logistic(df: pd.DataFrame):
                 c2.metric("BIC", f"{logit_model.bic:.2f}")
                 c3.metric("Pseudo R²", f"{logit_model.prsquared:.4f}")
 
-                y_prob = logit_model.predict(X_sm)
+                y_prob = logit_model.predict(X_sm_test)
             except Exception:
                 # Fallback to sklearn
                 st.warning("Using sklearn for logistic regression — limited statistical output.")
                 model = LogisticRegression(max_iter=1000)
-                model.fit(X, y)
-                y_prob = model.predict_proba(X)[:, 1]
+                model.fit(X_train, y_train)
+                y_prob = model.predict_proba(X_test)[:, 1]
         else:
             model = LogisticRegression(max_iter=1000)
-            model.fit(X, y)
-            y_prob = model.predict_proba(X)[:, 1]
+            model.fit(X_train, y_train)
+            y_prob = model.predict_proba(X_test)[:, 1]
 
         y_pred = (y_prob >= 0.5).astype(int)
 
-        # Confusion matrix
-        cm = confusion_matrix(y, y_pred)
+        # Confusion matrix (on held-out test data)
+        cm = confusion_matrix(y_test, y_pred)
         fig_cm = px.imshow(cm, text_auto=True, color_continuous_scale="Blues",
                            x=[str(c) for c in classes], y=[str(c) for c in classes],
                            labels=dict(x="Predicted", y="Actual"),
-                           title="Confusion Matrix")
+                           title="Confusion Matrix (Test Set)")
         st.plotly_chart(fig_cm, use_container_width=True)
 
         # Classification report
-        report = classification_report(y, y_pred, target_names=[str(c) for c in classes], output_dict=True)
+        report = classification_report(y_test, y_pred, target_names=[str(c) for c in classes], output_dict=True)
         st.dataframe(pd.DataFrame(report).transpose().round(4), use_container_width=True)
 
         # ROC curve
-        fpr, tpr, thresholds = roc_curve(y, y_prob)
+        fpr, tpr, thresholds = roc_curve(y_test, y_prob)
         roc_auc = auc(fpr, tpr)
         fig_roc = go.Figure()
         fig_roc.add_trace(go.Scatter(x=fpr, y=tpr, name=f"ROC (AUC={roc_auc:.4f})",
                                      line=dict(color="steelblue", width=2)))
         fig_roc.add_trace(go.Scatter(x=[0, 1], y=[0, 1], name="Random",
                                      line=dict(color="gray", dash="dash")))
-        fig_roc.update_layout(title="ROC Curve", xaxis_title="False Positive Rate",
+        fig_roc.update_layout(title="ROC Curve (Test Set)", xaxis_title="False Positive Rate",
                               yaxis_title="True Positive Rate", height=400)
         st.plotly_chart(fig_roc, use_container_width=True)
 

@@ -789,7 +789,8 @@ def _dataset_info(df):
     """Compute dataset info for sidebar display (cached)."""
     n_numeric = len(df.select_dtypes(include=[np.number]).columns)
     n_cat = len(df.select_dtypes(include=["object", "category"]).columns)
-    missing_pct = (df.isnull().sum().sum() / (df.shape[0] * df.shape[1])) * 100
+    total_cells = df.shape[0] * df.shape[1]
+    missing_pct = (df.isnull().sum().sum() / total_cells * 100) if total_cells > 0 else 0.0
     mem_kb = df.memory_usage(deep=True).sum() / 1024
     return n_numeric, n_cat, missing_pct, mem_kb
 

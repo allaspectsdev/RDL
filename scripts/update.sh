@@ -14,6 +14,7 @@ APP_DIR="/opt/rdl"
 # Detect deployment type
 if docker compose version &> /dev/null && docker ps --format '{{.Names}}' | grep -q rdl-app; then
     log "Docker deployment detected."
+    cd "$APP_DIR"
 
     log "Pulling latest code..."
     git pull origin main

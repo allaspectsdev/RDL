@@ -128,7 +128,8 @@ def _render_exploration(df: pd.DataFrame):
 
     # Rolling statistics
     st.markdown("#### Rolling Statistics")
-    window = st.slider("Window size:", 2, min(100, len(ts) // 2), 12, key="exp_window")
+    _max_w = max(2, min(100, len(ts) // 2))
+    window = st.slider("Window size:", 2, _max_w, min(12, _max_w), key="exp_window")
 
     rolling_mean = ts.rolling(window=window).mean()
     rolling_std = ts.rolling(window=window).std()
@@ -270,7 +271,8 @@ def _render_acf_pacf(df: pd.DataFrame):
     if ts is None:
         return
 
-    n_lags = st.slider("Number of lags:", 5, min(100, len(ts) // 2), 40, key="acf_lags")
+    _max_lags = max(5, min(100, len(ts) // 2))
+    n_lags = st.slider("Number of lags:", 5, _max_lags, min(40, _max_lags), key="acf_lags")
 
     if st.button("Compute ACF/PACF", key="run_acf"):
         ts_clean = ts.dropna()
@@ -347,12 +349,14 @@ def _render_smoothing(df: pd.DataFrame):
     ts_clean = ts.dropna()
 
     if method == "Simple Moving Average":
-        window = st.slider("Window:", 2, min(50, len(ts_clean) // 2), 7, key="sma_window")
+        _max_sma = max(2, min(50, len(ts_clean) // 2))
+        window = st.slider("Window:", 2, _max_sma, min(7, _max_sma), key="sma_window")
         smoothed = ts_clean.rolling(window=window).mean()
         label = f"SMA({window})"
 
     elif method == "Exponential Moving Average":
-        span = st.slider("Span:", 2, min(50, len(ts_clean) // 2), 12, key="ema_span")
+        _max_ema = max(2, min(50, len(ts_clean) // 2))
+        span = st.slider("Span:", 2, _max_ema, min(12, _max_ema), key="ema_span")
         smoothed = ts_clean.ewm(span=span).mean()
         label = f"EMA(span={span})"
 
