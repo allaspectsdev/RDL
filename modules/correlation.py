@@ -400,7 +400,7 @@ def _render_factor_analysis(df: pd.DataFrame):
 
     max_factors = min(len(selected) - 1, 10)
     if max_factors < 1:
-        st.warning("Need at least 2 variables selected for factor analysis.")
+        empty_state("Need at least 2 variables selected for factor analysis.")
         return
     n_factors = st.slider("Number of factors:", 1, max_factors, min(2, max_factors), key="fa_n")
     rotation = st.selectbox("Rotation:", ["varimax", "none"], key="fa_rot",

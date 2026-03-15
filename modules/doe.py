@@ -57,7 +57,7 @@ def render_doe(df: pd.DataFrame):
 def _render_design_generation(df: pd.DataFrame):
     """Generate experimental designs."""
     if not HAS_PYDOE:
-        st.warning("pyDOE2 required for design generation. Install with: pip install pyDOE2")
+        empty_state("pyDOE2 required for design generation.", "Install with: pip install pyDOE2")
         return
 
     section_header("Design Parameters")
@@ -571,7 +571,7 @@ def _generate_mixture_design(n_factors):
 def _render_design_analysis(df: pd.DataFrame):
     """Analyze a completed DOE dataset."""
     if not HAS_SM:
-        st.warning("statsmodels required for design analysis. Install with: pip install statsmodels")
+        empty_state("statsmodels required for design analysis.", "Install with: pip install statsmodels")
         return
 
     num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
@@ -891,7 +891,7 @@ def _plot_half_normal(model):
 def _render_response_surface(df: pd.DataFrame):
     """Response surface methodology with 3D surface and contour plots."""
     if not HAS_SM:
-        st.warning("statsmodels required for response surface analysis.")
+        empty_state("statsmodels required for response surface analysis.", "Install with: pip install statsmodels")
         return
 
     num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
@@ -1113,7 +1113,7 @@ def _find_optimum(b, x1_col, x2_col, response_col, x1, x2,
 def _render_augment_design(df: pd.DataFrame):
     """Augment an existing experimental design."""
     if not HAS_PYDOE:
-        st.warning("pyDOE2 required for design augmentation.")
+        empty_state("pyDOE2 required for design augmentation.", "Install with: pip install pyDOE2")
         return
 
     num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
@@ -1215,7 +1215,7 @@ Extend an existing experiment by adding runs:
 def _render_desirability(df: pd.DataFrame):
     """Multi-response optimization via desirability functions."""
     if not HAS_SM:
-        st.warning("statsmodels required for desirability optimization.")
+        empty_state("statsmodels required for desirability optimization.", "Install with: pip install statsmodels")
         return
 
     num_cols = df.select_dtypes(include=[np.number]).columns.tolist()

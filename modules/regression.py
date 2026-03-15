@@ -70,7 +70,7 @@ def _render_simple_linear(df: pd.DataFrame):
     """Simple linear regression."""
     num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
     if len(num_cols) < 2:
-        st.warning("Need at least 2 numeric columns.")
+        empty_state("Need at least 2 numeric columns.")
         return
 
     c1, c2 = st.columns(2)
@@ -182,12 +182,12 @@ def _render_simple_linear(df: pd.DataFrame):
 def _render_multiple_linear(df: pd.DataFrame):
     """Multiple linear regression."""
     if not HAS_SM:
-        st.warning("statsmodels required for multiple regression.")
+        empty_state("statsmodels required for multiple regression.", "Install with: pip install statsmodels")
         return
 
     num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
     if len(num_cols) < 3:
-        st.warning("Need at least 3 numeric columns.")
+        empty_state("Need at least 3 numeric columns.")
         return
 
     y_col = st.selectbox("Y (response):", num_cols, key="mlr_y")
@@ -289,7 +289,7 @@ def _render_polynomial(df: pd.DataFrame):
     """Polynomial regression."""
     num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
     if len(num_cols) < 2:
-        st.warning("Need at least 2 numeric columns.")
+        empty_state("Need at least 2 numeric columns.")
         return
 
     c1, c2, c3 = st.columns(3)
@@ -400,7 +400,7 @@ def _render_logistic(df: pd.DataFrame):
     # Find potential binary targets
     binary_cols = [c for c in all_cols if df[c].nunique() == 2]
     if not binary_cols:
-        st.warning("No binary target variable found (need column with exactly 2 unique values).")
+        empty_state("No binary target variable found.", "Need a column with exactly 2 unique values for logistic regression.")
         return
 
     target = st.selectbox("Target (binary):", binary_cols, key="log_target")
@@ -514,7 +514,7 @@ def _render_curve_fitting(df: pd.DataFrame):
     """Non-linear curve fitting (like MATLAB cftool)."""
     num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
     if len(num_cols) < 2:
-        st.warning("Need at least 2 numeric columns.")
+        empty_state("Need at least 2 numeric columns.")
         return
 
     c1, c2 = st.columns(2)
@@ -630,12 +630,12 @@ def _render_curve_fitting(df: pd.DataFrame):
 def _render_diagnostics(df: pd.DataFrame):
     """Regression diagnostics panel."""
     if not HAS_SM:
-        st.warning("statsmodels required for regression diagnostics.")
+        empty_state("statsmodels required for regression diagnostics.", "Install with: pip install statsmodels")
         return
 
     num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
     if len(num_cols) < 2:
-        st.warning("Need at least 2 numeric columns.")
+        empty_state("Need at least 2 numeric columns.")
         return
 
     y_col = st.selectbox("Y:", num_cols, key="diag_y")
@@ -765,12 +765,12 @@ def _plot_residuals(model, x_label, y_label):
 def _render_glm(df: pd.DataFrame):
     """Generalized Linear Models."""
     if not HAS_SM:
-        st.warning("statsmodels required for GLM.")
+        empty_state("statsmodels required for GLM.", "Install with: pip install statsmodels")
         return
 
     num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
     if len(num_cols) < 2:
-        st.warning("Need at least 2 numeric columns.")
+        empty_state("Need at least 2 numeric columns.")
         return
 
     y_col = st.selectbox("Response (Y):", num_cols, key="glm_y")
@@ -904,12 +904,12 @@ def _render_glm(df: pd.DataFrame):
 def _render_robust_quantile(df: pd.DataFrame):
     """Robust and quantile regression."""
     if not HAS_SM:
-        st.warning("statsmodels required.")
+        empty_state("statsmodels required for robust & quantile regression.", "Install with: pip install statsmodels")
         return
 
     num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
     if len(num_cols) < 2:
-        st.warning("Need at least 2 numeric columns.")
+        empty_state("Need at least 2 numeric columns.")
         return
 
     reg_type = st.selectbox("Method:", [
@@ -1102,14 +1102,14 @@ def _render_robust_quantile(df: pd.DataFrame):
 def _render_mixed_models(df: pd.DataFrame):
     """Mixed / multilevel models."""
     if not HAS_SM:
-        st.warning("statsmodels required for mixed models.")
+        empty_state("statsmodels required for mixed models.", "Install with: pip install statsmodels")
         return
 
     num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
     cat_cols = df.select_dtypes(include=["object", "category"]).columns.tolist()
 
     if not num_cols or not cat_cols:
-        st.warning("Need numeric and categorical columns for mixed models.")
+        empty_state("Need numeric and categorical columns for mixed models.")
         return
 
     y_col = st.selectbox("Dependent variable:", num_cols, key="mm_y")
@@ -1568,7 +1568,7 @@ Built-in models:
 def _render_profiler(df: pd.DataFrame):
     """Interactive prediction profiler for exploring fitted models."""
     if not HAS_SM:
-        st.warning("statsmodels required for the prediction profiler.")
+        empty_state("statsmodels required for the prediction profiler.", "Install with: pip install statsmodels")
         return
 
     num_cols = df.select_dtypes(include=[np.number]).columns.tolist()

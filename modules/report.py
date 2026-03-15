@@ -8,6 +8,8 @@ import numpy as np
 import io
 from datetime import datetime
 
+from modules.ui_helpers import empty_state
+
 
 def generate_report_html(title: str, sections: list) -> str:
     """Generate an HTML report from sections.
@@ -83,7 +85,7 @@ def render_download_report_button(title: str, sections: list, key: str = "dl_rep
 def render_report_builder(df: pd.DataFrame):
     """Interactive report builder accessible from sidebar."""
     if df is None or df.empty:
-        st.warning("No data loaded.")
+        empty_state("No data loaded.", "Upload a dataset from the sidebar to begin.")
         return
 
     st.markdown("#### Report Builder")

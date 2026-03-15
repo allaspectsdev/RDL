@@ -309,7 +309,7 @@ def render_visualization(df: pd.DataFrame):
     # ── 3D Scatter ──
     elif chart_type == "3D Scatter":
         if len(num_cols) < 3:
-            st.warning("Need at least 3 numeric columns.")
+            empty_state("Need at least 3 numeric columns.")
             return
         c1, c2, c3 = st.columns(3)
         x = c1.selectbox("X:", num_cols, key="3d_x")
@@ -324,7 +324,7 @@ def render_visualization(df: pd.DataFrame):
     # ── 3D Surface ──
     elif chart_type == "3D Surface":
         if len(num_cols) < 3:
-            st.warning("Need at least 3 numeric columns.")
+            empty_state("Need at least 3 numeric columns.")
             return
         c1, c2, c3 = st.columns(3)
         x = c1.selectbox("X:", num_cols, key="surf_x")
@@ -350,7 +350,7 @@ def render_visualization(df: pd.DataFrame):
     # ── Contour Plot ──
     elif chart_type == "Contour Plot":
         if len(num_cols) < 2:
-            st.warning("Need at least 2 numeric columns.")
+            empty_state("Need at least 2 numeric columns.")
             return
         c1, c2 = st.columns(2)
         x = c1.selectbox("X:", num_cols, key="cont_x")
@@ -401,7 +401,7 @@ def render_visualization(df: pd.DataFrame):
     # ── Joint Plot ──
     elif chart_type == "Joint Plot":
         if len(num_cols) < 2:
-            st.warning("Need at least 2 numeric columns.")
+            empty_state("Need at least 2 numeric columns.")
             return
         c1, c2 = st.columns(2)
         x = c1.selectbox("X:", num_cols, key="joint_x")
@@ -416,7 +416,7 @@ def render_visualization(df: pd.DataFrame):
     # ── Mosaic Plot ──
     elif chart_type == "Mosaic Plot":
         if len(cat_cols) < 2:
-            st.warning("Need at least 2 categorical columns for mosaic plot.")
+            empty_state("Need at least 2 categorical columns for mosaic plot.")
             return
         c1, c2 = st.columns(2)
         var1 = c1.selectbox("Variable 1 (width):", cat_cols, key="mos_v1")
@@ -495,10 +495,10 @@ def render_visualization(df: pd.DataFrame):
     # ── Variability Chart ──
     elif chart_type == "Variability Chart":
         if not num_cols:
-            st.warning("Need numeric columns.")
+            empty_state("Need numeric columns.")
             return
         if not cat_cols:
-            st.warning("Need at least one categorical grouping column.")
+            empty_state("Need at least one categorical grouping column.")
             return
 
         value = st.selectbox("Value:", num_cols, key="var_val")

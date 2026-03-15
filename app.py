@@ -47,6 +47,7 @@ st.markdown("""<style>
     --rdl-accent-subtle: rgba(99,102,241,0.08);
     --rdl-success: #22c55e;
     --rdl-warning: #f59e0b;
+    --rdl-warning-dark: #b45309;
     --rdl-error: #ef4444;
     --rdl-info: #3b82f6;
     --rdl-border: #e2e8f0;
@@ -149,6 +150,12 @@ st.markdown("""<style>
 [data-testid="stSidebar"] [data-baseweb="radio"]:hover {
     background: var(--rdl-sidebar-hover) !important;
 }
+[data-testid="stSidebar"] [data-baseweb="radio"]:focus-visible,
+[data-testid="stSidebar"] [data-baseweb="radio"]:has(input:focus-visible) {
+    outline: 2px solid var(--rdl-accent);
+    outline-offset: -2px;
+    background: var(--rdl-sidebar-hover) !important;
+}
 [data-testid="stSidebar"] [data-baseweb="radio"]:has(input:checked) {
     background: var(--rdl-sidebar-active) !important;
     border-left: 3px solid var(--rdl-accent) !important;
@@ -223,8 +230,11 @@ st.markdown("""<style>
     padding: 0 0.5rem;
     margin-bottom: 0.25rem;
     cursor: pointer;
-    border-radius: 8px;
-    transition: background 0.2s;
+    border-radius: var(--rdl-radius-sm);
+    transition: background var(--rdl-dur) var(--rdl-ease);
+}
+.rdl-brand:hover {
+    background: var(--rdl-sidebar-hover);
 }
 .rdl-brand-mark {
     display: flex;
@@ -232,8 +242,8 @@ st.markdown("""<style>
     justify-content: center;
     width: 40px;
     height: 40px;
-    background: linear-gradient(135deg, #6366f1, #818cf8);
-    border-radius: 11px;
+    background: var(--rdl-accent-gradient);
+    border-radius: var(--rdl-radius-sm);
     font-weight: 800;
     font-size: 0.78rem;
     color: #ffffff;
@@ -312,6 +322,9 @@ st.markdown("""<style>
     padding: 4px !important;
     border: 1px solid var(--rdl-border) !important;
     box-shadow: var(--rdl-shadow-xs) !important;
+    overflow-x: auto !important;
+    scrollbar-width: thin !important;
+    -webkit-overflow-scrolling: touch !important;
 }
 .stTabs [data-baseweb="tab"] {
     padding: 0.5rem 1.1rem !important;
@@ -329,11 +342,6 @@ st.markdown("""<style>
 .stTabs [data-baseweb="tab"]:hover {
     background: var(--rdl-accent-subtle) !important;
     color: var(--rdl-accent) !important;
-}
-.stTabs [data-baseweb="tab-list"] {
-    overflow-x: auto !important;
-    scrollbar-width: thin !important;
-    -webkit-overflow-scrolling: touch !important;
 }
 .stTabs [aria-selected="true"] {
     background: var(--rdl-accent) !important;
@@ -353,6 +361,7 @@ st.markdown("""<style>
 [data-testid="stMetric"] {
     background: var(--rdl-bg-card) !important;
     border: 1px solid var(--rdl-border) !important;
+    border-top: 3px solid var(--rdl-accent) !important;
     border-radius: var(--rdl-radius-sm) !important;
     padding: 1rem 1.25rem !important;
     box-shadow: var(--rdl-shadow-sm) !important;
@@ -361,14 +370,14 @@ st.markdown("""<style>
 }
 [data-testid="stMetric"]:hover {
     box-shadow: var(--rdl-shadow-md) !important;
-    transform: translateY(-1px);
+    transform: translateY(-2px) !important;
 }
 [data-testid="stMetric"] [data-testid="stMetricLabel"] {
     font-size: 0.72rem !important;
     text-transform: uppercase !important;
     letter-spacing: 0.05em !important;
     font-weight: 600 !important;
-    color: var(--rdl-text-secondary) !important;
+    color: var(--rdl-text-muted) !important;
 }
 [data-testid="stMetric"] [data-testid="stMetricValue"] {
     font-size: 1.55rem !important;
@@ -468,6 +477,10 @@ st.markdown("""<style>
     opacity: 0.5 !important;
 }
 
+html {
+    scrollbar-width: thin;
+    scrollbar-color: var(--rdl-text-muted) transparent;
+}
 ::-webkit-scrollbar {
     width: 6px;
     height: 6px;
@@ -590,18 +603,6 @@ st.markdown("""<style>
     margin: 0;
 }
 
-/* ── Metric Cards ── */
-[data-testid="stMetric"] {
-    border-top: 3px solid var(--rdl-accent) !important;
-    border-radius: var(--rdl-radius-sm) !important;
-    transition: box-shadow var(--rdl-dur) var(--rdl-ease),
-                transform var(--rdl-dur) var(--rdl-ease) !important;
-}
-[data-testid="stMetric"]:hover {
-    box-shadow: var(--rdl-shadow-md) !important;
-    transform: translateY(-2px) !important;
-}
-
 /* ── Validation Panel ── */
 .rdl-validation-panel {
     background: var(--rdl-bg-card);
@@ -712,7 +713,7 @@ st.markdown("""<style>
 .rdl-alt-tag {
     display: inline-block;
     background: rgba(245,158,11,0.12);
-    color: #b45309;
+    color: var(--rdl-warning-dark);
     font-weight: 600;
     font-size: 0.75rem;
     padding: 0.1rem 0.45rem;
@@ -761,14 +762,14 @@ st.markdown("""<style>
 .rdl-hero h1::before {
     content: '';
     display: block;
-    width: 64px;
+    width: clamp(48px, 8vw, 80px);
     height: 4px;
     background: var(--rdl-accent-gradient);
     border-radius: 2px;
     margin: 0 auto 1.25rem;
 }
 .rdl-accent-text {
-    background: linear-gradient(135deg, #6366f1, #a78bfa, #818cf8);
+    background: var(--rdl-accent-gradient);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
@@ -833,9 +834,9 @@ st.markdown("""<style>
     padding: 1.5rem;
     position: relative;
     overflow: hidden;
-    transition: box-shadow 0.25s var(--rdl-ease),
-                transform 0.25s var(--rdl-ease),
-                border-color 0.25s var(--rdl-ease);
+    transition: box-shadow var(--rdl-dur) var(--rdl-ease),
+                transform var(--rdl-dur) var(--rdl-ease),
+                border-color var(--rdl-dur) var(--rdl-ease);
 }
 .rdl-feature-card::before {
     content: '';
@@ -844,7 +845,7 @@ st.markdown("""<style>
     height: 3px;
     background: linear-gradient(90deg, var(--cat-color, var(--rdl-accent)), rgba(167,139,250,0.6));
     opacity: 0;
-    transition: opacity 0.25s var(--rdl-ease);
+    transition: opacity var(--rdl-dur) var(--rdl-ease);
 }
 .rdl-feature-card:hover {
     box-shadow: var(--rdl-shadow-xl);
@@ -884,9 +885,9 @@ st.markdown("""<style>
     padding: 1.25rem 1.5rem;
     position: relative;
     overflow: hidden;
-    transition: box-shadow 0.25s var(--rdl-ease),
-                transform 0.25s var(--rdl-ease),
-                border-color 0.25s var(--rdl-ease);
+    transition: box-shadow var(--rdl-dur) var(--rdl-ease),
+                transform var(--rdl-dur) var(--rdl-ease),
+                border-color var(--rdl-dur) var(--rdl-ease);
 }
 .rdl-module-item::before {
     content: '';
@@ -895,7 +896,7 @@ st.markdown("""<style>
     height: 3px;
     background: linear-gradient(90deg, var(--cat-color, var(--rdl-accent)), rgba(167,139,250,0.6));
     opacity: 0;
-    transition: opacity 0.25s var(--rdl-ease);
+    transition: opacity var(--rdl-dur) var(--rdl-ease);
 }
 .rdl-module-item:hover {
     box-shadow: var(--rdl-shadow-xl);
@@ -944,6 +945,12 @@ st.markdown("""<style>
     letter-spacing: -0.01em;
     box-shadow: 0 4px 14px rgba(99,102,241,0.3);
     animation: rdl-pulse-border 2.5s ease-in-out infinite;
+    transition: transform var(--rdl-dur) var(--rdl-ease),
+                box-shadow var(--rdl-dur) var(--rdl-ease);
+}
+.rdl-cta-card:hover {
+    transform: scale(1.03);
+    box-shadow: 0 6px 20px rgba(99,102,241,0.4);
 }
 .rdl-cta-card::after {
     content: ' \\2192';

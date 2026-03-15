@@ -222,7 +222,7 @@ def _imr_chart(data, col_name):
     """Individuals & Moving Range chart."""
     n = len(data)
     if n < 2:
-        st.warning("Need at least 2 observations for I-MR chart.")
+        empty_state("Need at least 2 observations for I-MR chart.")
         return
 
     mr = np.abs(np.diff(data))
@@ -268,7 +268,7 @@ def _xbar_r_chart(data, col_name, subgroup_col, subgroup_size, df):
     """X-bar & R chart."""
     subgroups = _build_subgroups(data, df, col_name, subgroup_col, subgroup_size)
     if len(subgroups) < 2:
-        st.warning("Need at least 2 subgroups.")
+        empty_state("Need at least 2 subgroups.")
         return
 
     n = len(subgroups[0])
@@ -320,7 +320,7 @@ def _xbar_s_chart(data, col_name, subgroup_col, subgroup_size, df):
     """X-bar & S chart."""
     subgroups = _build_subgroups(data, df, col_name, subgroup_col, subgroup_size)
     if len(subgroups) < 2:
-        st.warning("Need at least 2 subgroups.")
+        empty_state("Need at least 2 subgroups.")
         return
 
     n = len(subgroups[0])
@@ -387,7 +387,7 @@ def _ewma_chart(data, col_name):
     """EWMA (Exponentially Weighted Moving Average) chart."""
     n = len(data)
     if n < 2:
-        st.warning("Need at least 2 observations for EWMA chart.")
+        empty_state("Need at least 2 observations for EWMA chart.")
         return
 
     c1, c2 = st.columns(2)
@@ -444,7 +444,7 @@ def _cusum_chart(data, col_name):
     """Tabular CUSUM chart for detecting shifts from target."""
     n = len(data)
     if n < 2:
-        st.warning("Need at least 2 observations for CUSUM chart.")
+        empty_state("Need at least 2 observations for CUSUM chart.")
         return
 
     mu = np.mean(data)
@@ -813,7 +813,7 @@ def _render_process_capability(df: pd.DataFrame):
 
     if st.button("Analyse Capability", key="spc_cap_run"):
         if len(data) < 2:
-            st.warning("Need at least 2 observations.")
+            empty_state("Need at least 2 observations.")
             return
         if usl <= lsl:
             st.error("USL must be greater than LSL.")

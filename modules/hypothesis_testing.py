@@ -272,7 +272,7 @@ def _render_two_sample(df: pd.DataFrame):
         group_col = st.selectbox("Group column:", cat_cols, key="two_grp_col")
         groups = df[group_col].dropna().unique()
         if len(groups) < 2:
-            st.warning("Need at least 2 groups.")
+            empty_state("Need at least 2 groups.", "The grouping column needs at least 2 distinct values.")
             return
 
         g1_name = st.selectbox("Group 1:", groups, index=0, key="two_g1")
@@ -344,7 +344,7 @@ def _render_two_sample(df: pd.DataFrame):
 
     elif test_type in ("Paired t-test", "Wilcoxon Signed-Rank (paired)"):
         if len(num_cols) < 2:
-            st.warning("Need at least 2 numeric columns for paired test.")
+            empty_state("Need at least 2 numeric columns for paired test.")
             return
         col1 = st.selectbox("Column 1 (before/condition A):", num_cols, key="pair_c1")
         col2 = st.selectbox("Column 2 (after/condition B):", num_cols, index=min(1, len(num_cols) - 1), key="pair_c2")
@@ -429,7 +429,7 @@ def _render_chi_square(df: pd.DataFrame):
 
     if test_type == "Chi-Square Test of Independence":
         if len(cat_cols) < 2:
-            st.warning("Need at least 2 categorical columns.")
+            empty_state("Need at least 2 categorical columns.")
             return
         col1 = st.selectbox("Variable 1:", cat_cols, key="chi_col1")
         col2 = st.selectbox("Variable 2:", [c for c in cat_cols if c != col1], key="chi_col2")
@@ -868,14 +868,14 @@ def _render_bootstrap_permutation(df: pd.DataFrame):
 
     elif analysis == "Permutation Test (Two-Sample)":
         if not cat_cols:
-            st.warning("Need a categorical grouping column.")
+            empty_state("Need a categorical grouping column.")
             return
 
         value_col = st.selectbox("Value column:", num_cols, key="bp_perm_val")
         group_col = st.selectbox("Group column:", cat_cols, key="bp_perm_grp")
         groups = df[group_col].dropna().unique()
         if len(groups) < 2:
-            st.warning("Need at least 2 groups.")
+            empty_state("Need at least 2 groups.", "The grouping column needs at least 2 distinct values.")
             return
 
         g1_name = st.selectbox("Group 1:", groups, index=0, key="bp_perm_g1")
@@ -981,7 +981,7 @@ def _render_equivalence(df: pd.DataFrame):
         group_col = st.selectbox("Group column:", cat_cols, key="equiv_grp")
         groups = df[group_col].dropna().unique()
         if len(groups) < 2:
-            st.warning("Need at least 2 groups.")
+            empty_state("Need at least 2 groups.", "The grouping column needs at least 2 distinct values.")
             return
 
         c1, c2 = st.columns(2)
@@ -1056,7 +1056,7 @@ def _render_equivalence(df: pd.DataFrame):
 
     elif test_type == "TOST Equivalence (Paired)":
         if len(num_cols) < 2:
-            st.warning("Need at least 2 numeric columns.")
+            empty_state("Need at least 2 numeric columns.")
             return
 
         c1, c2 = st.columns(2)
@@ -1096,7 +1096,7 @@ def _render_equivalence(df: pd.DataFrame):
         group_col = st.selectbox("Group column:", cat_cols, key="ni_grp")
         groups = df[group_col].dropna().unique()
         if len(groups) < 2:
-            st.warning("Need at least 2 groups.")
+            empty_state("Need at least 2 groups.", "The grouping column needs at least 2 distinct values.")
             return
 
         c1, c2 = st.columns(2)

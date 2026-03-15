@@ -364,7 +364,7 @@ def _render_cox_ph(df: pd.DataFrame):
 
     if st.button("Fit Model", key="cox_fit"):
         if not covariates:
-            st.warning("Select at least one covariate.")
+            empty_state("Select at least one covariate.", "Choose covariates from the list above to fit the Cox model.")
             return
 
         cols_needed = [duration_col, event_col] + covariates

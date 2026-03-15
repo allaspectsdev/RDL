@@ -138,7 +138,7 @@ def _render_distribution(df: pd.DataFrame):
     col_data = df[col_name].dropna()
 
     if len(col_data) < 3:
-        st.warning("Need at least 3 data points.")
+        empty_state("Need at least 3 data points.", "The selected column needs more non-null values for distribution analysis.")
         return
 
     # Plot controls
