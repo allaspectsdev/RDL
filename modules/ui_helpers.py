@@ -27,23 +27,23 @@ _rdl_template.layout = go.Layout(
         size=13,
     ),
     colorway=_RDL_COLORWAY,
-    plot_bgcolor="#fafbfe",
+    plot_bgcolor="#fafafa",
     paper_bgcolor="#ffffff",
-    xaxis=dict(gridcolor="#e2e8f0", zeroline=False),
-    yaxis=dict(gridcolor="#e2e8f0", zeroline=False),
+    xaxis=dict(gridcolor="#ebebeb", zeroline=False),
+    yaxis=dict(gridcolor="#ebebeb", zeroline=False),
     hoverlabel=dict(
         bgcolor="#1e293b",
-        font_color="#f1f5f9",
-        font_size=14,
-        bordercolor="#334155",
+        font_color="#f8fafc",
+        font_size=13,
+        bordercolor="rgba(255,255,255,0.1)",
     ),
     title=dict(font=dict(size=16, color="#1e293b")),
     legend=dict(
-        bgcolor="rgba(255,255,255,0.85)",
-        bordercolor="#e2e8f0",
+        bgcolor="rgba(255,255,255,0.9)",
+        bordercolor="rgba(0,0,0,0.06)",
         borderwidth=1,
     ),
-    margin=dict(t=48, b=40, l=48, r=24, pad=4),
+    margin=dict(t=40, b=40, l=48, r=24, pad=4),
 )
 
 pio.templates["rdl"] = _rdl_template
