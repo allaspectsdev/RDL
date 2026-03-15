@@ -1054,6 +1054,7 @@ from modules.text_analytics import render_text_analytics
 from modules.monte_carlo import render_monte_carlo
 from modules.report import render_report_builder
 from modules.templates import render_templates
+from modules.experimental import render_experimental
 
 
 @st.cache_data
@@ -1404,6 +1405,7 @@ def main():
                 "Monte Carlo Simulation",
                 "Report Builder",
                 "Templates",
+                "Experimental",
             ],
             key="module_radio",
             label_visibility="collapsed",
@@ -1428,6 +1430,7 @@ def main():
             "Monte Carlo Simulation": "Distribution simulation, process propagation, risk analysis.",
             "Report Builder": "Build and download HTML reports from your analyses.",
             "Templates": "Save and load analysis configurations as JSON templates.",
+            "Experimental": "Visual workflow builder and AI-powered data analysis assistant.",
         }
         desc = _MODULE_DESCRIPTIONS.get(module, "")
         if desc:
@@ -1486,7 +1489,7 @@ def main():
                     <span class="rdl-stat-label">Chart Types</span>
                 </div>
                 <div class="rdl-stat">
-                    <span class="rdl-stat-value">17</span>
+                    <span class="rdl-stat-value">18</span>
                     <span class="rdl-stat-label">Modules</span>
                 </div>
                 <div class="rdl-stat">
@@ -1709,6 +1712,12 @@ def main():
             render_templates()
         except Exception as e:
             st.error(f"An error occurred in Templates: {e}")
+    elif module == "Experimental":
+        st.markdown("## Experimental")
+        try:
+            render_experimental(df_raw)
+        except Exception as e:
+            st.error(f"An error occurred in Experimental: {e}")
 
 
 if __name__ == "__main__":
