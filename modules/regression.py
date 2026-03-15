@@ -9,7 +9,12 @@ from scipy import stats, optimize
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from modules.ui_helpers import section_header, empty_state, help_tip
+from modules.ui_helpers import section_header, empty_state, help_tip, validation_panel, interpretation_card, confidence_badge
+from modules.validation import (
+    check_normality, check_sample_size, check_multicollinearity,
+    check_independence, check_homoscedasticity, check_residual_normality,
+    check_outlier_proportion, interpret_r_squared, interpret_p_value,
+)
 
 try:
     import statsmodels.api as sm
@@ -83,12 +88,31 @@ def _render_simple_linear(df: pd.DataFrame):
             X = sm.add_constant(x)
             model = sm.OLS(y, X).fit()
 
+            # --- Validation checks ---
+            try:
+                residuals = model.resid
+                checks = [check_sample_size(n, "regression")]
+                checks.extend([
+                    check_residual_normality(residuals),
+                    check_independence(residuals),
+                    check_homoscedasticity(residuals, x),
+                ])
+                validation_panel(checks)
+            except Exception:
+                pass
+
             section_header("Regression Summary")
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("R²", f"{model.rsquared:.4f}")
             c2.metric("Adj R²", f"{model.rsquared_adj:.4f}")
             c3.metric("F-statistic", f"{model.fvalue:.4f}")
             c4.metric("p (F-test)", f"{model.f_pvalue:.6f}")
+
+            # --- Interpretation card for R² ---
+            try:
+                interpretation_card(interpret_r_squared(model.rsquared, model.rsquared_adj))
+            except Exception:
+                pass
 
             coef_df = pd.DataFrame({
                 "Coefficient": ["Intercept", x_col],
@@ -138,7 +162,18 @@ def _render_simple_linear(df: pd.DataFrame):
         else:
             # Fallback without statsmodels
             slope, intercept, r_value, p_value, std_err = stats.linregress(x, y)
+            # --- Validation checks (fallback) ---
+            try:
+                checks = [check_sample_size(n, "regression")]
+                validation_panel(checks)
+            except Exception:
+                pass
             st.metric("R²", f"{r_value**2:.4f}")
+            # --- Interpretation card for R² (fallback) ---
+            try:
+                interpretation_card(interpret_r_squared(r_value**2))
+            except Exception:
+                pass
             st.write(f"**y = {intercept:.4f} + {slope:.4f} · x**  (p = {p_value:.6f})")
             fig = px.scatter(data, x=x_col, y=y_col, trendline="ols")
             st.plotly_chart(fig, use_container_width=True)
@@ -166,7 +201,23 @@ def _render_multiple_linear(df: pd.DataFrame):
         data = df[[y_col] + x_cols].dropna()
         y = data[y_col].values
         X = sm.add_constant(data[x_cols].values)
+        n = len(y)
         model = sm.OLS(y, X).fit()
+
+        # --- Validation checks ---
+        try:
+            residuals = model.resid
+            X_df = data[x_cols]
+            checks = [check_sample_size(n, "regression")]
+            checks.append(check_multicollinearity(X_df))
+            checks.extend([
+                check_residual_normality(residuals),
+                check_independence(residuals),
+                check_homoscedasticity(residuals, data[x_cols].values),
+            ])
+            validation_panel(checks)
+        except Exception:
+            pass
 
         section_header("Model Summary")
         c1, c2, c3, c4 = st.columns(4)
@@ -174,6 +225,12 @@ def _render_multiple_linear(df: pd.DataFrame):
         c2.metric("Adj R²", f"{model.rsquared_adj:.4f}")
         c3.metric("F-statistic", f"{model.fvalue:.4f}")
         c4.metric("p (F-test)", f"{model.f_pvalue:.6f}")
+
+        # --- Interpretation card for R² ---
+        try:
+            interpretation_card(interpret_r_squared(model.rsquared, model.rsquared_adj))
+        except Exception:
+            pass
 
         coef_names = ["Intercept"] + x_cols
         coef_df = pd.DataFrame({
@@ -266,10 +323,26 @@ def _render_polynomial(df: pd.DataFrame):
             adj_r2 = 1 - (1 - r2) * (n - 1) / (n - degree - 1)
         rmse = np.sqrt(ss_res / n)
 
+        # --- Validation checks ---
+        try:
+            checks = [check_sample_size(n, "regression")]
+            residuals_poly = y - y_pred
+            checks.append(check_residual_normality(residuals_poly))
+            validation_panel(checks)
+        except Exception:
+            pass
+
         c1, c2, c3 = st.columns(3)
         c1.metric("R²", f"{r2:.4f}")
         c2.metric("Adjusted R²", f"{adj_r2:.4f}")
         c3.metric("RMSE", f"{rmse:.4f}")
+
+        # --- Interpretation card for R² ---
+        try:
+            if not np.isnan(r2):
+                interpretation_card(interpret_r_squared(r2, adj_r2 if not np.isnan(adj_r2) else None))
+        except Exception:
+            pass
 
         # Build LaTeX equation
         latex_terms = []
@@ -356,6 +429,14 @@ def _render_logistic(df: pd.DataFrame):
             y = y_raw.values.astype(int)
             classes = np.unique(y)
 
+        # --- Validation checks ---
+        try:
+            n_log = len(y)
+            checks = [check_sample_size(n_log, "regression")]
+            validation_panel(checks)
+        except Exception:
+            pass
+
         # Train/test split for honest evaluation
         X_train, X_test, y_train, y_test = train_test_split(
             X, y, test_size=0.2, random_state=42, stratify=y)
@@ -383,6 +464,12 @@ def _render_logistic(df: pd.DataFrame):
                 c1.metric("AIC", f"{logit_model.aic:.2f}")
                 c2.metric("BIC", f"{logit_model.bic:.2f}")
                 c3.metric("Pseudo R²", f"{logit_model.prsquared:.4f}")
+
+                # --- Interpretation card for Pseudo R² ---
+                try:
+                    interpretation_card(interpret_r_squared(logit_model.prsquared))
+                except Exception:
+                    pass
 
                 y_prob = logit_model.predict(X_sm_test)
             except Exception:
@@ -496,6 +583,12 @@ def _render_curve_fitting(df: pd.DataFrame):
             c1, c2 = st.columns(2)
             c1.metric("R²", f"{r2:.4f}")
             c2.metric("RMSE", f"{rmse:.4f}")
+
+            # --- Interpretation card for R² ---
+            try:
+                interpretation_card(interpret_r_squared(r2))
+            except Exception:
+                pass
 
             # Parameters table
             param_df = pd.DataFrame({
@@ -732,12 +825,29 @@ def _render_glm(df: pd.DataFrame):
             with st.spinner("Fitting GLM..."):
                 model = StatsGLM(y, X, family=family).fit()
 
+            # --- Validation checks ---
+            try:
+                n_glm = len(y)
+                checks = [check_sample_size(n_glm, "regression")]
+                validation_panel(checks)
+            except Exception:
+                pass
+
             section_header("GLM Summary")
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("AIC", f"{model.aic:.2f}")
             c2.metric("BIC", f"{model.bic_deviance:.2f}")
             c3.metric("Deviance", f"{model.deviance:.4f}")
             c4.metric("Pearson χ²", f"{model.pearson_chi2:.4f}")
+
+            # --- Interpretation card for deviance-based pseudo R² ---
+            try:
+                null_dev = model.null_deviance
+                resid_dev = model.deviance
+                pseudo_r2_glm = 1 - resid_dev / null_dev if null_dev > 0 else 0
+                interpretation_card(interpret_r_squared(pseudo_r2_glm))
+            except Exception:
+                pass
 
             coef_names = ["Intercept"] + x_cols
             coef_df = pd.DataFrame({
@@ -833,6 +943,15 @@ def _render_robust_quantile(df: pd.DataFrame):
             try:
                 with st.spinner("Fitting robust model..."):
                     model = RLM(y, X, M=norm_map[m_estimator]).fit()
+
+                # --- Validation checks ---
+                try:
+                    n_rlm = len(y)
+                    checks = [check_sample_size(n_rlm, "regression")]
+                    checks.append(check_outlier_proportion(y))
+                    validation_panel(checks)
+                except Exception:
+                    pass
 
                 section_header("Robust Regression Summary")
                 coef_names = ["Intercept"] + x_cols
@@ -1205,6 +1324,12 @@ def _render_regularized(df: pd.DataFrame):
         c2m.metric("R²", f"{r2:.4f}")
         c3m.metric("RMSE", f"{rmse:.4f}")
 
+        # --- Interpretation card for R² ---
+        try:
+            interpretation_card(interpret_r_squared(r2))
+        except Exception:
+            pass
+
         # Coefficient table
         selected_mask = coefs != 0
         coef_df = pd.DataFrame({
@@ -1365,6 +1490,12 @@ Built-in models:
             c1m.metric("Pseudo R²", f"{r2_analog:.4f}")
             c2m.metric("RMSE", f"{rmse:.4f}")
 
+            # --- Interpretation card for Pseudo R² ---
+            try:
+                interpretation_card(interpret_r_squared(r2_analog))
+            except Exception:
+                pass
+
             # Parameter estimates
             section_header("Parameter Estimates")
             param_df = pd.DataFrame({
@@ -1496,6 +1627,12 @@ Interactively explore how each predictor affects the response:
         c1m.metric("R²", f"{model.rsquared:.4f}")
         c2m.metric("Adj R²", f"{model.rsquared_adj:.4f}")
         c3m.metric("RMSE", f"{np.sqrt(model.mse_resid):.4f}")
+
+        # --- Interpretation card for R² ---
+        try:
+            interpretation_card(interpret_r_squared(model.rsquared, model.rsquared_adj))
+        except Exception:
+            pass
 
         # Interactive sliders
         section_header("Profiler Settings")

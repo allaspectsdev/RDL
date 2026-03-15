@@ -10,7 +10,8 @@ import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from itertools import combinations
-from modules.ui_helpers import section_header, empty_state, help_tip
+from modules.ui_helpers import section_header, empty_state, help_tip, validation_panel, interpretation_card
+from modules.validation import check_residual_normality, check_homoscedasticity, interpret_r_squared
 
 try:
     import pyDOE2
@@ -627,6 +628,25 @@ def _render_design_analysis(df: pd.DataFrame):
         c2.metric("Adj R\u00b2", f"{model.rsquared_adj:.4f}")
         c3.metric("F-statistic", f"{model.fvalue:.4f}")
         c4.metric("p (F-test)", f"{model.f_pvalue:.6f}")
+
+        # R-squared interpretation card
+        try:
+            interpretation_card(interpret_r_squared(model.rsquared, model.rsquared_adj))
+        except Exception:
+            pass
+
+        # Model diagnostics: residual checks
+        try:
+            residuals = model.resid.values
+            X_vals = model.model.exog
+            diag_checks = [check_residual_normality(residuals)]
+            try:
+                diag_checks.append(check_homoscedasticity(residuals, X_vals))
+            except Exception:
+                pass
+            validation_panel(diag_checks, title="Model Diagnostics")
+        except Exception:
+            pass
 
         # ANOVA table
         section_header("ANOVA Table")

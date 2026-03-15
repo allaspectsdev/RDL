@@ -10,6 +10,12 @@ import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from modules.ui_helpers import significance_result, help_tip, empty_state, section_header
+from modules.ui_helpers import validation_panel, interpretation_card, alternative_suggestion, confidence_badge
+from modules.validation import (
+    check_normality, check_equal_variance, check_sample_size,
+    check_expected_frequencies, recommend_alternative,
+    interpret_p_value, interpret_effect_size, compute_post_hoc_power,
+)
 
 
 def render_hypothesis_testing(df: pd.DataFrame):
@@ -117,6 +123,17 @@ def _render_one_sample(df: pd.DataFrame):
         if st.button("Run Test", key="run_one_t"):
             data = df[col_name].dropna()
             n = len(data)
+
+            # --- Validation checks ---
+            try:
+                checks = [
+                    check_sample_size(n, "t-test"),
+                    check_normality(data, label=col_name),
+                ]
+                validation_panel(checks)
+            except Exception:
+                pass
+
             stat, p = stats.ttest_1samp(data, mu_0, alternative=alt)
             se = data.std() / np.sqrt(n)
             d = (data.mean() - mu_0) / data.std() if data.std() != 0 else 0
@@ -130,6 +147,12 @@ def _render_one_sample(df: pd.DataFrame):
             c4.metric("Sample Mean", f"{data.mean():.4f}")
             st.write(f"**{1 - alpha:.0%} CI for mean:** [{ci[0]:.4f}, {ci[1]:.4f}]")
             significance_result(p, alpha, "One-Sample t-test", effect_size=d, effect_label="Cohen's d")
+
+            # --- Interpretation card ---
+            try:
+                interpretation_card(interpret_p_value(p, alpha))
+            except Exception:
+                pass
 
             # Visualization
             fig = make_subplots(rows=1, cols=2, subplot_titles=("Distribution", "t-Distribution"))
@@ -174,6 +197,12 @@ def _render_one_sample(df: pd.DataFrame):
             c3.metric("Effect size r", f"{r:.4f}")
             significance_result(p, alpha, "Wilcoxon Signed-Rank", effect_size=r, effect_label="Effect size r")
 
+            # --- Interpretation card ---
+            try:
+                interpretation_card(interpret_p_value(p, alpha))
+            except Exception:
+                pass
+
     elif test_type == "One-Sample Proportion":
         cat_cols = df.select_dtypes(include=["object", "category"]).columns.tolist()
         bin_cols = [c for c in num_cols if df[c].nunique() == 2]
@@ -209,6 +238,12 @@ def _render_one_sample(df: pd.DataFrame):
             margin = z_crit * np.sqrt((p_hat * (1 - p_hat) + z_crit ** 2 / (4 * n)) / n) / denom
             st.write(f"**{1 - alpha:.0%} Wilson CI:** [{center - margin:.4f}, {center + margin:.4f}]")
             significance_result(p_val, alpha, "One-Sample Proportion")
+
+            # --- Interpretation card ---
+            try:
+                interpretation_card(interpret_p_value(p_val, alpha))
+            except Exception:
+                pass
 
 
 def _render_two_sample(df: pd.DataFrame):
@@ -247,6 +282,24 @@ def _render_two_sample(df: pd.DataFrame):
             g1 = df[df[group_col] == g1_name][value_col].dropna()
             g2 = df[df[group_col] == g2_name][value_col].dropna()
 
+            # --- Validation checks (for parametric t-tests) ---
+            if test_type in ("Independent t-test", "Welch's t-test"):
+                try:
+                    checks = [
+                        check_sample_size(min(len(g1), len(g2)), "t-test"),
+                        check_normality(g1, label=str(g1_name)),
+                        check_normality(g2, label=str(g2_name)),
+                        check_equal_variance(g1, g2),
+                    ]
+                    validation_panel(checks)
+                    failed = [c for c in checks if c.status in ("warn", "fail")]
+                    if failed:
+                        alts = recommend_alternative("independent-t", failed)
+                        if alts:
+                            alternative_suggestion("Some assumptions may be violated", alts)
+                except Exception:
+                    pass
+
             if test_type == "Independent t-test":
                 stat, p = stats.ttest_ind(g1, g2, equal_var=True)
                 test_label = "t"
@@ -273,6 +326,12 @@ def _render_two_sample(df: pd.DataFrame):
             st.write(f"**Group 2 ({g2_name}):** n={len(g2)}, mean={g2.mean():.4f}, sd={g2.std():.4f}")
             significance_result(p, alpha, test_type, effect_size=d, effect_label="Cohen's d")
 
+            # --- Interpretation card ---
+            try:
+                interpretation_card(interpret_p_value(p, alpha))
+            except Exception:
+                pass
+
             # Visualization
             fig = make_subplots(rows=1, cols=2, subplot_titles=("Distributions", "Box Plot"))
             fig.add_trace(go.Histogram(x=g1, name=str(g1_name), opacity=0.6), row=1, col=1)
@@ -295,6 +354,22 @@ def _render_two_sample(df: pd.DataFrame):
             g1, g2 = data[col1], data[col2]
             diff = g1 - g2
 
+            # --- Validation checks (for paired t-test) ---
+            if test_type == "Paired t-test":
+                try:
+                    checks = [
+                        check_sample_size(len(diff), "paired-t"),
+                        check_normality(diff, label="paired differences"),
+                    ]
+                    validation_panel(checks)
+                    failed = [c for c in checks if c.status in ("warn", "fail")]
+                    if failed:
+                        alts = recommend_alternative("paired-t", failed)
+                        if alts:
+                            alternative_suggestion("Some assumptions may be violated", alts)
+                except Exception:
+                    pass
+
             if test_type == "Paired t-test":
                 stat, p = stats.ttest_rel(g1, g2)
                 d = diff.mean() / diff.std() if diff.std() != 0 else 0
@@ -311,6 +386,12 @@ def _render_two_sample(df: pd.DataFrame):
             c3.metric("Effect size d", f"{d:.4f} ({_effect_size_label(d)})")
             st.write(f"**Mean difference:** {diff.mean():.4f} ± {diff.std():.4f}")
             significance_result(p, alpha, test_type, effect_size=d, effect_label="Effect size d")
+
+            # --- Interpretation card ---
+            try:
+                interpretation_card(interpret_p_value(p, alpha))
+            except Exception:
+                pass
 
             fig = make_subplots(rows=1, cols=2, subplot_titles=("Paired Differences", "Before vs After"))
             fig.add_trace(go.Histogram(x=diff, name="Differences"), row=1, col=1)
@@ -363,6 +444,21 @@ def _render_chi_square(df: pd.DataFrame):
             k = min(ct.shape)
             cramers_v = np.sqrt(chi2 / (n * (k - 1))) if (n * (k - 1)) > 0 else 0
 
+            # --- Validation checks ---
+            try:
+                checks = [
+                    check_sample_size(n, "chi-square"),
+                    check_expected_frequencies(ct.values),
+                ]
+                validation_panel(checks)
+                failed = [c for c in checks if c.status in ("warn", "fail")]
+                if failed:
+                    alts = recommend_alternative("chi-square", failed)
+                    if alts:
+                        alternative_suggestion("Some assumptions may be violated", alts)
+            except Exception:
+                pass
+
             st.markdown("**Expected Frequencies:**")
             expected_df = pd.DataFrame(expected, index=ct.index, columns=ct.columns).round(2)
             st.dataframe(expected_df, use_container_width=True)
@@ -373,6 +469,12 @@ def _render_chi_square(df: pd.DataFrame):
             c3.metric("df", str(dof))
             c4.metric("Cramér's V", f"{cramers_v:.4f}")
             significance_result(p, alpha, "Chi-Square Independence", effect_size=cramers_v, effect_label="Cramér's V")
+
+            # --- Interpretation card ---
+            try:
+                interpretation_card(interpret_p_value(p, alpha))
+            except Exception:
+                pass
 
             # Fisher's exact for 2x2
             if ct.shape == (2, 2):
@@ -403,6 +505,21 @@ def _render_chi_square(df: pd.DataFrame):
 
             chi2, p = stats.chisquare(observed.values, f_exp=expected)
 
+            # --- Validation checks ---
+            try:
+                checks = [
+                    check_sample_size(int(n), "chi-square"),
+                    check_expected_frequencies(observed.values.reshape(1, -1)),
+                ]
+                validation_panel(checks)
+                failed = [c for c in checks if c.status in ("warn", "fail")]
+                if failed:
+                    alts = recommend_alternative("chi-square", failed)
+                    if alts:
+                        alternative_suggestion("Some assumptions may be violated", alts)
+            except Exception:
+                pass
+
             st.markdown("**Observed vs Expected:**")
             comp_df = pd.DataFrame({
                 "Category": observed.index,
@@ -416,6 +533,12 @@ def _render_chi_square(df: pd.DataFrame):
             c2.metric("p-value", f"{p:.6f}")
             c3.metric("df", str(len(observed) - 1))
             significance_result(p, alpha, "Chi-Square Goodness of Fit")
+
+            # --- Interpretation card ---
+            try:
+                interpretation_card(interpret_p_value(p, alpha))
+            except Exception:
+                pass
 
             fig = go.Figure()
             fig.add_trace(go.Bar(x=observed.index.astype(str), y=observed.values, name="Observed"))
@@ -791,6 +914,12 @@ def _render_bootstrap_permutation(df: pd.DataFrame):
                 c4.metric(f"Group 2 Mean ({g2_name})", f"{g2.mean():.4f}")
 
                 significance_result(p_val, 0.05, "Permutation Test")
+
+                # --- Interpretation card ---
+                try:
+                    interpretation_card(interpret_p_value(p_val, 0.05))
+                except Exception:
+                    pass
 
                 # Null distribution
                 null_dist = result.null_distribution

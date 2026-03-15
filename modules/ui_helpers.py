@@ -1,23 +1,31 @@
 """
 RDL UI Helpers - Shared Plotly template, significance cards, help tips,
-section headers, empty states, and grouped chart selector.
+section headers, empty states, grouped chart selector, and validation components.
 """
+
+from __future__ import annotations
+
+import html as _html
 
 import streamlit as st
 import plotly.io as pio
 import plotly.graph_objects as go
 
+
 # ─── RDL Plotly Template ────────────────────────────────────────────────────
 # Registered at import time so every chart inherits the theme automatically.
 
 _RDL_COLORWAY = [
-    "#6366f1", "#818cf8", "#a78bfa", "#22c55e", "#f59e0b",
-    "#ef4444", "#3b82f6", "#ec4899", "#14b8a6", "#f97316",
+    "#6366f1", "#22c55e", "#f59e0b", "#ef4444", "#3b82f6",
+    "#ec4899", "#14b8a6", "#f97316", "#8b5cf6", "#06b6d4",
 ]
 
 _rdl_template = go.layout.Template()
 _rdl_template.layout = go.Layout(
-    font=dict(family="Plus Jakarta Sans, -apple-system, BlinkMacSystemFont, sans-serif"),
+    font=dict(
+        family="Plus Jakarta Sans, -apple-system, BlinkMacSystemFont, sans-serif",
+        size=13,
+    ),
     colorway=_RDL_COLORWAY,
     plot_bgcolor="#fafbfe",
     paper_bgcolor="#ffffff",
@@ -26,7 +34,7 @@ _rdl_template.layout = go.Layout(
     hoverlabel=dict(
         bgcolor="#1e293b",
         font_color="#f1f5f9",
-        font_size=13,
+        font_size=14,
         bordercolor="#334155",
     ),
     title=dict(font=dict(size=16, color="#1e293b")),
@@ -35,7 +43,7 @@ _rdl_template.layout = go.Layout(
         bordercolor="#e2e8f0",
         borderwidth=1,
     ),
-    margin=dict(t=48, b=40, l=48, r=24),
+    margin=dict(t=48, b=40, l=48, r=24, pad=4),
 )
 
 pio.templates["rdl"] = _rdl_template
@@ -131,3 +139,174 @@ def grouped_chart_selector(key_prefix="viz"):
         "Chart Type:", chart_types, key=f"{key_prefix}_chart_type"
     )
     return chart_type
+
+
+# ─── Validation Panel ────────────────────────────────────────────────────
+
+def validation_panel(checks, title="Assumption Checks"):
+    """Render a prominent validation status panel.
+
+    Parameters
+    ----------
+    checks : list[validation.ValidationCheck]
+        Each check has .name, .status ('pass'/'warn'/'fail'),
+        .detail, and optional .suggestion.
+    title : str
+        Panel heading text.
+    """
+    if not checks:
+        return
+
+    # Sort: failures first, then warnings, then passes
+    _order = {"fail": 0, "warn": 1, "pass": 2}
+    sorted_checks = sorted(checks, key=lambda c: _order.get(c.status, 2))
+
+    n_fail = sum(1 for c in checks if c.status == "fail")
+    n_warn = sum(1 for c in checks if c.status == "warn")
+
+    if n_fail > 0:
+        badge_class = "rdl-vp-badge--fail"
+        badge_text = f"{n_fail} Issue{'s' if n_fail > 1 else ''}"
+    elif n_warn > 0:
+        badge_class = "rdl-vp-badge--warn"
+        badge_text = f"{n_warn} Warning{'s' if n_warn > 1 else ''}"
+    else:
+        badge_class = "rdl-vp-badge--pass"
+        badge_text = "All Passed"
+
+    _icons = {"pass": ("&#10003;", "pass"), "warn": ("&#9888;", "warn"), "fail": ("&#10007;", "fail")}
+
+    rows_html = ""
+    for c in sorted_checks:
+        icon_char, icon_class = _icons.get(c.status, ("&#8226;", "pass"))
+        suggestion_html = ""
+        if c.suggestion:
+            suggestion_html = (
+                f'<span class="rdl-vp-suggestion">'
+                f'{_html.escape(c.suggestion)}</span>'
+            )
+        rows_html += f"""
+        <div class="rdl-vp-check">
+            <span class="rdl-vp-icon rdl-vp-icon--{icon_class}">{icon_char}</span>
+            <div class="rdl-vp-content">
+                <span class="rdl-vp-name">{_html.escape(c.name)}</span>
+                <span class="rdl-vp-detail">&mdash; {_html.escape(c.detail)}</span>
+                {suggestion_html}
+            </div>
+        </div>
+        """
+
+    html = f"""
+    <div class="rdl-validation-panel">
+        <div class="rdl-vp-header">
+            <span class="rdl-vp-title">{_html.escape(title)}</span>
+            <span class="rdl-vp-badge {badge_class}">{badge_text}</span>
+        </div>
+        {rows_html}
+    </div>
+    """
+    st.markdown(html, unsafe_allow_html=True)
+
+
+# ─── Confidence Badge ────────────────────────────────────────────────────
+
+def confidence_badge(checks):
+    """Return an HTML badge string indicating confidence level based on checks.
+
+    Parameters
+    ----------
+    checks : list[validation.ValidationCheck]
+
+    Returns
+    -------
+    str : HTML string to embed inline (e.g. after a section header).
+    """
+    if not checks:
+        return ""
+    n_fail = sum(1 for c in checks if c.status == "fail")
+    n_warn = sum(1 for c in checks if c.status == "warn")
+    if n_fail > 0:
+        return '<span class="rdl-confidence-badge rdl-confidence-badge--low">Low Confidence</span>'
+    if n_warn > 0:
+        return '<span class="rdl-confidence-badge rdl-confidence-badge--moderate">Moderate</span>'
+    return '<span class="rdl-confidence-badge rdl-confidence-badge--high">High Confidence</span>'
+
+
+# ─── Interpretation Card ─────────────────────────────────────────────────
+
+def interpretation_card(interp):
+    """Render a plain-language interpretation card.
+
+    Parameters
+    ----------
+    interp : validation.Interpretation | dict
+        Has .title, .body, and optional .detail (or dict with same keys).
+    """
+    if interp is None:
+        return
+    if isinstance(interp, dict):
+        title = interp.get("title", "Interpretation")
+        body = interp.get("body", "")
+        detail = interp.get("detail", "")
+    else:
+        title, body, detail = interp.title, interp.body, interp.detail
+
+    detail_html = ""
+    if detail:
+        detail_html = f'<div class="rdl-interp-detail">{_html.escape(detail)}</div>'
+
+    html = f"""
+    <div class="rdl-interp-card">
+        <div class="rdl-interp-title">{_html.escape(title)}</div>
+        {_html.escape(body)}
+        {detail_html}
+    </div>
+    """
+    st.markdown(html, unsafe_allow_html=True)
+
+
+# ─── Alternative Suggestion ──────────────────────────────────────────────
+
+def alternative_suggestion(issue, alternatives):
+    """Render an alternative-test recommendation card.
+
+    Parameters
+    ----------
+    issue : str
+        Why the current approach may be problematic.
+    alternatives : list[str]
+        Suggested alternative methods/tests.
+    """
+    if not alternatives:
+        return
+    tags = " ".join(f'<span class="rdl-alt-tag">{_html.escape(a)}</span>' for a in alternatives)
+    html = f"""
+    <div class="rdl-alt-card">
+        {_html.escape(issue)} &mdash; consider: {tags}
+    </div>
+    """
+    st.markdown(html, unsafe_allow_html=True)
+
+
+# ─── Sample Size Indicator ───────────────────────────────────────────────
+
+def sample_size_indicator(n, min_recommended):
+    """Render an inline sample-size status indicator.
+
+    Parameters
+    ----------
+    n : int
+        Actual sample size.
+    min_recommended : int
+        Minimum recommended sample size for this analysis.
+    """
+    if n >= min_recommended:
+        css = "rdl-sample-size--ok"
+        text = f"n = {n:,}"
+    elif n >= min_recommended * 0.5:
+        css = "rdl-sample-size--low"
+        text = f"n = {n:,} (below recommended {min_recommended})"
+    else:
+        css = "rdl-sample-size--critical"
+        text = f"n = {n:,} (well below recommended {min_recommended})"
+    st.markdown(f'<span class="rdl-sample-size {css}">{text}</span>', unsafe_allow_html=True)

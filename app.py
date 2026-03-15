@@ -39,8 +39,8 @@ st.markdown("""<style>
     --rdl-sidebar-active: rgba(99,102,241,0.15);
     --rdl-sidebar-border: rgba(255,255,255,0.06);
     --rdl-text: #1e293b;
-    --rdl-text-secondary: #64748b;
-    --rdl-text-muted: #94a3b8;
+    --rdl-text-secondary: #4b5563;
+    --rdl-text-muted: #6b7280;
     --rdl-accent: #6366f1;
     --rdl-accent-light: #eef2ff;
     --rdl-accent-hover: #4f46e5;
@@ -50,12 +50,16 @@ st.markdown("""<style>
     --rdl-error: #ef4444;
     --rdl-info: #3b82f6;
     --rdl-border: #e2e8f0;
-    --rdl-shadow-xs: 0 1px 2px rgba(0,0,0,0.03);
-    --rdl-shadow-sm: 0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.03);
-    --rdl-shadow-md: 0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -2px rgba(0,0,0,0.03);
-    --rdl-shadow-lg: 0 10px 25px -5px rgba(0,0,0,0.06), 0 4px 6px -4px rgba(0,0,0,0.03);
-    --rdl-radius: 14px;
-    --rdl-radius-sm: 10px;
+    --rdl-shadow-xs: 0 1px 2px rgba(0,0,0,0.04);
+    --rdl-shadow-sm: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+    --rdl-shadow-md: 0 4px 6px -1px rgba(0,0,0,0.07), 0 2px 4px -2px rgba(0,0,0,0.04);
+    --rdl-shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.08), 0 4px 6px -4px rgba(0,0,0,0.04);
+    --rdl-shadow-xl: 0 20px 25px -5px rgba(0,0,0,0.08), 0 8px 10px -6px rgba(0,0,0,0.04);
+    --rdl-accent-gradient: linear-gradient(135deg, #6366f1, #8b5cf6, #a78bfa);
+    --rdl-accent-gradient-warm: linear-gradient(135deg, #6366f1, #8b5cf6, #ec4899);
+    --rdl-radius-lg: 16px;
+    --rdl-radius: 12px;
+    --rdl-radius-sm: 8px;
     --rdl-radius-xs: 6px;
     --rdl-ease: cubic-bezier(0.4, 0, 0.2, 1);
     --rdl-dur: 0.2s;
@@ -147,6 +151,8 @@ st.markdown("""<style>
 }
 [data-testid="stSidebar"] [data-baseweb="radio"]:has(input:checked) {
     background: var(--rdl-sidebar-active) !important;
+    border-left: 3px solid var(--rdl-accent) !important;
+    padding-left: calc(0.75rem - 3px) !important;
 }
 [data-testid="stSidebar"] [data-baseweb="radio"]:has(input:checked) div:last-child {
     color: #a5b4fc !important;
@@ -324,11 +330,17 @@ st.markdown("""<style>
     background: var(--rdl-accent-subtle) !important;
     color: var(--rdl-accent) !important;
 }
+.stTabs [data-baseweb="tab-list"] {
+    overflow-x: auto !important;
+    scrollbar-width: thin !important;
+    -webkit-overflow-scrolling: touch !important;
+}
 .stTabs [aria-selected="true"] {
     background: var(--rdl-accent) !important;
     color: #ffffff !important;
     font-weight: 600 !important;
-    box-shadow: 0 2px 8px rgba(99,102,241,0.25) !important;
+    box-shadow: 0 2px 8px rgba(99,102,241,0.25),
+                inset 0 1px 0 rgba(255,255,255,0.1) !important;
 }
 .stTabs [data-baseweb="tab-highlight"],
 .stTabs [data-baseweb="tab-border"] {
@@ -383,7 +395,12 @@ st.markdown("""<style>
     box-shadow: var(--rdl-shadow-sm) !important;
 }
 .stButton > button:active {
-    transform: translateY(0.5px);
+    transform: scale(0.98) !important;
+    transition: transform 0.1s ease !important;
+}
+.stDownloadButton > button:active {
+    transform: scale(0.98) !important;
+    transition: transform 0.1s ease !important;
 }
 .stDownloadButton > button {
     background: var(--rdl-accent) !important;
@@ -434,7 +451,11 @@ st.markdown("""<style>
     border: 1px solid var(--rdl-border) !important;
     border-radius: var(--rdl-radius-sm) !important;
     overflow: hidden !important;
-    box-shadow: var(--rdl-shadow-xs) !important;
+    box-shadow: var(--rdl-shadow-sm) !important;
+    transition: box-shadow var(--rdl-dur) var(--rdl-ease) !important;
+}
+[data-testid="stDataFrame"]:hover {
+    box-shadow: var(--rdl-shadow-md) !important;
 }
 
 [data-testid="stAlert"] {
@@ -465,6 +486,17 @@ st.markdown("""<style>
 .js-plotly-plot, .plotly {
     border-radius: var(--rdl-radius-sm) !important;
     overflow: hidden !important;
+    transition: box-shadow var(--rdl-dur) var(--rdl-ease) !important;
+}
+.js-plotly-plot:hover, .plotly:hover {
+    box-shadow: var(--rdl-shadow-md) !important;
+}
+
+[data-testid="stSpinner"] {
+    background: rgba(244,245,249,0.8) !important;
+    backdrop-filter: blur(4px) !important;
+    -webkit-backdrop-filter: blur(4px) !important;
+    border-radius: var(--rdl-radius-sm) !important;
 }
 
 [data-testid="stSlider"] [data-baseweb="slider"] [role="slider"] {
@@ -480,12 +512,18 @@ st.markdown("""<style>
     padding: 1rem 1.25rem;
     margin: 0.75rem 0;
     box-shadow: var(--rdl-shadow-sm);
+    transition: box-shadow var(--rdl-dur) var(--rdl-ease);
+}
+.rdl-sig-card:hover {
+    box-shadow: var(--rdl-shadow-md);
 }
 .rdl-sig-card--reject {
     border-left-color: var(--rdl-error);
+    background: linear-gradient(90deg, rgba(239,68,68,0.03) 0%, var(--rdl-bg-card) 30%);
 }
 .rdl-sig-card--accept {
     border-left-color: var(--rdl-success);
+    background: linear-gradient(90deg, rgba(34,197,94,0.03) 0%, var(--rdl-bg-card) 30%);
 }
 .rdl-sig-header {
     display: flex;
@@ -552,22 +590,165 @@ st.markdown("""<style>
     margin: 0;
 }
 
-/* ── Metric hover enhancement ── */
-[data-testid="stMetric"]:hover {
-    transform: translateY(-3px) !important;
-    border-left: 3px solid var(--rdl-accent) !important;
+/* ── Metric Cards ── */
+[data-testid="stMetric"] {
+    border-top: 3px solid var(--rdl-accent) !important;
+    border-radius: var(--rdl-radius-sm) !important;
+    transition: box-shadow var(--rdl-dur) var(--rdl-ease),
+                transform var(--rdl-dur) var(--rdl-ease) !important;
 }
+[data-testid="stMetric"]:hover {
+    box-shadow: var(--rdl-shadow-md) !important;
+    transform: translateY(-2px) !important;
+}
+
+/* ── Validation Panel ── */
+.rdl-validation-panel {
+    background: var(--rdl-bg-card);
+    border: 1px solid var(--rdl-border);
+    border-radius: var(--rdl-radius-sm);
+    padding: 0.75rem 1rem;
+    margin: 0.75rem 0;
+    box-shadow: var(--rdl-shadow-sm);
+}
+.rdl-vp-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.5rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--rdl-border);
+}
+.rdl-vp-title {
+    font-weight: 600;
+    font-size: 0.88rem;
+    color: var(--rdl-text);
+}
+.rdl-vp-badge {
+    font-size: 0.72rem;
+    font-weight: 600;
+    padding: 0.15rem 0.6rem;
+    border-radius: 99px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+.rdl-vp-badge--pass { background: rgba(34,197,94,0.1); color: var(--rdl-success); }
+.rdl-vp-badge--warn { background: rgba(245,158,11,0.1); color: var(--rdl-warning); }
+.rdl-vp-badge--fail { background: rgba(239,68,68,0.1); color: var(--rdl-error); }
+.rdl-vp-check {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    padding: 0.35rem 0;
+    font-size: 0.82rem;
+}
+.rdl-vp-icon { font-size: 0.9rem; flex-shrink: 0; margin-top: 0.1rem; }
+.rdl-vp-icon--pass { color: var(--rdl-success); }
+.rdl-vp-icon--warn { color: var(--rdl-warning); }
+.rdl-vp-icon--fail { color: var(--rdl-error); }
+.rdl-vp-content { flex: 1; }
+.rdl-vp-name { font-weight: 500; color: var(--rdl-text); }
+.rdl-vp-detail { color: var(--rdl-text-secondary); margin-left: 0.25rem; }
+.rdl-vp-suggestion {
+    display: block;
+    font-size: 0.78rem;
+    color: var(--rdl-text-muted);
+    font-style: italic;
+    margin-top: 0.15rem;
+}
+
+/* ── Confidence Badge ── */
+.rdl-confidence-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 0.1rem 0.5rem;
+    border-radius: 99px;
+    vertical-align: middle;
+    margin-left: 0.5rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+.rdl-confidence-badge--high { background: rgba(34,197,94,0.1); color: var(--rdl-success); }
+.rdl-confidence-badge--moderate { background: rgba(245,158,11,0.1); color: var(--rdl-warning); }
+.rdl-confidence-badge--low { background: rgba(239,68,68,0.1); color: var(--rdl-error); }
+
+/* ── Interpretation Card ── */
+.rdl-interp-card {
+    background: var(--rdl-accent-subtle);
+    border-left: 3px solid var(--rdl-accent);
+    border-radius: var(--rdl-radius-xs);
+    padding: 0.65rem 1rem;
+    margin: 0.5rem 0;
+    font-size: 0.85rem;
+    color: var(--rdl-text);
+    line-height: 1.6;
+}
+.rdl-interp-title {
+    font-weight: 600;
+    font-size: 0.82rem;
+    margin-bottom: 0.25rem;
+    color: var(--rdl-accent);
+}
+.rdl-interp-detail {
+    font-size: 0.78rem;
+    color: var(--rdl-text-secondary);
+    margin-top: 0.25rem;
+}
+
+/* ── Alternative Suggestion Card ── */
+.rdl-alt-card {
+    background: rgba(245,158,11,0.04);
+    border-left: 3px solid var(--rdl-warning);
+    border-radius: var(--rdl-radius-xs);
+    padding: 0.55rem 1rem;
+    margin: 0.5rem 0;
+    font-size: 0.82rem;
+    color: var(--rdl-text);
+    line-height: 1.6;
+}
+.rdl-alt-tag {
+    display: inline-block;
+    background: rgba(245,158,11,0.12);
+    color: #b45309;
+    font-weight: 600;
+    font-size: 0.75rem;
+    padding: 0.1rem 0.45rem;
+    border-radius: var(--rdl-radius-xs);
+    margin: 0 0.15rem;
+}
+
+/* ── Sample Size Indicator ── */
+.rdl-sample-size { font-size: 0.82rem; font-weight: 500; }
+.rdl-sample-size--ok { color: var(--rdl-success); }
+.rdl-sample-size--low { color: var(--rdl-warning); }
+.rdl-sample-size--critical { color: var(--rdl-error); }
 </style>""", unsafe_allow_html=True)
 
 # ─── LANDING PAGE STYLES ────────────────────────────────────────────────────
 st.markdown("""<style>
 .rdl-hero {
     text-align: center;
-    padding: 3rem 1rem 1.5rem;
-    animation: rdl-fade-up 0.5s var(--rdl-ease) both;
+    padding: 3.5rem 1rem 1.5rem;
+    position: relative;
+    animation: rdl-enter 0.3s ease both;
 }
+.rdl-hero::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 50%;
+    transform: translateX(-50%);
+    width: 100%;
+    height: 100%;
+    background: radial-gradient(ellipse at 50% 0%, rgba(99,102,241,0.06) 0%, transparent 70%);
+    pointer-events: none;
+    z-index: 0;
+}
+.rdl-hero > * { position: relative; z-index: 1; }
 .rdl-hero h1 {
-    font-size: 2.75rem !important;
+    font-size: 3.25rem !important;
     font-weight: 800 !important;
     color: var(--rdl-text) !important;
     letter-spacing: -0.03em !important;
@@ -576,6 +757,15 @@ st.markdown("""<style>
     border-bottom: none !important;
     display: block !important;
     padding-bottom: 0 !important;
+}
+.rdl-hero h1::before {
+    content: '';
+    display: block;
+    width: 64px;
+    height: 4px;
+    background: var(--rdl-accent-gradient);
+    border-radius: 2px;
+    margin: 0 auto 1.25rem;
 }
 .rdl-accent-text {
     background: linear-gradient(135deg, #6366f1, #a78bfa, #818cf8);
@@ -596,10 +786,14 @@ st.markdown("""<style>
     display: flex;
     justify-content: center;
     gap: 3rem;
-    padding: 2rem 1rem;
+    padding: 1.5rem 2rem;
     margin: 0.5rem auto 2rem;
     max-width: 700px;
-    animation: rdl-fade-up 0.5s 0.08s var(--rdl-ease) both;
+    background: var(--rdl-bg-card);
+    border: 1px solid var(--rdl-border);
+    border-radius: var(--rdl-radius);
+    box-shadow: var(--rdl-shadow-sm);
+    animation: rdl-enter 0.3s ease both;
 }
 .rdl-stat {
     text-align: center;
@@ -630,7 +824,7 @@ st.markdown("""<style>
     max-width: 1100px;
     margin: 0 auto 2.5rem;
     padding: 0 1rem;
-    animation: rdl-fade-up 0.5s 0.16s var(--rdl-ease) both;
+    animation: rdl-enter 0.3s ease both;
 }
 .rdl-feature-card {
     background: var(--rdl-bg-card);
@@ -643,22 +837,21 @@ st.markdown("""<style>
                 transform 0.25s var(--rdl-ease),
                 border-color 0.25s var(--rdl-ease);
 }
-.rdl-feature-card-bar {
+.rdl-feature-card::before {
+    content: '';
     position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
+    top: 0; left: 0; right: 0;
     height: 3px;
-    background: linear-gradient(90deg, var(--rdl-accent), #a78bfa);
+    background: linear-gradient(90deg, var(--cat-color, var(--rdl-accent)), rgba(167,139,250,0.6));
     opacity: 0;
     transition: opacity 0.25s var(--rdl-ease);
 }
 .rdl-feature-card:hover {
-    box-shadow: var(--rdl-shadow-lg);
+    box-shadow: var(--rdl-shadow-xl);
     transform: translateY(-3px);
     border-color: rgba(99,102,241,0.2);
 }
-.rdl-feature-card:hover .rdl-feature-card-bar {
+.rdl-feature-card:hover::before {
     opacity: 1;
 }
 .rdl-feature-card h3 {
@@ -682,7 +875,7 @@ st.markdown("""<style>
     max-width: 1100px;
     margin: 0 auto 2rem;
     padding: 0 1rem;
-    animation: rdl-fade-up 0.5s 0.24s var(--rdl-ease) both;
+    animation: rdl-enter 0.3s ease both;
 }
 .rdl-module-item {
     background: var(--rdl-bg-card);
@@ -700,12 +893,12 @@ st.markdown("""<style>
     position: absolute;
     top: 0; left: 0; right: 0;
     height: 3px;
-    background: linear-gradient(90deg, var(--rdl-accent), #a78bfa);
+    background: linear-gradient(90deg, var(--cat-color, var(--rdl-accent)), rgba(167,139,250,0.6));
     opacity: 0;
     transition: opacity 0.25s var(--rdl-ease);
 }
 .rdl-module-item:hover {
-    box-shadow: var(--rdl-shadow-lg);
+    box-shadow: var(--rdl-shadow-xl);
     transform: translateY(-3px);
     border-color: rgba(99,102,241,0.2);
 }
@@ -718,6 +911,16 @@ st.markdown("""<style>
     color: var(--rdl-text) !important;
     margin: 0 0 0.25rem 0 !important;
 }
+.rdl-module-item h4::before {
+    content: '';
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--cat-color, var(--rdl-accent));
+    margin-right: 0.5rem;
+    vertical-align: middle;
+}
 .rdl-module-item p {
     font-size: 0.78rem;
     color: var(--rdl-text-secondary);
@@ -728,23 +931,30 @@ st.markdown("""<style>
 .rdl-cta {
     text-align: center;
     padding: 1.5rem 1rem 3rem;
-    animation: rdl-fade-up 0.5s 0.3s var(--rdl-ease) both;
+    animation: rdl-enter 0.3s ease both;
 }
-.rdl-cta-pill {
+.rdl-cta-card {
     display: inline-block;
-    background: var(--rdl-accent-light);
-    padding: 0.7rem 1.5rem;
-    border-radius: 999px;
-    font-size: 0.88rem;
-    font-weight: 500;
-    color: var(--rdl-accent);
-    border: 1px solid rgba(99,102,241,0.15);
+    background: var(--rdl-accent-gradient);
+    color: #fff;
+    padding: 0.85rem 2rem;
+    border-radius: var(--rdl-radius);
+    font-size: 0.92rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    box-shadow: 0 4px 14px rgba(99,102,241,0.3);
+    animation: rdl-pulse-border 2.5s ease-in-out infinite;
+}
+.rdl-cta-card::after {
+    content: ' \\2192';
+    margin-left: 0.5rem;
+    font-size: 1rem;
 }
 
 .rdl-section-label {
     text-align: center;
     margin-bottom: 1.25rem;
-    animation: rdl-fade-up 0.5s 0.2s var(--rdl-ease) both;
+    animation: rdl-enter 0.3s ease both;
 }
 .rdl-section-label span {
     font-size: 0.7rem;
@@ -756,17 +966,24 @@ st.markdown("""<style>
     padding: 0 1rem;
 }
 
-@keyframes rdl-fade-up {
-    from {
-        opacity: 0;
-        transform: translateY(12px);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
+@keyframes rdl-enter {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+@keyframes rdl-pulse-border {
+    0%, 100% { box-shadow: 0 4px 14px rgba(99,102,241,0.3); }
+    50% { box-shadow: 0 4px 14px rgba(99,102,241,0.3), 0 0 0 6px rgba(99,102,241,0.08); }
 }
 
+@media (max-width: 1024px) {
+    .rdl-features-grid,
+    .rdl-modules-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+    .rdl-hero h1 {
+        font-size: 2.5rem !important;
+    }
+}
 @media (max-width: 768px) {
     .rdl-features-grid,
     .rdl-modules-grid {
@@ -775,9 +992,22 @@ st.markdown("""<style>
     .rdl-stats-bar {
         flex-wrap: wrap;
         gap: 1.5rem;
+        padding: 1rem 1.25rem;
     }
     .rdl-hero h1 {
         font-size: 2rem !important;
+    }
+    .rdl-hero p {
+        font-size: 0.95rem;
+    }
+}
+@media (max-width: 480px) {
+    .rdl-hero h1 {
+        font-size: 1.75rem !important;
+    }
+    .rdl-stats-bar {
+        flex-direction: column;
+        gap: 0.75rem;
     }
 }
 </style>""", unsafe_allow_html=True)
@@ -1166,25 +1396,22 @@ def main():
             </div>
 
             <div class="rdl-features-grid">
-                <div class="rdl-feature-card">
-                    <div class="rdl-feature-card-bar"></div>
+                <div class="rdl-feature-card" style="--cat-color: #3b82f6">
                     <h3>Upload, Explore & Export</h3>
                     <p>
                         Import CSV, Excel, TSV, or JSON files. Preview, clean,
                         transform, and export data in multiple formats.
                     </p>
                 </div>
-                <div class="rdl-feature-card">
-                    <div class="rdl-feature-card-bar"></div>
+                <div class="rdl-feature-card" style="--cat-color: #6366f1">
                     <h3>Analyze & Test</h3>
                     <p>
                         Comprehensive statistical suite: hypothesis testing,
                         ANOVA, GLM, mixed models, bootstrap, survival analysis,
-                        and DOE.
+                        and DOE — with built-in assumption validation.
                     </p>
                 </div>
-                <div class="rdl-feature-card">
-                    <div class="rdl-feature-card-bar"></div>
+                <div class="rdl-feature-card" style="--cat-color: #8b5cf6">
                     <h3>Visualize & Model</h3>
                     <p>
                         22+ chart types, XGBoost, SHAP, UMAP, SPC control charts,
@@ -1198,58 +1425,58 @@ def main():
             </div>
 
             <div class="rdl-modules-grid">
-                <div class="rdl-module-item">
-                    <h4>📂 Data Management</h4>
+                <div class="rdl-module-item" style="--cat-color: #3b82f6">
+                    <h4>Data Management</h4>
                     <p>Upload, clean, transform, filter, encode, export CSV/Excel/JSON.</p>
                 </div>
-                <div class="rdl-module-item">
-                    <h4>📊 Descriptive Statistics</h4>
+                <div class="rdl-module-item" style="--cat-color: #6366f1">
+                    <h4>Descriptive Statistics</h4>
                     <p>Summary stats, distributions, normality tests, outlier detection.</p>
                 </div>
-                <div class="rdl-module-item">
-                    <h4>📈 Visualization Builder</h4>
+                <div class="rdl-module-item" style="--cat-color: #6366f1">
+                    <h4>Visualization Builder</h4>
                     <p>Scatter, bar, heatmap, 3D, treemap, radar, candlestick, and more.</p>
                 </div>
-                <div class="rdl-module-item">
-                    <h4>🧪 Hypothesis Testing</h4>
+                <div class="rdl-module-item" style="--cat-color: #6366f1">
+                    <h4>Hypothesis Testing</h4>
                     <p>t-tests, chi-square, bootstrap CIs, permutation tests, power analysis.</p>
                 </div>
-                <div class="rdl-module-item">
-                    <h4>🔗 Correlation & PCA</h4>
+                <div class="rdl-module-item" style="--cat-color: #6366f1">
+                    <h4>Correlation & PCA</h4>
                     <p>Correlation matrices, PCA, t-SNE, UMAP, factor analysis.</p>
                 </div>
-                <div class="rdl-module-item">
-                    <h4>📐 Regression Analysis</h4>
+                <div class="rdl-module-item" style="--cat-color: #8b5cf6">
+                    <h4>Regression Analysis</h4>
                     <p>Linear, GLM, robust, quantile, mixed models, curve fitting.</p>
                 </div>
-                <div class="rdl-module-item">
-                    <h4>⚖️ ANOVA</h4>
+                <div class="rdl-module-item" style="--cat-color: #6366f1">
+                    <h4>ANOVA</h4>
                     <p>One-way, two-way, repeated measures, ANCOVA, Kruskal-Wallis.</p>
                 </div>
-                <div class="rdl-module-item">
-                    <h4>⏳ Time Series</h4>
+                <div class="rdl-module-item" style="--cat-color: #8b5cf6">
+                    <h4>Time Series</h4>
                     <p>Decomposition, ARIMA/SARIMA, smoothing, forecasting.</p>
                 </div>
-                <div class="rdl-module-item">
-                    <h4>🤖 Machine Learning</h4>
+                <div class="rdl-module-item" style="--cat-color: #8b5cf6">
+                    <h4>Machine Learning</h4>
                     <p>XGBoost, LightGBM, SHAP, clustering, model comparison.</p>
                 </div>
-                <div class="rdl-module-item">
-                    <h4>🏥 Survival Analysis</h4>
+                <div class="rdl-module-item" style="--cat-color: #10b981">
+                    <h4>Survival Analysis</h4>
                     <p>Kaplan-Meier, log-rank test, Cox PH, parametric AFT models.</p>
                 </div>
-                <div class="rdl-module-item">
-                    <h4>🏭 Quality & SPC</h4>
+                <div class="rdl-module-item" style="--cat-color: #10b981">
+                    <h4>Quality & SPC</h4>
                     <p>Control charts (I-MR, X-bar), attributes charts, process capability.</p>
                 </div>
-                <div class="rdl-module-item">
-                    <h4>🔬 Design of Experiments</h4>
+                <div class="rdl-module-item" style="--cat-color: #10b981">
+                    <h4>Design of Experiments</h4>
                     <p>Factorial, CCD, Box-Behnken, response surface, effect analysis.</p>
                 </div>
             </div>
 
             <div class="rdl-cta">
-                <span class="rdl-cta-pill">
+                <span class="rdl-cta-card">
                     Select a dataset from the sidebar to begin
                 </span>
             </div>

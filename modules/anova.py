@@ -9,7 +9,14 @@ from scipy import stats
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from modules.ui_helpers import significance_result, help_tip, section_header, empty_state
+from modules.ui_helpers import (
+    significance_result, help_tip, section_header, empty_state,
+    validation_panel, interpretation_card, alternative_suggestion, confidence_badge,
+)
+from modules.validation import (
+    check_normality, check_equal_variance, check_sample_size,
+    recommend_alternative, interpret_p_value, interpret_effect_size,
+)
 
 try:
     import statsmodels.api as sm
@@ -88,6 +95,45 @@ def _render_one_way(df: pd.DataFrame):
             st.error("Need at least 2 valid groups (each with ≥2 observations).")
             return
 
+        # ── Assumption checks (rendered BEFORE results) ──
+        try:
+            checks = []
+            # Levene's test for equal variance
+            variance_check = check_equal_variance(*groups)
+            checks.append(variance_check)
+
+            # Shapiro-Wilk normality per group
+            for name, g in zip(group_names, groups):
+                checks.append(check_normality(g, label=str(name)))
+
+            # Sample size per group
+            min_group_n = min(len(g) for g in groups)
+            checks.append(check_sample_size(min_group_n, "anova"))
+
+            validation_panel(checks)
+
+            # Alternative suggestion if Levene's fails
+            if variance_check.status in ("warn", "fail"):
+                alternative_suggestion(
+                    "Unequal variances detected",
+                    ["Welch's ANOVA", "Kruskal-Wallis test"],
+                )
+                # Show Welch's ANOVA when available
+                if HAS_PG:
+                    welch = pg.welch_anova(data=data, dv=dep_var, between=factor)
+                    with st.expander("Welch's ANOVA Result"):
+                        st.dataframe(welch.round(4), use_container_width=True, hide_index=True)
+
+            # Alternative suggestion if normality fails for any group
+            norm_failed = [c for c in checks if "Normality" in c.name and c.status in ("warn", "fail")]
+            if norm_failed:
+                alternative_suggestion(
+                    "Normality assumption violated for one or more groups",
+                    ["Kruskal-Wallis test"],
+                )
+        except Exception:
+            pass  # validation is advisory — don't block analysis
+
         # One-way ANOVA
         f_stat, p_value = stats.f_oneway(*groups)
 
@@ -122,40 +168,17 @@ def _render_one_way(df: pd.DataFrame):
 
         significance_result(p_value, alpha, "One-Way ANOVA", effect_size=eta_sq, effect_label="η²")
 
-        # Show Levene's warning prominently when violated
-        lev_stat_check, lev_p_check = stats.levene(*groups)
-        if lev_p_check < 0.05:
-            st.warning(f"⚠️ **Variance homogeneity violated** (Levene's p = {lev_p_check:.4f}). Consider Welch's ANOVA or Kruskal-Wallis.")
-
         help_tip("Effect size interpretation", """
 - **η² (eta-squared):** Proportion of total variance explained. Small = 0.01, Medium = 0.06, Large = 0.14
 - **ω² (omega-squared):** Less biased estimate. Same thresholds apply.
 """)
 
-        # Assumption checks
-        with st.expander("Assumption Checks"):
-            # Levene's test
-            lev_stat, lev_p = stats.levene(*groups)
-            st.write(f"**Levene's test (homogeneity of variance):** W = {lev_stat:.4f}, p = {lev_p:.6f}")
-            if lev_p < 0.05:
-                st.warning("Variance homogeneity assumption violated. Consider Welch's ANOVA.")
-                # Welch's ANOVA
-                if HAS_PG:
-                    welch = pg.welch_anova(data=data, dv=dep_var, between=factor)
-                    st.write("**Welch's ANOVA:**")
-                    st.dataframe(welch.round(4), use_container_width=True, hide_index=True)
-
-            # Shapiro-Wilk per group
-            st.write("**Shapiro-Wilk normality test per group:**")
-            norm_results = []
-            for name, g in zip(group_names, groups):
-                sample = g[:5000] if len(g) > 5000 else g
-                if len(sample) >= 3:
-                    sw_stat, sw_p = stats.shapiro(sample)
-                    norm_results.append({"Group": str(name), "W": sw_stat, "p": sw_p,
-                                         "Normal?": "Yes" if sw_p > 0.05 else "No"})
-            if norm_results:
-                st.dataframe(pd.DataFrame(norm_results).round(4), use_container_width=True, hide_index=True)
+        # Interpretation cards
+        try:
+            interpretation_card(interpret_effect_size(eta_sq, "eta-squared"))
+            interpretation_card(interpret_p_value(p_value, alpha))
+        except Exception:
+            pass
 
         # Post-hoc tests
         if p_value < alpha:
@@ -224,6 +247,26 @@ def _render_two_way(df: pd.DataFrame):
         data[factor_a] = data[factor_a].astype(str)
         data[factor_b] = data[factor_b].astype(str)
 
+        # ── Assumption checks (rendered BEFORE results) ──
+        try:
+            checks = []
+            # Levene's test across all cells
+            cell_groups = [
+                g[dep_var].values
+                for _, g in data.groupby([factor_a, factor_b])
+                if len(g) >= 2
+            ]
+            if len(cell_groups) >= 2:
+                checks.append(check_equal_variance(*cell_groups))
+            # Normality of residuals (run on overall DV as proxy before model fit)
+            checks.append(check_normality(data[dep_var].values, label="overall"))
+            # Sample size
+            min_cell_n = min(len(g) for _, g in data.groupby([factor_a, factor_b]))
+            checks.append(check_sample_size(min_cell_n, "anova"))
+            validation_panel(checks)
+        except Exception:
+            pass
+
         formula = f"Q('{dep_var}') ~ C(Q('{factor_a}')) * C(Q('{factor_b}'))"
         try:
             model = ols(formula, data=data).fit()
@@ -237,6 +280,19 @@ def _render_two_way(df: pd.DataFrame):
             for idx in anova_table.index[:-1]:  # Skip Residual
                 eta_sq = anova_table.loc[idx, "sum_sq"] / ss_total
                 st.write(f"**{idx}:** η² = {eta_sq:.4f}")
+
+            # Interpretation cards for each effect
+            try:
+                for idx in anova_table.index[:-1]:
+                    eta_sq_val = anova_table.loc[idx, "sum_sq"] / ss_total
+                    p_val = anova_table.loc[idx, "PR(>F)"] if "PR(>F)" in anova_table.columns else None
+                    if p_val is not None and not np.isnan(p_val):
+                        interpretation_card(interpret_p_value(p_val, 0.05))
+                interpretation_card(interpret_effect_size(
+                    anova_table.loc[anova_table.index[0], "sum_sq"] / ss_total, "eta-squared"
+                ))
+            except Exception:
+                pass
 
             # Interaction plot
             means = data.groupby([factor_a, factor_b])[dep_var].mean().reset_index()
@@ -331,6 +387,13 @@ def _render_kruskal_wallis(df: pd.DataFrame):
         else:
             st.info(f"**Not significant** (p = {p_value:.6f})")
 
+        # Interpretation cards
+        try:
+            interpretation_card(interpret_p_value(p_value, 0.05))
+            interpretation_card(interpret_effect_size(eta_sq_h, "eta-squared"))
+        except Exception:
+            pass
+
         # Dunn's post-hoc test
         if p_value < 0.05 and HAS_PG:
             section_header("Dunn's Post-Hoc Test")
@@ -380,6 +443,12 @@ def _render_friedman(df: pd.DataFrame):
             st.success(f"**Significant** (p = {p_value:.6f})")
         else:
             st.info(f"**Not significant** (p = {p_value:.6f})")
+
+        # Interpretation cards
+        try:
+            interpretation_card(interpret_p_value(p_value, 0.05))
+        except Exception:
+            pass
 
         # Visualization
         melt_df = data.melt(var_name="Condition", value_name="Value")

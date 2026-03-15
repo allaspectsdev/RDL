@@ -9,7 +9,8 @@ from scipy import stats
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from modules.ui_helpers import section_header, empty_state, help_tip
+from modules.ui_helpers import section_header, empty_state, help_tip, validation_panel, interpretation_card
+from modules.validation import check_normality, interpret_capability
 
 
 # ---------------------------------------------------------------------------
@@ -818,6 +819,13 @@ def _render_process_capability(df: pd.DataFrame):
             st.error("USL must be greater than LSL.")
             return
 
+        # Normality check — capability indices assume normal data
+        try:
+            normality_check = check_normality(data, label=col_name)
+            validation_panel([normality_check], title="Normality Assumption")
+        except Exception:
+            pass
+
         mean = np.mean(data)
         std_within = np.std(data, ddof=1)  # within / short-term proxy
         std_overall = np.std(data, ddof=0)  # overall / long-term
@@ -853,6 +861,12 @@ def _render_process_capability(df: pd.DataFrame):
         m3.metric("Pp", f"{pp:.3f}")
         m4.metric("Ppk", f"{ppk:.3f}")
         m5.metric("Cpm", f"{cpm:.3f}")
+
+        # Capability interpretation card
+        try:
+            interpretation_card(interpret_capability(cpk))
+        except Exception:
+            pass
 
         # Interpretation
         def _interpret_index(name, value):

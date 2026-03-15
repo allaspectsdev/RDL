@@ -9,7 +9,11 @@ from scipy import stats
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from modules.ui_helpers import section_header, empty_state, help_tip
+from modules.ui_helpers import section_header, empty_state, help_tip, validation_panel, interpretation_card, alternative_suggestion
+from modules.validation import (
+    check_sample_size, check_stationarity, interpret_stationarity,
+    interpret_p_value,
+)
 
 try:
     import statsmodels.api as sm
@@ -233,6 +237,11 @@ def _render_stationarity(df: pd.DataFrame):
         else:
             st.warning("Series is non-stationary (cannot reject H₀ of unit root)")
 
+        try:
+            interpretation_card(interpret_stationarity(adf_result[1]))
+        except Exception:
+            pass
+
         # KPSS test
         section_header("KPSS Test")
         try:
@@ -455,6 +464,18 @@ def _render_arima(df: pd.DataFrame):
         test = ts_clean[n_train:]
 
         try:
+            try:
+                checks = [
+                    check_sample_size(len(train), "arima"),
+                    check_stationarity(train.values),
+                ]
+                validation_panel(checks, title="Pre-fit Checks")
+                stationarity_check = [c for c in checks if "Stationarity" in c.name]
+                if stationarity_check and stationarity_check[0].status in ("warn", "fail"):
+                    alternative_suggestion("Series is non-stationary", ["Apply differencing (d >= 1)", "Use SARIMA with seasonal differencing"])
+            except Exception:
+                pass
+
             with st.spinner("Fitting ARIMA model..."):
                 if use_seasonal:
                     model = SARIMAX(train, order=(p, d, q),
@@ -635,6 +656,38 @@ def _render_forecast_comparison(df: pd.DataFrame):
                                      line=dict(color=colors[i % len(colors)], dash="dash")))
         fig.update_layout(title="Forecast Comparison", height=500)
         st.plotly_chart(fig, use_container_width=True)
+
+        # Interpretation: does the best model beat naive?
+        try:
+            naive_row = [r for r in results if r["Model"] == "Naive"]
+            best_row = results_df.iloc[0]
+            if naive_row and best_row["Model"] != "Naive":
+                naive_rmse = naive_row[0]["RMSE"]
+                improvement = (1 - best_row["RMSE"] / naive_rmse) * 100 if naive_rmse > 0 else 0
+                from modules.validation import Interpretation
+                interpretation_card(Interpretation(
+                    title="Forecast Comparison",
+                    body=(
+                        f"The best model ({best_row['Model']}) achieves RMSE = {best_row['RMSE']:.4f}, "
+                        f"a {improvement:.1f}% improvement over the naive baseline "
+                        f"(RMSE = {naive_rmse:.4f})."
+                        + (" This suggests meaningful predictive structure in the data."
+                           if improvement > 5 else
+                           " The modest improvement suggests limited predictable structure beyond persistence.")
+                    ),
+                ))
+            elif naive_row and best_row["Model"] == "Naive":
+                from modules.validation import Interpretation
+                interpretation_card(Interpretation(
+                    title="Forecast Comparison",
+                    body=(
+                        "No model outperformed the naive baseline. "
+                        "The series may be a random walk or require different modeling approaches "
+                        "(e.g., external regressors, longer history, or non-linear models)."
+                    ),
+                ))
+        except Exception:
+            pass
 
 
 def _eval_forecast(name, actual, forecast, aic=None):

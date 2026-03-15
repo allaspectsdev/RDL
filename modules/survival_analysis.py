@@ -8,7 +8,8 @@ import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from modules.ui_helpers import section_header, empty_state, help_tip
+from modules.ui_helpers import section_header, empty_state, help_tip, validation_panel, interpretation_card
+from modules.validation import check_sample_size, interpret_p_value, interpret_effect_size
 
 try:
     from lifelines import (
@@ -397,24 +398,76 @@ def _render_cox_ph(df: pd.DataFrame):
             coef_df.index.name = "Covariate"
             st.dataframe(coef_df, use_container_width=True)
 
-            # PH assumption test
-            with st.expander("Proportional Hazards Assumption Test"):
+            # Sample size check for survival analysis
+            try:
+                n_events = int(data[event_col].sum())
+                ss_check = check_sample_size(n_events, "survival")
+                validation_panel([ss_check], title="Sample Size Check")
+            except Exception:
+                pass
+
+            # PH assumption test — rendered prominently via validation_panel
+            try:
+                from modules.validation import ValidationCheck
+                ph_checks = []
                 try:
-                    ph_test = cph.check_assumptions(data, p_value_threshold=0.05, show_plots=False)
-                    st.success("Proportional hazards assumption satisfied for all covariates.")
+                    cph.check_assumptions(data, p_value_threshold=0.05, show_plots=False)
+                    ph_checks.append(ValidationCheck(
+                        name="Proportional Hazards Assumption",
+                        status="pass",
+                        detail="All covariates satisfy the PH assumption (Schoenfeld test p > 0.05)",
+                    ))
                 except Exception as ph_exc:
-                    st.warning(f"PH assumption may be violated: {ph_exc}")
+                    ph_checks.append(ValidationCheck(
+                        name="Proportional Hazards Assumption",
+                        status="warn",
+                        detail=f"PH assumption may be violated: {ph_exc}",
+                        suggestion="Consider time-varying covariates or stratified Cox model",
+                    ))
                 try:
                     from lifelines.statistics import proportional_hazard_test
                     ph_result = proportional_hazard_test(cph, data, time_transform="rank")
-                    st.markdown("**Schoenfeld Test Results:**")
-                    st.dataframe(ph_result.summary.round(4), use_container_width=True)
+                    for cov_name in ph_result.summary.index:
+                        row = ph_result.summary.loc[cov_name]
+                        p_val = row["p"] if "p" in row.index else row.iloc[-1]
+                        status = "pass" if p_val >= 0.05 else ("warn" if p_val >= 0.01 else "fail")
+                        ph_checks.append(ValidationCheck(
+                            name=f"Schoenfeld Test ({cov_name})",
+                            status=status,
+                            detail=f"p = {p_val:.4f}" + (" -- PH assumption holds" if p_val >= 0.05 else " -- PH assumption violated"),
+                            suggestion="" if p_val >= 0.05 else "Consider time-varying coefficient for this covariate",
+                        ))
+                    with st.expander("Schoenfeld Test Details"):
+                        st.dataframe(ph_result.summary.round(4), use_container_width=True)
                 except Exception:
                     pass
+
+                if ph_checks:
+                    validation_panel(ph_checks, title="Proportional Hazards Diagnostics")
+            except Exception:
+                pass
 
             # Forest plot of hazard ratios
             section_header("Forest Plot (Hazard Ratios)")
             _plot_forest(cph.summary)
+
+            # Hazard ratio interpretation cards
+            try:
+                for cov_name in cph.summary.index:
+                    hr = cph.summary.loc[cov_name, "exp(coef)"]
+                    if hr > 1:
+                        direction = f"a {((hr - 1) * 100):.1f}% increase in the hazard (risk) for each unit increase in {cov_name}"
+                    elif hr < 1:
+                        direction = f"a {((1 - hr) * 100):.1f}% decrease in the hazard (risk) for each unit increase in {cov_name}"
+                    else:
+                        direction = f"no change in the hazard for each unit increase in {cov_name}"
+                    interpretation_card({
+                        "title": "Hazard Ratio",
+                        "body": f"A hazard ratio of {hr:.2f} means {direction}.",
+                        "detail": f"Covariate: {cov_name}",
+                    })
+            except Exception:
+                pass
 
         except Exception as e:
             st.error(f"Cox PH error: {e}")

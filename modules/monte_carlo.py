@@ -80,8 +80,7 @@ def _render_distribution_simulator():
         c5.metric("Max", f"{np.max(samples):.4f}")
 
         # Histogram
-        fig = px.histogram(x=samples, nbins=50, title=f"{dist_name} Distribution (n={n_sim:,})",
-                           color_discrete_sequence=["#6366f1"])
+        fig = px.histogram(x=samples, nbins=50, title=f"{dist_name} Distribution (n={n_sim:,})")
         fig.update_layout(xaxis_title="Value", yaxis_title="Frequency", height=400)
         st.plotly_chart(fig, use_container_width=True)
 
@@ -101,7 +100,7 @@ def _render_distribution_simulator():
         fig2 = go.Figure()
         fig2.add_trace(go.Scatter(x=sorted_samples[::step], y=cdf[::step],
                                   mode="lines", name="CDF",
-                                  line=dict(color="#6366f1")))
+))
         fig2.update_layout(title="Cumulative Distribution Function",
                            xaxis_title="Value", yaxis_title="Cumulative Probability",
                            height=350)
@@ -173,8 +172,7 @@ def _render_process_simulation():
         c3.metric("CV%", f"{np.std(output) / abs(np.mean(output)) * 100:.2f}%"
                   if np.mean(output) != 0 else "N/A")
 
-        fig = px.histogram(x=output, nbins=50, title="Output Distribution",
-                           color_discrete_sequence=["#6366f1"])
+        fig = px.histogram(x=output, nbins=50, title="Output Distribution")
         fig.update_layout(xaxis_title="Output Value", yaxis_title="Frequency", height=400)
         st.plotly_chart(fig, use_container_width=True)
 
@@ -252,8 +250,7 @@ def _render_risk_analysis():
         c3.metric("95% CI", f"[{ci_low:.4f}, {ci_high:.4f}]")
 
         # Histogram with threshold line
-        fig = px.histogram(x=samples, nbins=50, title="Distribution with Threshold",
-                           color_discrete_sequence=["#6366f1"])
+        fig = px.histogram(x=samples, nbins=50, title="Distribution with Threshold")
         fig.add_vline(x=threshold, line_dash="dash", line_color="#ef4444",
                       annotation_text=f"Threshold = {threshold}")
         fig.update_layout(height=400)

@@ -9,7 +9,14 @@ from scipy import stats
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from modules.ui_helpers import section_header, empty_state
+from modules.ui_helpers import (
+    section_header, empty_state, validation_panel, interpretation_card,
+    alternative_suggestion,
+)
+from modules.validation import (
+    check_sample_size, check_class_balance, check_outlier_proportion,
+    interpret_effect_size, interpret_silhouette,
+)
 
 from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.preprocessing import StandardScaler, LabelEncoder
@@ -241,6 +248,10 @@ def _show_cluster_results(data, X, labels, features, cat_cols, df):
         if mask.sum() > len(unique_labels):
             sil = silhouette_score(X[mask], labels[mask])
             st.metric("Silhouette Score", f"{sil:.4f}")
+            try:
+                interpretation_card(interpret_silhouette(sil))
+            except Exception:
+                pass
 
     # 2D visualization (PCA if >2 features)
     if X.shape[1] > 2:
@@ -353,6 +364,22 @@ def _render_classification(df: pd.DataFrame):
         le = LabelEncoder()
         y = le.fit_transform(y_raw)
         classes = le.classes_
+
+        # ── Data-quality validation ──────────────────────────────────
+        try:
+            checks = [
+                check_sample_size(len(X), "ml-classification"),
+                check_class_balance(y),
+            ]
+            validation_panel(checks, title="Data Quality")
+            if any(c.status in ("warn", "fail") for c in checks if "Class" in c.name):
+                alternative_suggestion(
+                    "Class imbalance detected",
+                    ["Use class_weight='balanced'", "Consider SMOTE oversampling"],
+                )
+        except Exception:
+            pass
+        # ────────────────────────────────────────────────────────────
 
         try:
             X_train, X_test, y_train, y_test = train_test_split(
@@ -575,6 +602,17 @@ def _render_ml_regression(df: pd.DataFrame):
         data = df[features + [target]].dropna()
         X = data[features].values
         y = data[target].values
+
+        # ── Data-quality validation ──────────────────────────────────
+        try:
+            checks = [
+                check_sample_size(len(X), "ml-regression"),
+                check_outlier_proportion(y),
+            ]
+            validation_panel(checks, title="Data Quality")
+        except Exception:
+            pass
+        # ────────────────────────────────────────────────────────────
 
         X_train, X_test, y_train, y_test = train_test_split(
             X, y, test_size=test_size, random_state=random_state)
@@ -822,6 +860,24 @@ def _render_model_comparison(df: pd.DataFrame):
             fig.update_layout(height=400)
             st.plotly_chart(fig, use_container_width=True)
 
+            # ── Best model interpretation ────────────────────────────
+            try:
+                if not results_df.empty:
+                    best = results_df.iloc[0]
+                    interpretation_card({
+                        "title": "Best Model",
+                        "body": (
+                            f"{best['Model']} achieved a mean 5-fold CV accuracy of "
+                            f"{best['Mean Accuracy']:.4f} (std {best['Std']:.4f})."
+                        ),
+                        "detail": (
+                            f"Accuracy ranged from {best['Min']:.4f} to {best['Max']:.4f} "
+                            f"across folds."
+                        ),
+                    })
+            except Exception:
+                pass
+
     else:  # Regression
         if len(num_cols) < 2:
             empty_state("Need at least 2 numeric columns.")
@@ -847,3 +903,21 @@ def _render_model_comparison(df: pd.DataFrame):
                          color="Mean R²", color_continuous_scale="Blues")
             fig.update_layout(height=400)
             st.plotly_chart(fig, use_container_width=True)
+
+            # ── Best model interpretation ────────────────────────────
+            try:
+                if not results_df.empty:
+                    best = results_df.iloc[0]
+                    interpretation_card(interpret_effect_size(
+                        best["Mean R²"], "r-squared",
+                    ))
+                    interpretation_card({
+                        "title": "Best Model",
+                        "body": (
+                            f"{best['Model']} achieved a mean 5-fold CV R² of "
+                            f"{best['Mean R²']:.4f} (std {best['Std R²']:.4f}) "
+                            f"with mean RMSE of {best['Mean RMSE']:.4f}."
+                        ),
+                    })
+            except Exception:
+                pass

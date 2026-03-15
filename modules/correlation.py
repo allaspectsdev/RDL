@@ -12,7 +12,13 @@ from sklearn.preprocessing import StandardScaler
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from modules.ui_helpers import section_header, empty_state
+from modules.ui_helpers import (
+    section_header, empty_state, validation_panel,
+    interpretation_card, alternative_suggestion,
+)
+from modules.validation import (
+    check_sample_size, check_kmo_bartlett, interpret_correlation,
+)
 
 
 @st.cache_data
@@ -83,6 +89,19 @@ def _render_corr_matrix(df: pd.DataFrame):
     show_tri = st.selectbox("Show:", ["Full", "Upper Triangle", "Lower Triangle"], key="corr_tri")
 
     corr, p_matrix = _compute_corr_and_pvals(df[selected], method)
+
+    # Validation checks
+    try:
+        n_obs = len(df[selected].dropna())
+        checks = [check_sample_size(n_obs, "correlation")]
+        validation_panel(checks, title="Data Quality")
+        if method == "pearson" and n_obs < 30:
+            alternative_suggestion(
+                f"Small sample (n={n_obs}) with Pearson correlation",
+                ["Spearman rank correlation"],
+            )
+    except Exception:
+        pass
 
     # Mask
     mask = np.zeros_like(corr, dtype=bool)
@@ -215,6 +234,22 @@ def _render_pca(df: pd.DataFrame):
     if st.button("Run PCA", key="run_pca"):
         data = df[selected].dropna()
         X = data.values
+
+        # Validation: KMO & Bartlett's test
+        try:
+            checks = [
+                check_sample_size(len(data), "pca"),
+                check_kmo_bartlett(data[selected] if isinstance(data, pd.DataFrame) else pd.DataFrame(X, columns=selected)),
+            ]
+            validation_panel(checks, title="PCA Suitability")
+            failed = [c for c in checks if c.status in ("warn", "fail")]
+            if any("KMO" in c.name for c in failed):
+                alternative_suggestion(
+                    "Data may not be suitable for dimension reduction",
+                    ["Review variable selection", "Check for low-variance variables"],
+                )
+        except Exception:
+            pass
 
         if standardize:
             scaler = StandardScaler()
@@ -373,6 +408,17 @@ def _render_factor_analysis(df: pd.DataFrame):
 
     if st.button("Run Factor Analysis", key="run_fa"):
         data = df[selected].dropna()
+
+        # Validation: KMO & Bartlett's
+        try:
+            checks = [
+                check_sample_size(len(data), "pca"),
+                check_kmo_bartlett(data),
+            ]
+            validation_panel(checks, title="Factor Analysis Suitability")
+        except Exception:
+            pass
+
         X = StandardScaler().fit_transform(data.values)
 
         rot = rotation if rotation != "none" else None

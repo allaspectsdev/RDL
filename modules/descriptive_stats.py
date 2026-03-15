@@ -9,7 +9,8 @@ from scipy import stats
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from modules.ui_helpers import section_header, empty_state
+from modules.ui_helpers import section_header, empty_state, validation_panel, interpretation_card, sample_size_indicator
+from modules.validation import check_sample_size, interpret_effect_size
 
 
 def render_descriptive_stats(df: pd.DataFrame):
@@ -47,6 +48,13 @@ def _render_summary_stats(df: pd.DataFrame):
         return
 
     ci_level = st.selectbox("Confidence level:", [0.90, 0.95, 0.99], index=1, key="ci_level")
+
+    # Sample size indicator
+    try:
+        total_n = min(len(df[c].dropna()) for c in selected)
+        sample_size_indicator(total_n, 30)
+    except Exception:
+        pass
 
     records = []
     for col_name in selected:
@@ -271,6 +279,20 @@ def _render_distribution(df: pd.DataFrame):
         float_cols = results_df.select_dtypes(include=[np.number]).columns
         results_df[float_cols] = results_df[float_cols].round(6)
         st.dataframe(results_df, use_container_width=True, hide_index=True)
+
+        # Aggregate normality assessment
+        try:
+            # Count rejections from the test table
+            n_reject = sum(1 for tr in test_results if tr.get("Normal (\u03b1=0.05)?") == "No")
+            n_total = len(test_results)
+            if n_reject >= 3:
+                interpretation_card({"title": "Normality Assessment", "body": f"{n_reject} of {n_total} tests reject normality \u2014 data is likely non-normal."})
+            elif n_reject == 0:
+                interpretation_card({"title": "Normality Assessment", "body": "All normality tests pass \u2014 data appears normally distributed."})
+            else:
+                interpretation_card({"title": "Normality Assessment", "body": f"{n_reject} of {n_total} tests reject normality \u2014 results are mixed."})
+        except Exception:
+            pass
 
 
 def _render_frequency(df: pd.DataFrame):
