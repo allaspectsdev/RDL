@@ -1038,6 +1038,7 @@ st.markdown("""<style>
 # ─── MODULE IMPORTS ──────────────────────────────────────────────────────────
 import modules.ui_helpers  # noqa: F401  — registers RDL Plotly template
 from modules.data_manager import render_upload, render_data_manager
+from modules.dataset_editor import render_dataset_editor
 from modules.descriptive_stats import render_descriptive_stats
 from modules.hypothesis_testing import render_hypothesis_testing
 from modules.regression import render_regression
@@ -1387,6 +1388,7 @@ def main():
             [
                 "Home",
                 "Data Manager",
+                "Dataset Editor",
                 "Descriptive Statistics",
                 "Visualization Builder",
                 "Hypothesis Testing",
@@ -1410,6 +1412,7 @@ def main():
         _MODULE_DESCRIPTIONS = {
             "Home": "Overview of Ryan's Data Lab and available modules.",
             "Data Manager": "Upload, clean, reshape, merge, string ops, date extraction, and export.",
+            "Dataset Editor": "Spreadsheet-like cell editing, find & replace, validation rules, and undo history.",
             "Descriptive Statistics": "Summary stats, distribution fitting, normality tests, tolerance intervals.",
             "Visualization Builder": "34+ interactive chart types: Sankey, ridgeline, hexbin, and more.",
             "Hypothesis Testing": "t-tests, chi-square, McNemar, Bartlett, runs test, expanded power analysis.",
@@ -1483,7 +1486,7 @@ def main():
                     <span class="rdl-stat-label">Chart Types</span>
                 </div>
                 <div class="rdl-stat">
-                    <span class="rdl-stat-value">16</span>
+                    <span class="rdl-stat-value">17</span>
                     <span class="rdl-stat-label">Modules</span>
                 </div>
                 <div class="rdl-stat">
@@ -1602,6 +1605,15 @@ def main():
                 st.session_state["df"] = result
         except Exception as e:
             st.error(f"An error occurred in Data Manager: {e}")
+        return
+
+    # Dataset Editor also operates on raw df (it mutates data).
+    if module == "Dataset Editor":
+        st.markdown("## Dataset Editor")
+        try:
+            render_dataset_editor(df_raw)
+        except Exception as e:
+            st.error(f"An error occurred in Dataset Editor: {e}")
         return
 
     # ── Interactive filter bar (all other modules) ──
