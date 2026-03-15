@@ -132,7 +132,7 @@ def _init_session_state():
         "exp_chat_history": [],
         "exp_auto_context": True,
         "exp_stop_on_error": True,
-        "exp_canvas_height": 500,
+        "exp_canvas_height": 450,
     }
     for key, val in defaults.items():
         if key not in st.session_state:
@@ -217,6 +217,19 @@ def _inject_css():
         font-weight: 600;
         font-size: 0.85rem;
         color: #1e293b;
+    }
+    /* Contain the canvas in a fixed viewport */
+    .rdl-exp-canvas-area {
+        position: relative;
+        border-radius: 14px;
+        overflow: hidden;
+        margin-bottom: 0.75rem;
+    }
+    /* Compact node palette buttons */
+    .rdl-exp-palette-btn button {
+        font-size: 0.75rem !important;
+        padding: 0.3rem 0.5rem !important;
+        text-align: center !important;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -787,38 +800,19 @@ def _render_workflow_tab(df):
         )
         return
 
-    help_tip("Workflow Builder", """
-Build analysis pipelines visually:
-1. **Add nodes** from the palette below.
-2. **Connect nodes** by dragging from one node's handle to another.
-3. **Click a node** to configure its settings.
-4. **Run** the workflow to execute all nodes in order.
+    # ── Canvas FIRST (always visible) ──
+    _render_canvas()
 
-Node types: Data Source (load data), Transform (reshape), Analysis (stats),
-Visualization (charts), AI Prompt (Claude), Output (display results).
-""")
+    # ── Compact Node Palette + Controls ──
+    node_items = list(NODE_TYPES.items())
+    cols = st.columns([1, 1, 1, 1, 1, 1, 2])
+    for i, (ntype, info) in enumerate(node_items):
+        with cols[i]:
+            if st.button(f"{info['icon']} {ntype}", key=f"exp_add_{ntype}", use_container_width=True):
+                _add_node(ntype)
+                st.rerun()
 
-    # ── Node Palette + Controls ──
-    c_palette, c_controls = st.columns([3, 2])
-
-    with c_palette:
-        section_header("Node Palette")
-        cols = st.columns(3)
-        for i, (ntype, info) in enumerate(NODE_TYPES.items()):
-            with cols[i % 3]:
-                st.markdown(
-                    f'<div class="rdl-exp-node-card" style="--node-color: {info["color"]}">'
-                    f'<span class="node-icon">{info["icon"]}</span>'
-                    f'<span class="node-name">{ntype}</span>'
-                    f'<div class="node-desc">{info["desc"]}</div></div>',
-                    unsafe_allow_html=True,
-                )
-                if st.button(f"+ Add", key=f"exp_add_{ntype}", use_container_width=True):
-                    _add_node(ntype)
-                    st.rerun()
-
-    with c_controls:
-        section_header("Controls")
+    with cols[6]:
         bc1, bc2 = st.columns(2)
         if bc1.button("Run Workflow", type="primary", key="exp_run", use_container_width=True):
             _run_workflow(df)
@@ -831,7 +825,10 @@ Visualization (charts), AI Prompt (Claude), Output (display results).
             st.session_state["exp_selected_node"] = None
             st.rerun()
 
-        with st.expander("Save / Load"):
+    # ── Workflow Management (Save / Load / Export / Import) ──
+    with st.expander("Workflow Management"):
+        wm1, wm2 = st.columns(2)
+        with wm1:
             wf_name = st.text_input("Workflow name:", value=st.session_state.get("exp_workflow_name", ""),
                                     key="exp_wf_name_input")
             sc1, sc2 = st.columns(2)
@@ -847,8 +844,7 @@ Visualization (charts), AI Prompt (Claude), Output (display results).
                     _load_workflow(sel)
                     st.rerun()
 
-        # JSON export/import
-        with st.expander("Export / Import JSON"):
+        with wm2:
             if st.button("Export to JSON", key="exp_export"):
                 data = _serialize_workflow()
                 st.download_button("Download JSON", json.dumps(data, indent=2, default=str),
@@ -864,11 +860,20 @@ Visualization (charts), AI Prompt (Claude), Output (display results).
                 except Exception as e:
                     st.error(f"Import failed: {e}")
 
-    # ── Canvas ──
-    st.divider()
-    _render_canvas()
+    # ── Help (collapsed to save space) ──
+    with st.expander("Help"):
+        st.markdown("""
+**Build analysis pipelines visually:**
+1. **Add nodes** from the palette above.
+2. **Connect nodes** by dragging from one handle to another.
+3. **Click a node** to configure its settings.
+4. **Run** the workflow to execute all nodes in order.
 
-    # ── Config Panel ──
+**Node types:** Data Source (load data), Transform (reshape), Analysis (stats),
+Visualization (charts), AI Prompt (Claude), Output (display results).
+""")
+
+    # ── Config Panel (only if node selected) ──
     _render_config_panel(df)
 
     # ── Execution Results ──
@@ -920,12 +925,9 @@ def _render_canvas():
         flow_state = StreamlitFlowState(nodes=[], edges=[])
         st.session_state["exp_flow_state"] = flow_state
 
-    if not flow_state.nodes:
-        st.info("Add nodes from the palette above, then connect them to build a workflow.")
-        return
+    height = st.session_state.get("exp_canvas_height", 450)
 
-    height = st.session_state.get("exp_canvas_height", 500)
-
+    st.markdown('<div class="rdl-exp-canvas-area">', unsafe_allow_html=True)
     updated = streamlit_flow(
         "exp_canvas",
         state=flow_state,
@@ -940,6 +942,10 @@ def _render_canvas():
         enable_pane_menu=True,
         min_zoom=0.3,
     )
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    if not flow_state.nodes:
+        st.caption("Add nodes from the palette below, then connect them to build a workflow.")
 
     if updated is not None:
         # Check for node click
