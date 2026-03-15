@@ -940,6 +940,8 @@ def _render_canvas():
         enable_node_menu=True,
         enable_edge_menu=True,
         enable_pane_menu=True,
+        allow_new_edges=True,
+        animate_new_edges=True,
         min_zoom=0.3,
     )
     st.markdown('</div>', unsafe_allow_html=True)
