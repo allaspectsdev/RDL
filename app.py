@@ -1226,6 +1226,85 @@ def _dataset_info(df):
     return n_numeric, n_cat, missing_pct, mem_kb
 
 
+def _apply_data_filters(df):
+    """Interactive filter bar at top of main content. Returns filtered DataFrame.
+
+    Modules receive the filtered df — zero changes needed in module code.
+    Filter state lives in widget keys so it survives reruns naturally.
+    """
+    with st.expander("Data Filters", expanded=False):
+        num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+        cat_cols = df.select_dtypes(include=["object", "category"]).columns.tolist()
+        date_cols = df.select_dtypes(include=["datetime64"]).columns.tolist()
+        filterable = num_cols + cat_cols + date_cols
+
+        if not filterable:
+            st.caption("No filterable columns available.")
+            return df
+
+        filter_cols = st.multiselect(
+            "Filter by:", filterable, key="fbar_cols",
+            help="Select columns to add filter controls",
+        )
+
+        if not filter_cols:
+            return df
+
+        filtered = df
+        for col in filter_cols:
+            if col in num_cols:
+                col_data = df[col].dropna()
+                if col_data.empty:
+                    continue
+                col_min, col_max = float(col_data.min()), float(col_data.max())
+                if col_min >= col_max:
+                    continue
+                vals = st.slider(
+                    f"{col}:", col_min, col_max, (col_min, col_max),
+                    key=f"fbar_n_{col}",
+                )
+                filtered = filtered[
+                    (filtered[col] >= vals[0]) & (filtered[col] <= vals[1])
+                ]
+            elif col in cat_cols:
+                unique = sorted(df[col].dropna().unique().tolist(), key=str)
+                if not unique:
+                    continue
+                selected = st.multiselect(
+                    f"{col}:", unique, default=unique, key=f"fbar_c_{col}",
+                )
+                if selected:
+                    filtered = filtered[filtered[col].isin(selected)]
+            elif col in date_cols:
+                try:
+                    min_d = df[col].min().date()
+                    max_d = df[col].max().date()
+                    date_range = st.date_input(
+                        f"{col}:", value=(min_d, max_d), key=f"fbar_d_{col}",
+                    )
+                    if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
+                        filtered = filtered[
+                            (filtered[col].dt.date >= date_range[0])
+                            & (filtered[col].dt.date <= date_range[1])
+                        ]
+                except Exception:
+                    pass
+
+    n_total = len(df)
+    n_filtered = len(filtered)
+    if n_filtered < n_total:
+        st.markdown(
+            f'<div style="background:var(--rdl-accent-light);color:var(--rdl-accent);'
+            f'padding:0.35rem 0.75rem;border-radius:var(--rdl-radius-xs);'
+            f'display:inline-block;font-size:0.8rem;font-weight:600;'
+            f'margin-bottom:0.5rem;">'
+            f'Filtered: {n_filtered:,} of {n_total:,} rows</div>',
+            unsafe_allow_html=True,
+        )
+
+    return filtered
+
+
 def main():
     with st.sidebar:
         st.markdown("""
@@ -1330,18 +1409,18 @@ def main():
 
         _MODULE_DESCRIPTIONS = {
             "Home": "Overview of Ryan's Data Lab and available modules.",
-            "Data Manager": "Upload, clean, transform, filter, encode, and export datasets.",
-            "Descriptive Statistics": "Summary statistics, distributions, normality tests, outlier detection.",
-            "Visualization Builder": "22+ interactive chart types with full customization.",
-            "Hypothesis Testing": "t-tests, chi-square, bootstrap CIs, permutation tests, power analysis.",
-            "Correlation & Multivariate": "Correlation matrices, PCA, t-SNE, UMAP, factor analysis.",
-            "Regression Analysis": "Linear, GLM, robust, quantile, mixed models, and curve fitting.",
-            "ANOVA": "One-way, two-way, repeated measures, ANCOVA, Kruskal-Wallis.",
-            "Time Series Analysis": "Decomposition, ARIMA/SARIMA, smoothing, and forecasting.",
-            "Machine Learning": "XGBoost, LightGBM, SHAP, clustering, and model comparison.",
+            "Data Manager": "Upload, clean, reshape, merge, string ops, date extraction, and export.",
+            "Descriptive Statistics": "Summary stats, distribution fitting, normality tests, tolerance intervals.",
+            "Visualization Builder": "34+ interactive chart types: Sankey, ridgeline, hexbin, and more.",
+            "Hypothesis Testing": "t-tests, chi-square, McNemar, Bartlett, runs test, expanded power analysis.",
+            "Correlation & Multivariate": "Correlation matrices, PCA, t-SNE, correspondence analysis, MDS.",
+            "Regression Analysis": "Linear, GLM, stepwise, multinomial/ordinal logistic, WLS, mixed models.",
+            "ANOVA": "One-way, two-way, MANOVA, Games-Howell, Dunnett, repeated measures.",
+            "Time Series Analysis": "Decomposition, ARIMA/SARIMA, change point detection, forecasting.",
+            "Machine Learning": "XGBoost, LightGBM, SHAP, GMM, precision-recall, model comparison.",
             "Survival Analysis": "Kaplan-Meier, log-rank test, Cox PH, parametric AFT models.",
-            "Quality & SPC": "Control charts (I-MR, X-bar), attributes charts, process capability.",
-            "Design of Experiments": "Factorial, CCD, Box-Behnken, response surface, effect analysis.",
+            "Quality & SPC": "Control charts, multi-vari analysis, fishbone diagrams, capability.",
+            "Design of Experiments": "Factorial, CCD, Taguchi, Latin hypercube, response surface.",
             "Text Analytics": "Text exploration, TF-IDF, word clouds, sentiment analysis.",
             "Monte Carlo Simulation": "Distribution simulation, process propagation, risk analysis.",
             "Report Builder": "Build and download HTML reports from your analyses.",
@@ -1400,15 +1479,15 @@ def main():
 
             <div class="rdl-stats-bar">
                 <div class="rdl-stat">
-                    <span class="rdl-stat-value">22+</span>
+                    <span class="rdl-stat-value">34+</span>
                     <span class="rdl-stat-label">Chart Types</span>
                 </div>
                 <div class="rdl-stat">
-                    <span class="rdl-stat-value">12</span>
+                    <span class="rdl-stat-value">16</span>
                     <span class="rdl-stat-label">Modules</span>
                 </div>
                 <div class="rdl-stat">
-                    <span class="rdl-stat-value">70+</span>
+                    <span class="rdl-stat-value">100+</span>
                     <span class="rdl-stat-label">Statistical Tests</span>
                 </div>
                 <div class="rdl-stat">
@@ -1511,17 +1590,24 @@ def main():
             st.info(f"**{data_name_home}** is loaded ({df_home.shape[0]:,} rows, {df_home.shape[1]} columns). Select a module from the sidebar to analyze.")
         return
 
-    df = st.session_state["df"]
+    df_raw = st.session_state["df"]
 
+    # Data Manager operates on the raw (unfiltered) df so filters
+    # don't permanently delete rows when the user saves changes.
     if module == "Data Manager":
         st.markdown("## Data Manager")
         try:
-            result = render_data_manager(df)
+            result = render_data_manager(df_raw)
             if result is not None:
                 st.session_state["df"] = result
         except Exception as e:
             st.error(f"An error occurred in Data Manager: {e}")
-    elif module == "Descriptive Statistics":
+        return
+
+    # ── Interactive filter bar (all other modules) ──
+    df = _apply_data_filters(df_raw)
+
+    if module == "Descriptive Statistics":
         st.markdown("## Descriptive Statistics")
         try:
             render_descriptive_stats(df)

@@ -117,11 +117,15 @@ def empty_state(message, suggestion=None):
 # ─── Grouped Chart Selector ──────────────────────────────────────────────
 
 CHART_CATEGORIES = {
-    "Distribution": ["Histogram", "Box Plot", "Violin Plot", "Strip Plot"],
-    "Comparison": ["Bar Chart", "Radar Chart", "Funnel Chart", "Waterfall Chart"],
-    "Relationship": ["Scatter Plot", "Bubble Chart", "Joint Plot", "Heatmap", "Mosaic Plot"],
+    "Distribution": ["Histogram", "Box Plot", "Violin Plot", "Strip Plot", "Ridgeline Plot"],
+    "Comparison": ["Bar Chart", "Radar Chart", "Funnel Chart", "Waterfall Chart",
+                    "Error Bar Chart", "Lollipop Chart", "Slope Chart",
+                    "Diverging Bar Chart", "Bullet Chart"],
+    "Relationship": ["Scatter Plot", "Bubble Chart", "Joint Plot", "Heatmap", "Mosaic Plot",
+                      "Hexbin Plot", "Bland-Altman Plot"],
     "Composition": ["Pie / Donut", "Treemap", "Sunburst", "Area Chart"],
-    "Trend": ["Line Chart", "Candlestick (OHLC)"],
+    "Flow": ["Sankey Diagram"],
+    "Trend": ["Line Chart", "Candlestick (OHLC)", "Bump Chart", "Calendar Heatmap"],
     "3D & Spatial": ["3D Scatter", "3D Surface", "Contour Plot"],
     "Multivariate": ["Parallel Coordinates", "Variability Chart"],
 }
@@ -138,6 +142,37 @@ def grouped_chart_selector(key_prefix="viz"):
         "Chart Type:", chart_types, key=f"{key_prefix}_chart_type"
     )
     return chart_type
+
+
+# ─── Column Switcher ────────────────────────────────────────────────────
+
+def column_switcher(label, columns, key):
+    """Three-column layout with prev/next arrows for cycling through columns.
+
+    Returns the currently selected column name.
+    """
+    if not columns:
+        return None
+
+    idx_key = f"{key}_idx"
+    if idx_key not in st.session_state:
+        st.session_state[idx_key] = 0
+
+    c1, c2, c3 = st.columns([1, 6, 1])
+    with c1:
+        if st.button("\u25c0", key=f"{key}_prev", use_container_width=True):
+            st.session_state[idx_key] = (st.session_state[idx_key] - 1) % len(columns)
+    with c2:
+        idx = st.selectbox(label, range(len(columns)),
+                          index=st.session_state[idx_key],
+                          format_func=lambda i: columns[i],
+                          key=f"{key}_sel")
+        st.session_state[idx_key] = idx
+    with c3:
+        if st.button("\u25b6", key=f"{key}_next", use_container_width=True):
+            st.session_state[idx_key] = (st.session_state[idx_key] + 1) % len(columns)
+
+    return columns[st.session_state[idx_key]]
 
 
 # ─── Validation Panel ────────────────────────────────────────────────────

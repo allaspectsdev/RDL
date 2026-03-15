@@ -133,6 +133,7 @@ def render_quality(df: pd.DataFrame):
     tabs = st.tabs([
         "Variables Charts", "Attributes Charts", "Process Capability",
         "Multivariate Charts", "Gage R&R / MSA", "Acceptance Sampling",
+        "Multi-Vari Analysis", "Fishbone Diagram",
     ])
 
     with tabs[0]:
@@ -147,6 +148,10 @@ def render_quality(df: pd.DataFrame):
         _render_gage_rr(df)
     with tabs[5]:
         _render_acceptance_sampling(df)
+    with tabs[6]:
+        _render_multi_vari(df)
+    with tabs[7]:
+        _render_fishbone(df)
 
 
 # ===================================================================
@@ -1482,3 +1487,549 @@ Design sampling plans for lot-by-lot inspection:
             fig.update_yaxes(title_text="Avg Sample Number", row=1, col=2)
             fig.update_layout(height=450)
             st.plotly_chart(fig, use_container_width=True)
+
+
+# ===================================================================
+# Tab 7 -- Multi-Vari Analysis
+# ===================================================================
+
+def _render_multi_vari(df: pd.DataFrame):
+    """Multi-Vari chart to visualise variation at multiple levels."""
+    section_header("Multi-Vari Analysis")
+    help_tip("Multi-Vari Charts", """
+Multi-Vari charts display variation from multiple sources simultaneously:
+- **Between groups (Factor 1):** variation across primary categories
+- **Within groups (Factor 2):** variation within each primary group
+- **Temporal / nested (Factor 3):** additional nesting or faceting
+
+The chart shows individual data points, within-group connections, and
+group means so you can visually identify the dominant source of variation.
+""")
+
+    num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    cat_cols = df.select_dtypes(include=["object", "category"]).columns.tolist()
+
+    if not num_cols:
+        empty_state("No numeric columns found for the response variable.")
+        return
+    if not cat_cols:
+        empty_state("Need at least one categorical column for grouping.",
+                     "Multi-Vari analysis requires categorical factor columns.")
+        return
+
+    response_col = st.selectbox("Response variable (numeric):", num_cols,
+                                 key="mv_response")
+
+    factor1 = st.selectbox("Factor 1 (primary grouping, required):", cat_cols,
+                            key="mv_factor1")
+
+    remaining_cats = [c for c in cat_cols if c != factor1]
+    factor2 = st.selectbox("Factor 2 (secondary nesting, optional):",
+                            ["(none)"] + remaining_cats, key="mv_factor2")
+    if factor2 == "(none)":
+        factor2 = None
+
+    remaining_cats2 = [c for c in remaining_cats if c != factor2]
+    factor3 = st.selectbox("Factor 3 (tertiary nesting, optional):",
+                            ["(none)"] + remaining_cats2, key="mv_factor3")
+    if factor3 == "(none)":
+        factor3 = None
+
+    if st.button("Generate Multi-Vari Chart", key="mv_run"):
+        cols_needed = [response_col, factor1]
+        if factor2:
+            cols_needed.append(factor2)
+        if factor3:
+            cols_needed.append(factor3)
+        data = df[cols_needed].dropna()
+
+        if len(data) < 3:
+            st.error("Need at least 3 observations for Multi-Vari analysis.")
+            return
+
+        f1_levels = sorted(data[factor1].unique())
+        if len(f1_levels) > 30:
+            st.warning("Factor 1 has more than 30 levels. Showing the first 30.")
+            f1_levels = f1_levels[:30]
+            data = data[data[factor1].isin(f1_levels)]
+
+        # RDL color palette
+        _palette = [
+            "#6366f1", "#22c55e", "#f59e0b", "#ef4444", "#3b82f6",
+            "#ec4899", "#14b8a6", "#f97316", "#8b5cf6", "#06b6d4",
+        ]
+
+        # --- Build the Multi-Vari chart ---
+        if factor3:
+            # Use faceted subplots for factor 3
+            f3_levels = sorted(data[factor3].unique())
+            n_panels = len(f3_levels)
+            fig = make_subplots(
+                rows=1, cols=n_panels,
+                subplot_titles=[f"{factor3} = {lv}" for lv in f3_levels],
+                shared_yaxes=True,
+            )
+            for pi, f3_lv in enumerate(f3_levels):
+                sub = data[data[factor3] == f3_lv]
+                _add_multi_vari_traces(
+                    fig, sub, response_col, factor1, factor2,
+                    f1_levels, _palette, row=1, col=pi + 1,
+                    show_legend=(pi == 0),
+                )
+            fig.update_layout(
+                height=550, title_text="Multi-Vari Chart",
+                yaxis_title=response_col,
+            )
+            for pi in range(n_panels):
+                fig.update_xaxes(title_text=factor1, row=1, col=pi + 1)
+        else:
+            fig = go.Figure()
+            _add_multi_vari_traces(
+                fig, data, response_col, factor1, factor2,
+                f1_levels, _palette, row=None, col=None,
+                show_legend=True,
+            )
+            fig.update_layout(
+                height=550, title_text="Multi-Vari Chart",
+                xaxis_title=factor1, yaxis_title=response_col,
+            )
+
+        st.plotly_chart(fig, use_container_width=True)
+
+        # --- Variation decomposition ---
+        section_header("Variation Decomposition")
+        _multi_vari_decomposition(data, response_col, factor1, factor2, factor3)
+
+
+def _add_multi_vari_traces(fig, data, response_col, factor1, factor2,
+                           f1_levels, palette, row, col, show_legend):
+    """Add Multi-Vari traces (points, within-group lines, group means) to a figure."""
+
+    def _add(trace, r, c):
+        if r is not None:
+            fig.add_trace(trace, row=r, col=c)
+        else:
+            fig.add_trace(trace)
+
+    f1_strings = [str(lv) for lv in f1_levels]
+
+    if factor2 is None:
+        # Simple case: scatter individual points + connect group means
+        for xi, lv in enumerate(f1_levels):
+            sub = data[data[factor1] == lv]
+            y_vals = sub[response_col].values
+            x_vals = [f1_strings[xi]] * len(y_vals)
+            _add(go.Scatter(
+                x=x_vals, y=y_vals, mode="markers",
+                marker=dict(size=6, color=palette[0], opacity=0.5),
+                showlegend=False,
+                name="Observations",
+            ), row, col)
+
+        # Group means line
+        means = [data.loc[data[factor1] == lv, response_col].mean() for lv in f1_levels]
+        _add(go.Scatter(
+            x=f1_strings, y=means, mode="lines+markers",
+            marker=dict(size=12, color=palette[0], symbol="diamond"),
+            line=dict(width=2, color=palette[0]),
+            name="Group Mean",
+            showlegend=show_legend,
+        ), row, col)
+
+    else:
+        # Factor 2 grouping: color by factor 2 levels, connect within groups
+        f2_levels = sorted(data[factor2].unique())
+
+        for f2i, f2_lv in enumerate(f2_levels):
+            color = palette[f2i % len(palette)]
+            f2_sub = data[data[factor2] == f2_lv]
+
+            # Individual points
+            for xi, f1_lv in enumerate(f1_levels):
+                cell = f2_sub[f2_sub[factor1] == f1_lv]
+                if cell.empty:
+                    continue
+                y_vals = cell[response_col].values
+                x_vals = [f1_strings[xi]] * len(y_vals)
+                _add(go.Scatter(
+                    x=x_vals, y=y_vals, mode="markers",
+                    marker=dict(size=5, color=color, opacity=0.5),
+                    showlegend=False,
+                    name=f"{factor2}={f2_lv}",
+                ), row, col)
+
+            # Connect means within this Factor 2 level
+            f2_means = []
+            f2_x = []
+            for xi, f1_lv in enumerate(f1_levels):
+                cell = f2_sub[f2_sub[factor1] == f1_lv]
+                if not cell.empty:
+                    f2_means.append(cell[response_col].mean())
+                    f2_x.append(f1_strings[xi])
+
+            if f2_means:
+                _add(go.Scatter(
+                    x=f2_x, y=f2_means, mode="lines+markers",
+                    marker=dict(size=9, color=color, symbol="diamond"),
+                    line=dict(width=2, color=color),
+                    name=f"{factor2}={f2_lv}",
+                    showlegend=show_legend,
+                ), row, col)
+
+        # Overall Factor 1 means
+        overall_means = [data.loc[data[factor1] == lv, response_col].mean()
+                         for lv in f1_levels]
+        _add(go.Scatter(
+            x=f1_strings, y=overall_means, mode="lines+markers",
+            marker=dict(size=14, color="black", symbol="diamond-open"),
+            line=dict(width=3, color="black", dash="dash"),
+            name="Overall Mean",
+            showlegend=show_legend,
+        ), row, col)
+
+
+def _multi_vari_decomposition(data, response_col, factor1, factor2, factor3):
+    """Compute and display variation components for the Multi-Vari analysis."""
+    grand_mean = data[response_col].mean()
+    ss_total = np.sum((data[response_col] - grand_mean) ** 2)
+
+    if ss_total == 0:
+        st.warning("No variation in the response variable.")
+        return
+
+    # SS for Factor 1 (between Factor 1 levels)
+    f1_groups = data.groupby(factor1)[response_col]
+    ss_f1 = sum(len(g) * (g.mean() - grand_mean) ** 2 for _, g in f1_groups)
+
+    rows = [
+        {"Source": f"Between {factor1}", "SS": ss_f1,
+         "% of Total": round(ss_f1 / ss_total * 100, 2)},
+    ]
+
+    ss_explained = ss_f1
+
+    if factor2:
+        # SS for Factor 2 within Factor 1
+        ss_f2_within = 0.0
+        for f1_lv, f1_group in data.groupby(factor1):
+            f1_mean = f1_group[response_col].mean()
+            for f2_lv, cell in f1_group.groupby(factor2):
+                ss_f2_within += len(cell) * (cell[response_col].mean() - f1_mean) ** 2
+        rows.append({
+            "Source": f"Within {factor1}, Between {factor2}",
+            "SS": ss_f2_within,
+            "% of Total": round(ss_f2_within / ss_total * 100, 2),
+        })
+        ss_explained += ss_f2_within
+
+    if factor3:
+        # SS for Factor 3 within Factor 2 (within Factor 1)
+        ss_f3_within = 0.0
+        group_keys = [factor1]
+        if factor2:
+            group_keys.append(factor2)
+        for keys, cell_group in data.groupby(group_keys):
+            cell_mean = cell_group[response_col].mean()
+            for f3_lv, sub_cell in cell_group.groupby(factor3):
+                ss_f3_within += len(sub_cell) * (sub_cell[response_col].mean() - cell_mean) ** 2
+        label_within = f"Within {factor2}" if factor2 else f"Within {factor1}"
+        rows.append({
+            "Source": f"{label_within}, Between {factor3}",
+            "SS": ss_f3_within,
+            "% of Total": round(ss_f3_within / ss_total * 100, 2),
+        })
+        ss_explained += ss_f3_within
+
+    ss_residual = ss_total - ss_explained
+    rows.append({
+        "Source": "Residual (Within-cell)",
+        "SS": ss_residual,
+        "% of Total": round(ss_residual / ss_total * 100, 2),
+    })
+    rows.append({
+        "Source": "Total",
+        "SS": ss_total,
+        "% of Total": 100.0,
+    })
+
+    decomp_df = pd.DataFrame(rows)
+    st.dataframe(decomp_df.round(4), use_container_width=True, hide_index=True)
+
+    # Identify dominant source
+    non_total = [r for r in rows if r["Source"] != "Total"]
+    dominant = max(non_total, key=lambda r: r["% of Total"])
+    st.success(
+        f"Dominant variation source: **{dominant['Source']}** "
+        f"({dominant['% of Total']:.1f}% of total variation)"
+    )
+
+    # Bar chart of variation components
+    sources = [r["Source"] for r in non_total]
+    pcts = [r["% of Total"] for r in non_total]
+    fig_bar = go.Figure(go.Bar(x=sources, y=pcts))
+    fig_bar.update_layout(
+        title="Variation Breakdown",
+        yaxis_title="% of Total Variation",
+        height=350,
+    )
+    st.plotly_chart(fig_bar, use_container_width=True)
+
+
+# ===================================================================
+# Tab 8 -- Fishbone (Cause & Effect) Diagram
+# ===================================================================
+
+def _render_fishbone(df: pd.DataFrame):
+    """Interactive fishbone (Ishikawa / cause-and-effect) diagram builder."""
+    section_header("Fishbone (Cause & Effect) Diagram")
+    help_tip("Fishbone Diagram", """
+Also called an Ishikawa or cause-and-effect diagram. Used to identify
+potential root causes of a problem or effect.
+
+**Default 6M categories:**
+- **Man:** people, skills, training
+- **Machine:** equipment, tools, technology
+- **Material:** raw materials, consumables
+- **Method:** procedures, processes
+- **Measurement:** gauges, data collection
+- **Environment:** conditions, regulations
+
+Customize the categories and enter causes (one per line) for each.
+The diagram is rendered as a Plotly figure that you can download.
+""")
+
+    # Initialize session state for fishbone
+    if "fishbone_categories" not in st.session_state:
+        st.session_state["fishbone_categories"] = [
+            "Man", "Machine", "Material", "Method", "Measurement", "Environment",
+        ]
+    if "fishbone_causes" not in st.session_state:
+        st.session_state["fishbone_causes"] = {
+            cat: "" for cat in st.session_state["fishbone_categories"]
+        }
+    if "fishbone_effect" not in st.session_state:
+        st.session_state["fishbone_effect"] = "Quality Problem"
+
+    # Effect input
+    effect = st.text_input(
+        "Effect (problem / outcome):",
+        value=st.session_state["fishbone_effect"],
+        key="fb_effect_input",
+    )
+    st.session_state["fishbone_effect"] = effect
+
+    # Category management
+    section_header("Categories and Causes")
+
+    cat_text = st.text_input(
+        "Categories (comma-separated):",
+        value=", ".join(st.session_state["fishbone_categories"]),
+        key="fb_cats_input",
+    )
+    new_cats = [c.strip() for c in cat_text.split(",") if c.strip()]
+    if new_cats != st.session_state["fishbone_categories"]:
+        # Preserve existing causes for categories that still exist
+        old_causes = st.session_state["fishbone_causes"]
+        st.session_state["fishbone_categories"] = new_cats
+        st.session_state["fishbone_causes"] = {
+            cat: old_causes.get(cat, "") for cat in new_cats
+        }
+
+    categories = st.session_state["fishbone_categories"]
+    causes_dict = st.session_state["fishbone_causes"]
+
+    if not categories:
+        st.info("Enter at least one category above.")
+        return
+
+    # Cause entry for each category
+    n_cats = len(categories)
+    cols_per_row = min(n_cats, 3)
+    for row_start in range(0, n_cats, cols_per_row):
+        cols = st.columns(cols_per_row)
+        for ci in range(cols_per_row):
+            idx = row_start + ci
+            if idx >= n_cats:
+                break
+            cat = categories[idx]
+            with cols[ci]:
+                val = st.text_area(
+                    f"{cat} (one cause per line):",
+                    value=causes_dict.get(cat, ""),
+                    height=120,
+                    key=f"fb_cause_{cat}",
+                )
+                causes_dict[cat] = val
+
+    st.session_state["fishbone_causes"] = causes_dict
+
+    if st.button("Generate Fishbone Diagram", key="fb_generate"):
+        # Parse causes
+        parsed_causes = {}
+        for cat in categories:
+            raw = causes_dict.get(cat, "")
+            causes = [line.strip() for line in raw.split("\n") if line.strip()]
+            parsed_causes[cat] = causes
+
+        fig = _build_fishbone_figure(effect, categories, parsed_causes)
+        st.plotly_chart(fig, use_container_width=True)
+
+        st.caption("Use the Plotly toolbar (top-right of chart) to download as PNG.")
+
+
+def _build_fishbone_figure(effect: str, categories: list,
+                           causes: dict) -> go.Figure:
+    """Build a fishbone diagram using Plotly shapes and annotations."""
+    _palette = [
+        "#6366f1", "#22c55e", "#f59e0b", "#ef4444", "#3b82f6",
+        "#ec4899", "#14b8a6", "#f97316", "#8b5cf6", "#06b6d4",
+    ]
+
+    n_cats = len(categories)
+
+    # Layout dimensions
+    spine_y = 0.5
+    x_start = 0.05
+    x_end = 0.82
+    effect_x = 0.88
+
+    # Distribute branch attachment points evenly along spine
+    if n_cats > 0:
+        branch_xs = np.linspace(x_start + 0.08, x_end - 0.04, n_cats)
+    else:
+        branch_xs = []
+
+    # Alternate branches above and below
+    branch_len_y = 0.32
+    shapes = []
+    annotations = []
+
+    # --- Spine line ---
+    shapes.append(dict(
+        type="line",
+        x0=x_start, y0=spine_y, x1=x_end, y1=spine_y,
+        line=dict(color="black", width=3),
+        xref="paper", yref="paper",
+    ))
+
+    # --- Arrow head to effect box ---
+    shapes.append(dict(
+        type="line",
+        x0=x_end, y0=spine_y, x1=effect_x - 0.02, y1=spine_y,
+        line=dict(color="black", width=3),
+        xref="paper", yref="paper",
+    ))
+    # Arrow head
+    shapes.append(dict(
+        type="line",
+        x0=effect_x - 0.04, y0=spine_y + 0.02,
+        x1=effect_x - 0.02, y1=spine_y,
+        line=dict(color="black", width=2),
+        xref="paper", yref="paper",
+    ))
+    shapes.append(dict(
+        type="line",
+        x0=effect_x - 0.04, y0=spine_y - 0.02,
+        x1=effect_x - 0.02, y1=spine_y,
+        line=dict(color="black", width=2),
+        xref="paper", yref="paper",
+    ))
+
+    # --- Effect box ---
+    shapes.append(dict(
+        type="rect",
+        x0=effect_x - 0.02, y0=spine_y - 0.06,
+        x1=1.0, y1=spine_y + 0.06,
+        line=dict(color="black", width=2),
+        fillcolor="rgba(99,102,241,0.12)",
+        xref="paper", yref="paper",
+    ))
+    annotations.append(dict(
+        x=(effect_x - 0.02 + 1.0) / 2,
+        y=spine_y,
+        text=f"<b>{effect}</b>",
+        showarrow=False,
+        font=dict(size=13, color="black"),
+        xref="paper", yref="paper",
+        xanchor="center", yanchor="middle",
+    ))
+
+    # --- Branches ---
+    for i, cat in enumerate(categories):
+        bx = branch_xs[i]
+        color = _palette[i % len(_palette)]
+        above = (i % 2 == 0)
+        branch_tip_y = spine_y + branch_len_y if above else spine_y - branch_len_y
+
+        # Branch line (diagonal from spine to category label)
+        shapes.append(dict(
+            type="line",
+            x0=bx, y0=spine_y,
+            x1=bx, y1=branch_tip_y,
+            line=dict(color=color, width=2.5),
+            xref="paper", yref="paper",
+        ))
+
+        # Category label at the tip
+        label_y = branch_tip_y + (0.04 if above else -0.04)
+        annotations.append(dict(
+            x=bx, y=label_y,
+            text=f"<b>{cat}</b>",
+            showarrow=False,
+            font=dict(size=12, color=color),
+            xref="paper", yref="paper",
+            xanchor="center",
+            yanchor="bottom" if above else "top",
+        ))
+
+        # Cause sub-branches
+        cause_list = causes.get(cat, [])
+        n_causes = len(cause_list)
+        if n_causes > 0:
+            # Space causes along the branch
+            for ci, cause_text in enumerate(cause_list):
+                frac = (ci + 1) / (n_causes + 1)
+                cy = spine_y + frac * (branch_tip_y - spine_y)
+                # Small horizontal tick for cause
+                tick_dir = 0.06 if (i < n_cats / 2) else -0.06
+                shapes.append(dict(
+                    type="line",
+                    x0=bx, y0=cy,
+                    x1=bx + tick_dir, y1=cy,
+                    line=dict(color=color, width=1.5),
+                    xref="paper", yref="paper",
+                ))
+                # Cause text
+                annotations.append(dict(
+                    x=bx + tick_dir * 1.1,
+                    y=cy,
+                    text=cause_text,
+                    showarrow=False,
+                    font=dict(size=9, color="#444"),
+                    xref="paper", yref="paper",
+                    xanchor="left" if tick_dir > 0 else "right",
+                    yanchor="middle",
+                ))
+
+    # --- Build figure ---
+    fig = go.Figure()
+    # Invisible scatter to create the plotting area
+    fig.add_trace(go.Scatter(
+        x=[0], y=[0], mode="markers",
+        marker=dict(size=0.1, opacity=0),
+        showlegend=False,
+    ))
+    fig.update_layout(
+        shapes=shapes,
+        annotations=annotations,
+        xaxis=dict(visible=False, range=[0, 1]),
+        yaxis=dict(visible=False, range=[0, 1], scaleanchor="x", scaleratio=0.6),
+        title=dict(text="Fishbone (Cause & Effect) Diagram", x=0.5),
+        height=600,
+        width=1000,
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+        margin=dict(l=20, r=20, t=60, b=20),
+    )
+
+    return fig

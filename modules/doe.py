@@ -27,6 +27,28 @@ except ImportError:
     HAS_SM = False
 
 
+# ---------------------------------------------------------------------------
+# Taguchi Orthogonal Arrays
+# ---------------------------------------------------------------------------
+TAGUCHI_ARRAYS = {
+    "L4": {"factors": 3, "levels": 2, "runs": 4, "array": [
+        [1, 1, 1], [1, 2, 2], [2, 1, 2], [2, 2, 1]]},
+    "L8": {"factors": 7, "levels": 2, "runs": 8, "array": [
+        [1, 1, 1, 1, 1, 1, 1], [1, 1, 1, 2, 2, 2, 2],
+        [1, 2, 2, 1, 1, 2, 2], [1, 2, 2, 2, 2, 1, 1],
+        [2, 1, 2, 1, 2, 1, 2], [2, 1, 2, 2, 1, 2, 1],
+        [2, 2, 1, 1, 2, 2, 1], [2, 2, 1, 2, 1, 1, 2]]},
+    "L9": {"factors": 4, "levels": 3, "runs": 9, "array": [
+        [1, 1, 1, 1], [1, 2, 2, 2], [1, 3, 3, 3],
+        [2, 1, 2, 3], [2, 2, 3, 1], [2, 3, 1, 2],
+        [3, 1, 3, 2], [3, 2, 1, 3], [3, 3, 2, 1]]},
+    "L12": {"factors": 11, "levels": 2, "runs": 12, "array": None},
+    "L16": {"factors": 15, "levels": 2, "runs": 16, "array": None},
+    "L18": {"factors": 8, "levels": 3, "runs": 18, "array": None},
+    "L27": {"factors": 13, "levels": 3, "runs": 27, "array": None},
+}
+
+
 def render_doe(df: pd.DataFrame):
     """Render design of experiments interface."""
     if df is None or df.empty:
@@ -35,7 +57,7 @@ def render_doe(df: pd.DataFrame):
 
     tabs = st.tabs([
         "Design Generation", "Design Analysis", "Response Surface",
-        "Augment Design", "Desirability",
+        "Augment Design", "Desirability", "Taguchi S/N Analysis",
     ])
 
     with tabs[0]:
@@ -48,6 +70,8 @@ def render_doe(df: pd.DataFrame):
         _render_augment_design(df)
     with tabs[4]:
         _render_desirability(df)
+    with tabs[5]:
+        _render_taguchi_analysis(df)
 
 
 # ---------------------------------------------------------------------------
@@ -62,8 +86,6 @@ def _render_design_generation(df: pd.DataFrame):
 
     section_header("Design Parameters")
 
-    n_factors = st.slider("Number of factors:", 2, 8, 3, key="doe_n_factors")
-
     design_type = st.selectbox("Design type:", [
         "Full Factorial",
         "Fractional Factorial (Resolution III)",
@@ -76,7 +98,22 @@ def _render_design_generation(df: pd.DataFrame):
         "D-optimal",
         "I-optimal",
         "Mixture Design",
+        "Taguchi (Orthogonal Array)",
+        "Latin Hypercube",
     ], key="doe_design_type")
+
+    # ----- Taguchi (Orthogonal Array) path -----
+    if design_type == "Taguchi (Orthogonal Array)":
+        _render_taguchi_generation()
+        return
+
+    # ----- Latin Hypercube path -----
+    if design_type == "Latin Hypercube":
+        _render_lhs_generation()
+        return
+
+    # ----- Standard designs path -----
+    n_factors = st.slider("Number of factors:", 2, 8, 3, key="doe_n_factors")
 
     # Factor definitions
     section_header("Factor Definitions")
@@ -206,6 +243,393 @@ def _render_design_generation(df: pd.DataFrame):
         st.session_state["doe_coded_design"] = coded_df
         st.session_state["doe_actual_design"] = actual_df
         st.session_state["doe_factor_names"] = factor_names
+
+
+# ---------------------------------------------------------------------------
+# Taguchi Design Generation
+# ---------------------------------------------------------------------------
+
+def _render_taguchi_generation():
+    """Render Taguchi orthogonal array design generation interface."""
+    section_header("Taguchi Orthogonal Array Design")
+    help_tip("Taguchi Methods", """
+Taguchi designs use orthogonal arrays to study many factors with few runs:
+- **L4:** 3 factors at 2 levels in 4 runs
+- **L8:** Up to 7 factors at 2 levels in 8 runs
+- **L9:** Up to 4 factors at 3 levels in 9 runs
+- **L12:** Up to 11 factors at 2 levels in 12 runs (Plackett-Burman)
+- **L16:** Up to 15 factors at 2 levels in 16 runs
+- **L18:** Up to 8 factors at 3 levels in 18 runs
+- **L27:** Up to 13 factors at 3 levels in 27 runs
+
+Use the **Taguchi S/N Analysis** tab after collecting data to compute
+signal-to-noise ratios and identify optimal factor settings.
+""")
+
+    array_names = list(TAGUCHI_ARRAYS.keys())
+    array_choice = st.selectbox(
+        "Select orthogonal array:",
+        array_names,
+        format_func=lambda k: f"{k} ({TAGUCHI_ARRAYS[k]['runs']} runs, "
+                               f"up to {TAGUCHI_ARRAYS[k]['factors']} factors at "
+                               f"{TAGUCHI_ARRAYS[k]['levels']} levels)",
+        key="doe_taguchi_array",
+    )
+
+    arr_info = TAGUCHI_ARRAYS[array_choice]
+    max_factors = arr_info["factors"]
+    n_levels = arr_info["levels"]
+    n_runs = arr_info["runs"]
+
+    st.markdown(
+        f"**{array_choice}:** {n_runs} runs, up to {max_factors} factors, "
+        f"{n_levels} levels per factor."
+    )
+
+    n_factors_tag = st.slider(
+        "Number of factors to use:", 2, max_factors, min(3, max_factors),
+        key="doe_taguchi_nf",
+    )
+
+    # Factor names
+    section_header("Factor Names")
+    tag_factor_names = []
+    for i in range(n_factors_tag):
+        name = st.text_input(
+            f"Factor {i + 1} name:", value=f"Factor_{i + 1}",
+            key=f"doe_tag_fname_{i}",
+        )
+        tag_factor_names.append(name)
+
+    # Level values for each factor
+    section_header("Level Values")
+    st.caption(f"Enter {n_levels} level values for each factor.")
+    tag_levels = {}
+    for i in range(n_factors_tag):
+        cols = st.columns(n_levels)
+        lvl_vals = []
+        for lv in range(n_levels):
+            val = cols[lv].number_input(
+                f"{tag_factor_names[i]} - Level {lv + 1}:",
+                value=float(lv + 1),
+                key=f"doe_tag_lv_{i}_{lv}",
+            )
+            lvl_vals.append(val)
+        tag_levels[tag_factor_names[i]] = lvl_vals
+
+    if st.button("Generate Taguchi Design", key="doe_taguchi_generate"):
+        with st.spinner("Generating Taguchi design..."):
+            try:
+                oa = _get_taguchi_array(array_choice, n_factors_tag)
+            except Exception as e:
+                st.error(f"Failed to generate Taguchi array: {e}")
+                return
+
+            if oa is None:
+                st.error("Could not generate the requested orthogonal array.")
+                return
+
+            # Build design matrix with actual level values
+            design_data = {}
+            for fi, fname in enumerate(tag_factor_names):
+                lvl_list = tag_levels[fname]
+                # Map array indices (1-based) to actual values
+                design_data[fname] = [lvl_list[int(oa[r, fi]) - 1] for r in range(n_runs)]
+
+            design_df = pd.DataFrame(design_data)
+            design_df.index = range(1, n_runs + 1)
+            design_df.index.name = "Run"
+
+            # Also build a coded version (level indices)
+            coded_data = {}
+            for fi, fname in enumerate(tag_factor_names):
+                coded_data[fname] = [int(oa[r, fi]) for r in range(n_runs)]
+            coded_df = pd.DataFrame(coded_data)
+            coded_df.index = range(1, n_runs + 1)
+            coded_df.index.name = "Run"
+
+            section_header("Coded Design (Level Indices)")
+            st.dataframe(coded_df, use_container_width=True)
+
+            section_header("Actual Values Design Matrix")
+            st.dataframe(design_df.round(4), use_container_width=True)
+
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Number of Runs", n_runs)
+            c2.metric("Number of Factors", n_factors_tag)
+            c3.metric("Array", array_choice)
+
+            csv_data = design_df.to_csv()
+            st.download_button(
+                "Download Taguchi Design (CSV)", csv_data,
+                file_name=f"taguchi_{array_choice}_design.csv",
+                mime="text/csv", key="doe_tag_dl",
+            )
+
+            st.session_state["doe_coded_design"] = coded_df
+            st.session_state["doe_actual_design"] = design_df
+            st.session_state["doe_factor_names"] = tag_factor_names
+
+
+def _get_taguchi_array(array_name: str, n_factors: int) -> np.ndarray:
+    """Return the orthogonal array matrix for the given Taguchi array.
+
+    Returns an ndarray of shape (n_runs, n_factors) with 1-based level indices.
+    """
+    info = TAGUCHI_ARRAYS[array_name]
+
+    # Use hardcoded array if available
+    if info["array"] is not None:
+        full_arr = np.array(info["array"])
+        return full_arr[:, :n_factors]
+
+    # For L12, L16: generate via Plackett-Burman (2-level)
+    if array_name in ("L12", "L16"):
+        n_max = info["factors"]
+        pb = pyDOE2.pbdesign(n_max)  # returns -1/+1 matrix
+        # Convert -1/+1 to 1/2
+        arr = np.where(pb < 0, 1, 2).astype(int)
+        return arr[:, :n_factors]
+
+    # For L18: mixed 2x3^7 -- build using known construction
+    if array_name == "L18":
+        # Standard L18 array (2^1 x 3^7, 18 runs, 8 columns)
+        l18 = np.array([
+            [1, 1, 1, 1, 1, 1, 1, 1],
+            [1, 1, 2, 2, 2, 2, 2, 2],
+            [1, 1, 3, 3, 3, 3, 3, 3],
+            [1, 2, 1, 1, 2, 2, 3, 3],
+            [1, 2, 2, 2, 3, 3, 1, 1],
+            [1, 2, 3, 3, 1, 1, 2, 2],
+            [1, 3, 1, 2, 1, 3, 2, 3],
+            [1, 3, 2, 3, 2, 1, 3, 1],
+            [1, 3, 3, 1, 3, 2, 1, 2],
+            [2, 1, 1, 3, 3, 2, 2, 1],
+            [2, 1, 2, 1, 1, 3, 3, 2],
+            [2, 1, 3, 2, 2, 1, 1, 3],
+            [2, 2, 1, 2, 3, 1, 3, 2],
+            [2, 2, 2, 3, 1, 2, 1, 3],
+            [2, 2, 3, 1, 2, 3, 2, 1],
+            [2, 3, 1, 3, 2, 3, 1, 2],
+            [2, 3, 2, 1, 3, 1, 2, 3],
+            [2, 3, 3, 2, 1, 2, 3, 1],
+        ])
+        return l18[:, :n_factors]
+
+    # For L27: 3^13, 27 runs -- generate via 3-level full factorial subsets
+    if array_name == "L27":
+        # Standard L27 (3^13) orthogonal array
+        # Build from base columns and interactions of 3-level design
+        base = np.zeros((27, 3), dtype=int)
+        idx = 0
+        for i in range(3):
+            for j in range(3):
+                for k in range(3):
+                    base[idx] = [i + 1, j + 1, k + 1]
+                    idx += 1
+        # Generate interaction columns using modular arithmetic
+        cols = [base[:, 0], base[:, 1], base[:, 2]]
+        # AB interactions
+        for a_col in range(3):
+            for b_col in range(a_col + 1, 3):
+                a_vals = base[:, a_col] - 1  # 0-indexed
+                b_vals = base[:, b_col] - 1
+                inter1 = (a_vals + b_vals) % 3 + 1
+                inter2 = (a_vals + 2 * b_vals) % 3 + 1
+                cols.append(inter1)
+                cols.append(inter2)
+        # ABC interaction columns
+        a0 = base[:, 0] - 1
+        a1 = base[:, 1] - 1
+        a2 = base[:, 2] - 1
+        cols.append((a0 + a1 + a2) % 3 + 1)
+        cols.append((a0 + a1 + 2 * a2) % 3 + 1)
+        cols.append((a0 + 2 * a1 + a2) % 3 + 1)
+        cols.append((a0 + 2 * a1 + 2 * a2) % 3 + 1)
+
+        full_arr = np.column_stack(cols[:13])
+        return full_arr[:, :n_factors]
+
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Latin Hypercube Design Generation
+# ---------------------------------------------------------------------------
+
+def _render_lhs_generation():
+    """Render Latin Hypercube Space-Filling design generation interface."""
+    section_header("Latin Hypercube (Space-Filling) Design")
+    help_tip("Latin Hypercube Sampling", """
+LHS designs spread sample points evenly across the design space:
+- Each factor range is divided into *n* equal intervals
+- Exactly one sample is placed in each interval for every factor
+- Criteria control how points are arranged:
+  - **None:** Basic random LHS
+  - **Maximin:** Maximize the minimum distance between points
+  - **Centermaximin:** Center-based maximin
+  - **Correlation:** Minimize correlation between factors
+  - **Random:** Simple random permutations
+
+LHS is ideal for computer experiments, surrogate modeling, and
+space-filling when the response surface shape is unknown.
+""")
+
+    c1, c2 = st.columns(2)
+    n_factors_lhs = c1.slider("Number of factors:", 2, 20, 4, key="doe_lhs_nf")
+    n_samples = c2.number_input(
+        "Number of samples (runs):", 5, 10000, 20, key="doe_lhs_samples",
+    )
+
+    criterion_map = {
+        "None": None,
+        "Maximin": "maximin",
+        "Centermaximin": "centermaximin",
+        "Correlation": "correlation",
+        "Random": "random-cd",
+    }
+    criterion_label = st.selectbox(
+        "Sampling criterion:",
+        list(criterion_map.keys()),
+        key="doe_lhs_criterion",
+    )
+    criterion = criterion_map[criterion_label]
+
+    # Factor names and ranges
+    section_header("Factor Ranges")
+    lhs_names = []
+    lhs_mins = []
+    lhs_maxs = []
+    for i in range(n_factors_lhs):
+        c1f, c2f, c3f = st.columns([2, 1, 1])
+        name = c1f.text_input(
+            f"Factor {i + 1} name:", value=f"X{i + 1}", key=f"doe_lhs_fname_{i}",
+        )
+        fmin = c2f.number_input(
+            f"Min ({name}):", value=0.0, key=f"doe_lhs_fmin_{i}",
+        )
+        fmax = c3f.number_input(
+            f"Max ({name}):", value=1.0, key=f"doe_lhs_fmax_{i}",
+        )
+        lhs_names.append(name)
+        lhs_mins.append(fmin)
+        lhs_maxs.append(fmax)
+
+    if st.button("Generate LHS Design", key="doe_lhs_generate"):
+        # Validate ranges
+        for i in range(n_factors_lhs):
+            if lhs_maxs[i] <= lhs_mins[i]:
+                st.error(f"Max must be greater than Min for factor {lhs_names[i]}.")
+                return
+
+        with st.spinner("Generating Latin Hypercube design..."):
+            try:
+                lhs_raw = pyDOE2.lhs(n_factors_lhs, samples=n_samples, criterion=criterion)
+            except Exception as e:
+                st.error(f"LHS generation failed: {e}")
+                return
+
+            # Scale to actual ranges
+            scaled = np.zeros_like(lhs_raw)
+            for j in range(n_factors_lhs):
+                scaled[:, j] = lhs_mins[j] + lhs_raw[:, j] * (lhs_maxs[j] - lhs_mins[j])
+
+            design_df = pd.DataFrame(scaled, columns=lhs_names)
+            design_df.index = range(1, n_samples + 1)
+            design_df.index.name = "Run"
+
+            section_header("LHS Design Matrix")
+            st.dataframe(design_df.round(4), use_container_width=True)
+
+            c1m, c2m, c3m = st.columns(3)
+            c1m.metric("Number of Runs", n_samples)
+            c2m.metric("Number of Factors", n_factors_lhs)
+            c3m.metric("Criterion", criterion_label)
+
+            # Space-filling metrics
+            section_header("Space-Filling Metrics")
+            _lhs_space_metrics(scaled, lhs_names)
+
+            # Scatter matrix
+            if n_factors_lhs <= 8:
+                section_header("Scatter Matrix of Design Points")
+                fig_scatter = px.scatter_matrix(
+                    design_df,
+                    dimensions=lhs_names[:min(n_factors_lhs, 8)],
+                    title="LHS Design Point Scatter Matrix",
+                    height=max(500, 120 * min(n_factors_lhs, 8)),
+                )
+                fig_scatter.update_traces(diagonal_visible=True, marker=dict(size=3))
+                st.plotly_chart(fig_scatter, use_container_width=True)
+            else:
+                st.info("Scatter matrix is shown for up to 8 factors. "
+                        "Your design has more factors; showing pairwise correlations instead.")
+
+            # Download
+            csv_data = design_df.to_csv()
+            st.download_button(
+                "Download LHS Design (CSV)", csv_data,
+                file_name="lhs_design.csv", mime="text/csv", key="doe_lhs_dl",
+            )
+
+            st.session_state["doe_actual_design"] = design_df
+            st.session_state["doe_factor_names"] = lhs_names
+
+
+def _lhs_space_metrics(points: np.ndarray, factor_names: list):
+    """Compute and display space-filling quality metrics for an LHS design."""
+    from scipy.spatial.distance import pdist
+
+    n, k = points.shape
+    if n < 2:
+        st.warning("Need at least 2 points for space-filling metrics.")
+        return
+
+    # Normalize points to [0, 1] for metric computation
+    mins = points.min(axis=0)
+    maxs = points.max(axis=0)
+    ranges = maxs - mins
+    ranges[ranges == 0] = 1.0
+    normed = (points - mins) / ranges
+
+    dists = pdist(normed)
+    min_dist = dists.min()
+    mean_dist = dists.mean()
+    max_dist = dists.max()
+
+    # Correlation matrix between factors
+    if k >= 2:
+        corr_matrix = np.corrcoef(points, rowvar=False)
+        # Max absolute off-diagonal correlation
+        mask = ~np.eye(k, dtype=bool)
+        max_abs_corr = np.abs(corr_matrix[mask]).max()
+        mean_abs_corr = np.abs(corr_matrix[mask]).mean()
+    else:
+        max_abs_corr = 0.0
+        mean_abs_corr = 0.0
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Min Distance", f"{min_dist:.4f}")
+    c2.metric("Mean Distance", f"{mean_dist:.4f}")
+    c3.metric("Max |Correlation|", f"{max_abs_corr:.4f}")
+    c4.metric("Mean |Correlation|", f"{mean_abs_corr:.4f}")
+
+    if max_abs_corr < 0.10:
+        st.success("Low inter-factor correlation -- good space-filling design.")
+    elif max_abs_corr < 0.30:
+        st.info("Moderate inter-factor correlation. Consider using the Correlation criterion.")
+    else:
+        st.warning("High inter-factor correlation detected. Try the Correlation criterion to reduce it.")
+
+    # Show correlation heatmap if >= 3 factors
+    if k >= 3:
+        corr_df = pd.DataFrame(corr_matrix, columns=factor_names, index=factor_names)
+        fig_corr = px.imshow(
+            corr_df.round(3), text_auto=True, color_continuous_scale="RdBu_r",
+            zmin=-1, zmax=1, title="Factor Correlation Matrix",
+        )
+        fig_corr.update_layout(height=400)
+        st.plotly_chart(fig_corr, use_container_width=True)
 
 
 def _generate_design(design_type: str, n_factors: int) -> np.ndarray:
@@ -1444,3 +1868,240 @@ Simultaneously optimize multiple response variables:
             st.plotly_chart(fig, use_container_width=True)
         else:
             st.warning("Optimization did not converge. Try different settings.")
+
+
+# ---------------------------------------------------------------------------
+# Tab 6: Taguchi S/N Ratio Analysis
+# ---------------------------------------------------------------------------
+
+def _render_taguchi_analysis(df: pd.DataFrame):
+    """Taguchi Signal-to-Noise ratio analysis on loaded data."""
+    section_header("Taguchi S/N Ratio Analysis")
+    help_tip("Signal-to-Noise Ratios", """
+Taguchi S/N ratios measure robustness -- the ratio of desired signal to undesired noise.
+
+**S/N types:**
+- **Smaller-is-better:** S/N = -10 * log10(mean(y^2)) -- minimize response (defects, errors)
+- **Nominal-is-best:** S/N = 10 * log10(mean^2 / variance) -- hit a target value
+- **Larger-is-better:** S/N = -10 * log10(mean(1/y^2)) -- maximize response (strength, yield)
+
+Higher S/N always means better performance. Factors with the largest
+delta (max S/N - min S/N) have the greatest influence.
+""")
+
+    num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    all_cols = df.columns.tolist()
+
+    if len(num_cols) < 1:
+        empty_state("No numeric columns found for S/N analysis.")
+        return
+
+    response_col = st.selectbox(
+        "Response column (numeric):", num_cols, key="tag_sn_response",
+    )
+
+    # Factor columns -- can be numeric or categorical
+    available_factors = [c for c in all_cols if c != response_col]
+    if not available_factors:
+        empty_state("Need at least one factor column besides the response.")
+        return
+    factor_cols = st.multiselect(
+        "Factor columns:", available_factors, key="tag_sn_factors",
+    )
+
+    if len(factor_cols) < 1:
+        st.info("Select at least one factor column to analyze.")
+        return
+
+    sn_type = st.selectbox("S/N ratio type:", [
+        "Smaller-is-better",
+        "Nominal-is-best",
+        "Larger-is-better",
+    ], key="tag_sn_type")
+
+    if st.button("Run Taguchi Analysis", key="tag_sn_run"):
+        data = df[[response_col] + factor_cols].dropna()
+        if len(data) < 3:
+            st.error("Need at least 3 data points for S/N analysis.")
+            return
+
+        y = data[response_col].values
+
+        # Compute S/N for each run
+        sn_values = _compute_sn_ratios(y, sn_type)
+        if sn_values is None:
+            st.error("Could not compute S/N ratios. Check that response values are valid "
+                     "(positive for Larger-is-better, non-zero variance for Nominal-is-best).")
+            return
+
+        data = data.copy()
+        data["S/N Ratio (dB)"] = sn_values
+
+        section_header("S/N Ratios per Run")
+        display_df = data.copy()
+        display_df.index = range(1, len(data) + 1)
+        display_df.index.name = "Run"
+        st.dataframe(display_df.round(4), use_container_width=True)
+
+        # Factor level means of S/N
+        section_header("Factor Effects on S/N Ratio")
+        effects_data = []
+        for fac in factor_cols:
+            levels = sorted(data[fac].unique())
+            level_means = []
+            for lv in levels:
+                mask = data[fac] == lv
+                mean_sn = data.loc[mask, "S/N Ratio (dB)"].mean()
+                level_means.append({"Factor": fac, "Level": lv, "Mean S/N": mean_sn})
+            effects_data.extend(level_means)
+
+        effects_df = pd.DataFrame(effects_data)
+        st.dataframe(effects_df.round(4), use_container_width=True, hide_index=True)
+
+        # Rank factors by delta
+        section_header("Factor Ranking (by Delta)")
+        ranking_rows = []
+        for fac in factor_cols:
+            fac_df = effects_df[effects_df["Factor"] == fac]
+            delta = fac_df["Mean S/N"].max() - fac_df["Mean S/N"].min()
+            best_level = fac_df.loc[fac_df["Mean S/N"].idxmax(), "Level"]
+            ranking_rows.append({
+                "Factor": fac,
+                "Delta (Max - Min S/N)": round(delta, 4),
+                "Best Level": best_level,
+                "Max S/N": round(fac_df["Mean S/N"].max(), 4),
+                "Min S/N": round(fac_df["Mean S/N"].min(), 4),
+            })
+
+        ranking_df = pd.DataFrame(ranking_rows).sort_values(
+            "Delta (Max - Min S/N)", ascending=False,
+        ).reset_index(drop=True)
+        ranking_df.index = range(1, len(ranking_df) + 1)
+        ranking_df.index.name = "Rank"
+        st.dataframe(ranking_df, use_container_width=True)
+
+        # Identify dominant factor
+        top_factor = ranking_df.iloc[0]["Factor"]
+        top_delta = ranking_df.iloc[0]["Delta (Max - Min S/N)"]
+        st.success(
+            f"Most influential factor: **{top_factor}** "
+            f"(Delta = {top_delta:.4f} dB)"
+        )
+
+        # Factor effect plots
+        section_header("S/N Factor Effect Plots")
+        n_facs = len(factor_cols)
+        cols_per_row = min(n_facs, 3)
+        rows_plot = (n_facs + cols_per_row - 1) // cols_per_row
+        fig = make_subplots(
+            rows=rows_plot, cols=cols_per_row,
+            subplot_titles=[f"S/N Effect: {f}" for f in factor_cols],
+        )
+
+        grand_mean_sn = data["S/N Ratio (dB)"].mean()
+
+        for idx, fac in enumerate(factor_cols):
+            row = idx // cols_per_row + 1
+            col = idx % cols_per_row + 1
+            fac_eff = effects_df[effects_df["Factor"] == fac].sort_values("Level")
+
+            fig.add_trace(go.Scatter(
+                x=[str(lv) for lv in fac_eff["Level"]],
+                y=fac_eff["Mean S/N"].values,
+                mode="lines+markers",
+                marker=dict(size=10),
+                line=dict(width=2),
+                showlegend=False,
+            ), row=row, col=col)
+
+            fig.add_hline(
+                y=grand_mean_sn, line_dash="dash", line_color="gray",
+                row=row, col=col,
+            )
+
+        fig.update_layout(
+            height=350 * rows_plot,
+            title_text=f"S/N Factor Effect Plots ({sn_type})",
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+        # ANOVA on S/N ratios
+        if HAS_SM and len(factor_cols) >= 1:
+            section_header("ANOVA on S/N Ratios")
+            try:
+                # Rename columns to safe names for formula parsing
+                anova_data = data[["S/N Ratio (dB)"] + factor_cols].copy()
+                safe_resp = "_sn_ratio_"
+                safe_facs = [f"_fac{i}_" for i in range(len(factor_cols))]
+                rename_map = {"S/N Ratio (dB)": safe_resp}
+                reverse_map = {safe_resp: "S/N Ratio (dB)"}
+                for i, fc in enumerate(factor_cols):
+                    rename_map[fc] = safe_facs[i]
+                    reverse_map[safe_facs[i]] = fc
+                    anova_data[fc] = anova_data[fc].astype(str)
+                anova_data = anova_data.rename(columns=rename_map)
+
+                terms = [f"C({sf})" for sf in safe_facs]
+                formula_str = f"{safe_resp} ~ " + " + ".join(terms)
+
+                model = smf.ols(formula_str, data=anova_data).fit()
+                anova_table = sm.stats.anova_lm(model, typ=2)
+                anova_table = anova_table.rename(columns={
+                    "sum_sq": "SS", "df": "df", "F": "F", "PR(>F)": "p-value",
+                })
+                # Restore original factor names in index
+                new_idx = []
+                for idx_val in anova_table.index:
+                    label = str(idx_val)
+                    for sf, orig in zip(safe_facs, factor_cols):
+                        label = label.replace(sf, orig)
+                    new_idx.append(label)
+                anova_table.index = new_idx
+
+                if "df" in anova_table.columns:
+                    anova_table["MS"] = anova_table["SS"] / anova_table["df"]
+                    anova_table = anova_table[["SS", "df", "MS", "F", "p-value"]]
+                st.dataframe(anova_table.round(4), use_container_width=True)
+            except Exception as e:
+                st.warning(f"ANOVA computation could not complete: {e}")
+
+        # Optimal combination
+        section_header("Predicted Optimal Settings")
+        opt_settings = []
+        for _, row in ranking_df.iterrows():
+            opt_settings.append(f"**{row['Factor']}** = {row['Best Level']}")
+        st.markdown("Based on maximizing S/N ratio: " + ", ".join(opt_settings))
+
+
+def _compute_sn_ratios(y: np.ndarray, sn_type: str) -> np.ndarray:
+    """Compute per-observation S/N ratios.
+
+    For individual observations (no replicates at each run), S/N is computed
+    pointwise. If replicates are available, group by run and average.
+    """
+    n = len(y)
+    sn = np.zeros(n)
+
+    if sn_type == "Smaller-is-better":
+        for i in range(n):
+            val = y[i]
+            sn[i] = -10.0 * np.log10(val ** 2) if val != 0 else 0.0
+
+    elif sn_type == "Nominal-is-best":
+        # For individual observations, use running or global mean/variance proxy
+        global_mean = np.mean(y)
+        global_var = np.var(y, ddof=1)
+        if global_var <= 0:
+            return None
+        for i in range(n):
+            val = y[i]
+            sn[i] = 10.0 * np.log10(val ** 2 / global_var) if global_var > 0 else 0.0
+
+    elif sn_type == "Larger-is-better":
+        for i in range(n):
+            val = y[i]
+            if val <= 0:
+                return None
+            sn[i] = -10.0 * np.log10(1.0 / (val ** 2))
+
+    return sn

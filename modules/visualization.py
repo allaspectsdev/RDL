@@ -1,5 +1,5 @@
 """
-Visualization Builder Module - 22+ interactive chart types with full customization.
+Visualization Builder Module - 34+ interactive chart types with full customization.
 """
 
 import streamlit as st
@@ -9,7 +9,7 @@ from scipy import stats
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from modules.ui_helpers import grouped_chart_selector, empty_state
+from modules.ui_helpers import grouped_chart_selector, empty_state, section_header, _RDL_COLORWAY
 
 
 def render_visualization(df: pd.DataFrame):
@@ -563,3 +563,499 @@ def render_visualization(df: pd.DataFrame):
         fig.update_layout(title=title, height=height,
                           xaxis_title=group1, yaxis_title=value)
         st.plotly_chart(fig, use_container_width=True)
+
+    # ── Error Bar Chart ──
+    elif chart_type == "Error Bar Chart":
+        if not num_cols or not cat_cols:
+            empty_state("Need at least one numeric and one categorical column.")
+            return
+        c1, c2 = st.columns(2)
+        val_col = c1.selectbox("Value column:", num_cols, key="err_val")
+        grp_col = c2.selectbox("Group column:", cat_cols, key="err_grp")
+        c1, c2 = st.columns(2)
+        error_type = c1.selectbox("Error type:", ["SE", "SD", "95% CI"], key="err_type")
+        orientation = c2.selectbox("Orientation:", ["vertical", "horizontal"], key="err_orient")
+
+        grouped = df.groupby(grp_col)[val_col]
+        means = grouped.mean()
+        sds = grouped.std()
+        counts = grouped.count()
+
+        if error_type == "SE":
+            errors = sds / np.sqrt(counts)
+        elif error_type == "SD":
+            errors = sds
+        else:  # 95% CI
+            errors = 1.96 * sds / np.sqrt(counts)
+
+        categories = means.index.astype(str).tolist()
+        if orientation == "vertical":
+            fig = go.Figure(go.Bar(
+                x=categories, y=means.values, error_y=dict(type="data", array=errors.values),
+                marker_color=_RDL_COLORWAY[0], opacity=opacity,
+            ))
+            fig.update_layout(xaxis_title=grp_col, yaxis_title=f"Mean {val_col}")
+        else:
+            fig = go.Figure(go.Bar(
+                y=categories, x=means.values, error_x=dict(type="data", array=errors.values),
+                marker_color=_RDL_COLORWAY[0], opacity=opacity, orientation="h",
+            ))
+            fig.update_layout(yaxis_title=grp_col, xaxis_title=f"Mean {val_col}")
+
+        fig.update_layout(title=title, height=height)
+        st.plotly_chart(fig, use_container_width=True)
+
+    # ── Sankey Diagram ──
+    elif chart_type == "Sankey Diagram":
+        if not cat_cols:
+            empty_state("Need at least two categorical columns for a Sankey diagram.",
+                        "Upload data with categorical columns.")
+            return
+        stage_cols = st.multiselect("Stage columns (2-3, in order):", cat_cols,
+                                     default=cat_cols[:min(2, len(cat_cols))], key="sankey_stages")
+        value_col = st.selectbox("Value column (optional, auto-counts if None):",
+                                  [None] + num_cols, key="sankey_val")
+
+        if len(stage_cols) < 2:
+            st.info("Select at least 2 stage columns.")
+        else:
+            # Build links across consecutive stages
+            all_labels = []
+            label_map = {}
+            links_source = []
+            links_target = []
+            links_value = []
+
+            for stage_col in stage_cols:
+                for val in df[stage_col].dropna().unique():
+                    label = f"{stage_col}: {val}"
+                    if label not in label_map:
+                        label_map[label] = len(all_labels)
+                        all_labels.append(label)
+
+            for i in range(len(stage_cols) - 1):
+                src_col = stage_cols[i]
+                tgt_col = stage_cols[i + 1]
+                if value_col:
+                    agg = df.groupby([src_col, tgt_col])[value_col].sum().reset_index()
+                    for _, row in agg.iterrows():
+                        src_label = f"{src_col}: {row[src_col]}"
+                        tgt_label = f"{tgt_col}: {row[tgt_col]}"
+                        if src_label in label_map and tgt_label in label_map:
+                            links_source.append(label_map[src_label])
+                            links_target.append(label_map[tgt_label])
+                            links_value.append(row[value_col])
+                else:
+                    counts = df.groupby([src_col, tgt_col]).size().reset_index(name="count")
+                    for _, row in counts.iterrows():
+                        src_label = f"{src_col}: {row[src_col]}"
+                        tgt_label = f"{tgt_col}: {row[tgt_col]}"
+                        if src_label in label_map and tgt_label in label_map:
+                            links_source.append(label_map[src_label])
+                            links_target.append(label_map[tgt_label])
+                            links_value.append(row["count"])
+
+            # Auto-assign colors from RDL palette
+            node_colors = [_RDL_COLORWAY[i % len(_RDL_COLORWAY)] for i in range(len(all_labels))]
+
+            fig = go.Figure(go.Sankey(
+                node=dict(
+                    pad=15, thickness=20, line=dict(color="black", width=0.5),
+                    label=all_labels, color=node_colors,
+                ),
+                link=dict(source=links_source, target=links_target, value=links_value),
+            ))
+            fig.update_layout(title=title, height=height)
+            st.plotly_chart(fig, use_container_width=True)
+
+    # ── Ridgeline Plot ──
+    elif chart_type == "Ridgeline Plot":
+        if not num_cols or not cat_cols:
+            empty_state("Need at least one numeric and one categorical column.")
+            return
+        c1, c2 = st.columns(2)
+        val_col = c1.selectbox("Numeric column:", num_cols, key="ridge_val")
+        grp_col = c2.selectbox("Group column:", cat_cols, key="ridge_grp")
+        sort_by = st.selectbox("Sort groups by:", ["alphabetical", "median"], key="ridge_sort")
+
+        data = df[[val_col, grp_col]].dropna()
+        groups = data.groupby(grp_col)[val_col]
+
+        if sort_by == "median":
+            group_order = groups.median().sort_values().index.tolist()
+        else:
+            group_order = sorted(groups.groups.keys())
+
+        n_groups = len(group_order)
+        if n_groups < 1:
+            st.warning("No groups found.")
+        else:
+            fig = go.Figure()
+            spacing = 1.0
+            x_min = data[val_col].min()
+            x_max = data[val_col].max()
+            kde_x = np.linspace(x_min, x_max, 200)
+
+            for i, grp_name in enumerate(group_order):
+                grp_data = groups.get_group(grp_name).values
+                if len(grp_data) < 2:
+                    continue
+                try:
+                    kde = stats.gaussian_kde(grp_data)
+                    kde_y = kde(kde_x)
+                    # Normalize so max height is ~0.8 of spacing
+                    kde_y = kde_y / kde_y.max() * 0.8 * spacing
+                    offset = i * spacing
+                    color = _RDL_COLORWAY[i % len(_RDL_COLORWAY)]
+                    fig.add_trace(go.Scatter(
+                        x=kde_x, y=kde_y + offset, mode="lines",
+                        fill="tozeroy" if i == 0 else None,
+                        line=dict(color=color, width=1.5),
+                        fillcolor=color.replace(")", ", 0.3)").replace("rgb", "rgba") if "rgb" in color else color,
+                        name=str(grp_name), showlegend=True,
+                    ))
+                    # Fill to the offset baseline
+                    fig.add_trace(go.Scatter(
+                        x=kde_x, y=[offset] * len(kde_x), mode="lines",
+                        line=dict(color="rgba(0,0,0,0)", width=0),
+                        showlegend=False, hoverinfo="skip",
+                    ))
+                    # Use fill="tonexty" on the KDE trace relative to baseline
+                    fig.data[-2].update(fill="tonexty", fillcolor=color + "4D" if color.startswith("#") else color)
+                except Exception:
+                    continue
+
+            fig.update_layout(
+                title=title, height=max(height, n_groups * 60 + 100),
+                yaxis=dict(
+                    tickvals=[i * spacing for i in range(n_groups)],
+                    ticktext=[str(g) for g in group_order],
+                    showgrid=False,
+                ),
+                xaxis_title=val_col,
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+    # ── Hexbin Plot ──
+    elif chart_type == "Hexbin Plot":
+        if len(num_cols) < 2:
+            empty_state("Need at least 2 numeric columns.")
+            return
+        c1, c2 = st.columns(2)
+        x = c1.selectbox("X:", num_cols, key="hex_x")
+        y = c2.selectbox("Y:", [c for c in num_cols if c != x], key="hex_y")
+        c1, c2 = st.columns(2)
+        nbins = c1.slider("Number of bins:", 10, 100, 30, key="hex_bins")
+        hex_color_scale = c2.selectbox("Color scale:", [
+            "Viridis", "Plasma", "Inferno", "Blues", "Reds", "YlOrRd", "RdBu",
+        ], key="hex_cs")
+        marginals = st.checkbox("Show marginal histograms", value=False, key="hex_marg")
+
+        fig = px.density_heatmap(
+            df, x=x, y=y, nbinsx=nbins, nbinsy=nbins,
+            color_continuous_scale=hex_color_scale, title=title,
+            marginal_x="histogram" if marginals else None,
+            marginal_y="histogram" if marginals else None,
+        )
+        fig.update_layout(height=height)
+        st.plotly_chart(fig, use_container_width=True)
+
+    # ── Lollipop Chart ──
+    elif chart_type == "Lollipop Chart":
+        if not cat_cols:
+            empty_state("Need at least one categorical column.")
+            return
+        c1, c2 = st.columns(2)
+        cat_col = c1.selectbox("Category:", cat_cols, key="lolli_cat")
+        val_col = c2.selectbox("Value:", [None] + num_cols, key="lolli_val")
+        orientation = st.selectbox("Orientation:", ["horizontal", "vertical"], key="lolli_orient")
+
+        if val_col:
+            agg = df.groupby(cat_col)[val_col].mean().sort_values(ascending=True).reset_index()
+            agg.columns = [cat_col, "value"]
+        else:
+            agg = df[cat_col].value_counts().sort_values(ascending=True).reset_index()
+            agg.columns = [cat_col, "value"]
+
+        fig = go.Figure()
+        if orientation == "horizontal":
+            for i, row in agg.iterrows():
+                fig.add_trace(go.Scatter(
+                    x=[0, row["value"]], y=[row[cat_col], row[cat_col]],
+                    mode="lines", line=dict(color=_RDL_COLORWAY[0], width=2),
+                    showlegend=False, hoverinfo="skip",
+                ))
+            fig.add_trace(go.Scatter(
+                x=agg["value"], y=agg[cat_col], mode="markers",
+                marker=dict(size=10, color=_RDL_COLORWAY[0]),
+                name="Value",
+            ))
+            fig.update_layout(xaxis_title=val_col or "Count", yaxis_title=cat_col)
+        else:
+            for i, row in agg.iterrows():
+                fig.add_trace(go.Scatter(
+                    x=[row[cat_col], row[cat_col]], y=[0, row["value"]],
+                    mode="lines", line=dict(color=_RDL_COLORWAY[0], width=2),
+                    showlegend=False, hoverinfo="skip",
+                ))
+            fig.add_trace(go.Scatter(
+                x=agg[cat_col], y=agg["value"], mode="markers",
+                marker=dict(size=10, color=_RDL_COLORWAY[0]),
+                name="Value",
+            ))
+            fig.update_layout(xaxis_title=cat_col, yaxis_title=val_col or "Count")
+
+        fig.update_layout(title=title, height=height)
+        st.plotly_chart(fig, use_container_width=True)
+
+    # ── Bump Chart ──
+    elif chart_type == "Bump Chart":
+        if not num_cols or not cat_cols:
+            empty_state("Need numeric and categorical columns for a bump chart.")
+            return
+        c1, c2, c3 = st.columns(3)
+        x_col = c1.selectbox("X (time/category):", all_cols, key="bump_x")
+        y_col = c2.selectbox("Y (numeric):", num_cols, key="bump_y")
+        grp_col = c3.selectbox("Group:", cat_cols, key="bump_grp")
+
+        data = df[[x_col, y_col, grp_col]].dropna()
+
+        # Rank-transform Y within each X value (lower rank = higher value, 1 = top)
+        ranked = data.copy()
+        ranked["rank"] = data.groupby(x_col)[y_col].rank(ascending=False, method="min").astype(int)
+
+        fig = go.Figure()
+        for i, grp_name in enumerate(ranked[grp_col].unique()):
+            grp_data = ranked[ranked[grp_col] == grp_name].sort_values(x_col)
+            fig.add_trace(go.Scatter(
+                x=grp_data[x_col], y=grp_data["rank"],
+                mode="lines+markers", name=str(grp_name),
+                line=dict(width=3, color=_RDL_COLORWAY[i % len(_RDL_COLORWAY)]),
+                marker=dict(size=8),
+            ))
+
+        fig.update_layout(
+            title=title, height=height,
+            yaxis=dict(autorange="reversed", title="Rank (1 = top)", dtick=1),
+            xaxis_title=x_col,
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    # ── Slope Chart ──
+    elif chart_type == "Slope Chart":
+        if len(num_cols) < 2:
+            empty_state("Need at least 2 numeric columns for a slope chart.")
+            return
+        c1, c2 = st.columns(2)
+        col_before = c1.selectbox("Before (column):", num_cols, key="slope_before")
+        col_after = c2.selectbox("After (column):", [c for c in num_cols if c != col_before], key="slope_after")
+        label_col = st.selectbox("Label column (optional):", [None] + cat_cols + [c for c in all_cols if c not in num_cols], key="slope_label")
+
+        data = df[[col_before, col_after]].dropna()
+        if label_col:
+            labels = df.loc[data.index, label_col].astype(str).values
+        else:
+            labels = [f"Row {i}" for i in range(len(data))]
+
+        fig = go.Figure()
+        for i in range(len(data)):
+            color = _RDL_COLORWAY[i % len(_RDL_COLORWAY)]
+            before_val = data.iloc[i][col_before]
+            after_val = data.iloc[i][col_after]
+            fig.add_trace(go.Scatter(
+                x=[col_before, col_after], y=[before_val, after_val],
+                mode="lines+markers+text",
+                line=dict(color=color, width=2),
+                marker=dict(size=8, color=color),
+                text=[str(labels[i]), str(labels[i])],
+                textposition=["middle left", "middle right"],
+                textfont=dict(size=9),
+                name=str(labels[i]),
+                showlegend=False,
+            ))
+
+        fig.update_layout(
+            title=title, height=max(height, len(data) * 15 + 100),
+            xaxis=dict(tickvals=[col_before, col_after], range=[-0.3, 1.3]),
+            yaxis_title="Value",
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    # ── Diverging Bar Chart ──
+    elif chart_type == "Diverging Bar Chart":
+        if not cat_cols or not num_cols:
+            empty_state("Need at least one categorical and one numeric column.")
+            return
+        c1, c2 = st.columns(2)
+        cat_col = c1.selectbox("Category:", cat_cols, key="div_cat")
+        val_col = c2.selectbox("Value:", num_cols, key="div_val")
+
+        agg = df.groupby(cat_col)[val_col].mean().sort_values().reset_index()
+        agg.columns = [cat_col, "value"]
+
+        colors = [_RDL_COLORWAY[4] if v >= 0 else _RDL_COLORWAY[3] for v in agg["value"]]
+
+        fig = go.Figure(go.Bar(
+            y=agg[cat_col].astype(str), x=agg["value"],
+            orientation="h", marker_color=colors, opacity=opacity,
+        ))
+        fig.add_vline(x=0, line_dash="dash", line_color="gray")
+        fig.update_layout(title=title, height=max(height, len(agg) * 25),
+                          xaxis_title=val_col, yaxis_title=cat_col)
+        st.plotly_chart(fig, use_container_width=True)
+
+    # ── Bullet Chart ──
+    elif chart_type == "Bullet Chart":
+        if not cat_cols or len(num_cols) < 2:
+            empty_state("Need at least one categorical column and two numeric columns (actual + target).")
+            return
+        c1, c2, c3 = st.columns(3)
+        cat_col = c1.selectbox("Category:", cat_cols, key="bullet_cat")
+        actual_col = c2.selectbox("Actual value:", num_cols, key="bullet_actual")
+        target_col = c3.selectbox("Target value:", [c for c in num_cols if c != actual_col], key="bullet_target")
+        range_col = st.selectbox("Range max (optional):", [None] + [c for c in num_cols if c not in (actual_col, target_col)], key="bullet_range")
+
+        data = df.groupby(cat_col).agg({actual_col: "mean", target_col: "mean"}).reset_index()
+        if range_col:
+            range_data = df.groupby(cat_col)[range_col].mean()
+        else:
+            range_data = None
+
+        fig = go.Figure()
+
+        categories = data[cat_col].astype(str).tolist()
+        actuals = data[actual_col].values
+        targets = data[target_col].values
+
+        max_val = max(actuals.max(), targets.max())
+        if range_data is not None:
+            max_val = max(max_val, range_data.max())
+
+        # Background ranges (light gray bars representing scale)
+        fig.add_trace(go.Bar(
+            y=categories, x=[max_val * 1.1] * len(categories),
+            orientation="h", marker_color="rgba(200,200,200,0.3)",
+            name="Range", showlegend=True, width=0.6,
+        ))
+        fig.add_trace(go.Bar(
+            y=categories, x=[max_val * 0.75] * len(categories),
+            orientation="h", marker_color="rgba(200,200,200,0.5)",
+            name="75%", showlegend=False, width=0.6,
+        ))
+
+        # Actual values (thinner bars)
+        fig.add_trace(go.Bar(
+            y=categories, x=actuals,
+            orientation="h", marker_color=_RDL_COLORWAY[0],
+            name="Actual", width=0.3,
+        ))
+
+        # Target markers (vertical lines)
+        fig.add_trace(go.Scatter(
+            y=categories, x=targets,
+            mode="markers", marker=dict(symbol="line-ns", size=20,
+                                         line=dict(width=3, color=_RDL_COLORWAY[3])),
+            name="Target",
+        ))
+
+        fig.update_layout(
+            title=title, height=max(height, len(categories) * 60),
+            barmode="overlay", xaxis_title="Value", yaxis_title=cat_col,
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    # ── Calendar Heatmap ──
+    elif chart_type == "Calendar Heatmap":
+        if not date_cols:
+            empty_state("Need at least one datetime column for a calendar heatmap.",
+                        "Convert a column to datetime in Data Manager.")
+            return
+        c1, c2 = st.columns(2)
+        date_col = c1.selectbox("Date column:", date_cols, key="cal_date")
+        val_col = c2.selectbox("Value column:", num_cols if num_cols else [None], key="cal_val")
+        cal_color_scale = st.selectbox("Color scale:", [
+            "Viridis", "Plasma", "Blues", "Greens", "YlOrRd", "RdBu",
+        ], key="cal_cs")
+
+        data = df[[date_col]].copy()
+        if val_col:
+            data["value"] = df[val_col]
+        else:
+            data["value"] = 1
+
+        data[date_col] = pd.to_datetime(data[date_col], errors="coerce")
+        data = data.dropna(subset=[date_col])
+        data = data.set_index(date_col)
+        daily = data["value"].resample("D").sum().reset_index()
+        daily.columns = ["date", "value"]
+
+        daily["dow"] = daily["date"].dt.dayofweek  # Mon=0, Sun=6
+        daily["week"] = daily["date"].dt.isocalendar().week.astype(int)
+        daily["year"] = daily["date"].dt.year
+
+        # Handle multi-year: offset week by year
+        years = sorted(daily["year"].unique())
+        if len(years) > 1:
+            st.info(f"Showing {len(years)} years. Select a specific year for cleaner display.")
+            year_filter = st.selectbox("Year:", years, index=len(years) - 1, key="cal_year")
+            daily = daily[daily["year"] == year_filter]
+
+        dow_labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+        fig = go.Figure(go.Heatmap(
+            x=daily["week"], y=daily["dow"], z=daily["value"],
+            colorscale=cal_color_scale, showscale=True,
+            hovertemplate="Week %{x}<br>%{text}<br>Value: %{z}<extra></extra>",
+            text=[dow_labels[d] for d in daily["dow"]],
+        ))
+        fig.update_layout(
+            title=title, height=height,
+            yaxis=dict(tickvals=list(range(7)), ticktext=dow_labels,
+                       autorange="reversed"),
+            xaxis_title="Week of Year",
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    # ── Bland-Altman Plot ──
+    elif chart_type == "Bland-Altman Plot":
+        if len(num_cols) < 2:
+            empty_state("Need at least 2 numeric columns for a Bland-Altman plot.")
+            return
+        c1, c2 = st.columns(2)
+        method_a = c1.selectbox("Method A:", num_cols, key="ba_a")
+        method_b = c2.selectbox("Method B:", [c for c in num_cols if c != method_a], key="ba_b")
+
+        data = df[[method_a, method_b]].dropna()
+        means = (data[method_a] + data[method_b]) / 2
+        diffs = data[method_a] - data[method_b]
+
+        mean_diff = diffs.mean()
+        sd_diff = diffs.std()
+        upper_loa = mean_diff + 1.96 * sd_diff
+        lower_loa = mean_diff - 1.96 * sd_diff
+
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=means, y=diffs, mode="markers",
+            marker=dict(color=_RDL_COLORWAY[0], opacity=0.7, size=6),
+            name="Observations",
+        ))
+        fig.add_hline(y=mean_diff, line_dash="solid", line_color=_RDL_COLORWAY[1],
+                       annotation_text=f"Mean diff: {mean_diff:.4f}")
+        fig.add_hline(y=upper_loa, line_dash="dash", line_color=_RDL_COLORWAY[3],
+                       annotation_text=f"+1.96 SD: {upper_loa:.4f}")
+        fig.add_hline(y=lower_loa, line_dash="dash", line_color=_RDL_COLORWAY[3],
+                       annotation_text=f"-1.96 SD: {lower_loa:.4f}")
+
+        fig.update_layout(
+            title=title, height=height,
+            xaxis_title=f"Mean of {method_a} & {method_b}",
+            yaxis_title=f"Difference ({method_a} - {method_b})",
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Display metrics
+        section_header("Agreement Metrics")
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Mean Difference", f"{mean_diff:.4f}")
+        c2.metric("SD of Differences", f"{sd_diff:.4f}")
+        c3.metric("95% Limits of Agreement", f"({lower_loa:.4f}, {upper_loa:.4f})")

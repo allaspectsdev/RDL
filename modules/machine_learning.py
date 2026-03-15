@@ -24,7 +24,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.metrics import (
     confusion_matrix, classification_report, roc_curve, auc,
     mean_squared_error, r2_score, mean_absolute_error, silhouette_score,
-    silhouette_samples,
+    silhouette_samples, precision_recall_curve, average_precision_score,
 )
 from sklearn.cluster import KMeans, DBSCAN, AgglomerativeClustering
 from sklearn.ensemble import (
@@ -167,7 +167,7 @@ def _render_clustering(df: pd.DataFrame):
     if len(features) < 2:
         return
 
-    algorithm = st.selectbox("Algorithm:", ["K-Means", "DBSCAN", "Agglomerative"], key="cl_algo")
+    algorithm = st.selectbox("Algorithm:", ["K-Means", "DBSCAN", "Agglomerative", "Gaussian Mixture"], key="cl_algo")
     standardize = st.checkbox("Standardize features", value=True, key="cl_std")
 
     data = df[features].dropna()
@@ -232,6 +232,141 @@ def _render_clustering(df: pd.DataFrame):
             model = AgglomerativeClustering(n_clusters=n_clusters, linkage=linkage)
             labels = model.fit_predict(X)
             _show_cluster_results(data, X, labels, features, cat_cols, df)
+
+    elif algorithm == "Gaussian Mixture":
+        from sklearn.mixture import GaussianMixture
+
+        c1, c2 = st.columns(2)
+        n_components = c1.slider("Number of components:", 2, 15, 3, key="cl_gmm_k")
+        cov_type = c2.selectbox("Covariance type:", ["full", "tied", "diag", "spherical"], key="cl_gmm_cov")
+        show_bic_aic = st.checkbox("Show BIC/AIC plot", value=True, key="cl_gmm_bic")
+
+        if show_bic_aic:
+            bics = []
+            aics = []
+            K_range = range(2, min(16, len(X)))
+            with st.spinner("Computing BIC/AIC..."):
+                for ki in K_range:
+                    gm = GaussianMixture(n_components=ki, covariance_type=cov_type, random_state=42)
+                    gm.fit(X)
+                    bics.append(gm.bic(X))
+                    aics.append(gm.aic(X))
+
+            fig = make_subplots(rows=1, cols=2, subplot_titles=("BIC vs k", "AIC vs k"))
+            fig.add_trace(go.Scatter(x=list(K_range), y=bics, mode="lines+markers",
+                                     name="BIC"), row=1, col=1)
+            fig.add_trace(go.Scatter(x=list(K_range), y=aics, mode="lines+markers",
+                                     name="AIC"), row=1, col=2)
+            fig.update_xaxes(title_text="k", row=1, col=1)
+            fig.update_xaxes(title_text="k", row=1, col=2)
+            fig.update_layout(height=350)
+            st.plotly_chart(fig, use_container_width=True)
+
+        if st.button("Run Gaussian Mixture", key="run_gmm"):
+            model = GaussianMixture(n_components=n_components, covariance_type=cov_type, random_state=42)
+            model.fit(X)
+            labels = model.predict(X)
+            probs = model.predict_proba(X)
+
+            _show_cluster_results(data, X, labels, features, cat_cols, df)
+
+            # Show cluster probabilities (soft assignments)
+            section_header("Cluster Probabilities (Soft Assignments)")
+            prob_df = pd.DataFrame(probs, columns=[f"Cluster {i}" for i in range(n_components)])
+            prob_df.index = data.index
+            st.dataframe(prob_df.head(50).round(4), use_container_width=True)
+            if len(prob_df) > 50:
+                st.caption(f"Showing first 50 of {len(prob_df):,} rows.")
+
+            # Cluster ellipses on 2D scatter if applicable
+            if X.shape[1] == 2:
+                section_header("Cluster Ellipses (2D)")
+                fig_ell = px.scatter(
+                    data.assign(Cluster=labels.astype(str)),
+                    x=features[0], y=features[1], color="Cluster",
+                    title="Gaussian Mixture Clusters with Covariance Ellipses",
+                    opacity=0.6,
+                )
+                # Draw covariance ellipses
+                for i in range(n_components):
+                    if cov_type == "full":
+                        cov = model.covariances_[i]
+                    elif cov_type == "tied":
+                        cov = model.covariances_
+                    elif cov_type == "diag":
+                        cov = np.diag(model.covariances_[i])
+                    else:  # spherical
+                        cov = np.eye(2) * model.covariances_[i]
+
+                    mean = model.means_[i]
+                    # Compute ellipse from covariance
+                    try:
+                        eigenvalues, eigenvectors = np.linalg.eigh(cov)
+                        angle = np.arctan2(eigenvectors[1, 0], eigenvectors[0, 0])
+                        theta = np.linspace(0, 2 * np.pi, 100)
+                        # 95% confidence ellipse (chi-squared with 2 df at 0.95 = 5.991)
+                        scale = np.sqrt(5.991)
+                        ellipse_x = (scale * np.sqrt(eigenvalues[0]) * np.cos(theta) * np.cos(angle)
+                                     - scale * np.sqrt(eigenvalues[1]) * np.sin(theta) * np.sin(angle) + mean[0])
+                        ellipse_y = (scale * np.sqrt(eigenvalues[0]) * np.cos(theta) * np.sin(angle)
+                                     + scale * np.sqrt(eigenvalues[1]) * np.sin(theta) * np.cos(angle) + mean[1])
+                        from modules.ui_helpers import _RDL_COLORWAY
+                        fig_ell.add_trace(go.Scatter(
+                            x=ellipse_x, y=ellipse_y, mode="lines",
+                            line=dict(color=_RDL_COLORWAY[i % len(_RDL_COLORWAY)], width=2, dash="dash"),
+                            name=f"Cluster {i} (95% CI)", showlegend=True,
+                        ))
+                    except Exception:
+                        continue
+
+                fig_ell.update_layout(height=500)
+                st.plotly_chart(fig_ell, use_container_width=True)
+            elif X.shape[1] > 2:
+                # Use PCA to project to 2D and draw ellipses
+                section_header("Cluster Ellipses (PCA Projection)")
+                pca = PCA(n_components=2)
+                X_2d = pca.fit_transform(X)
+
+                plot_df = pd.DataFrame(X_2d, columns=["PC1", "PC2"])
+                plot_df["Cluster"] = labels.astype(str)
+                fig_ell = px.scatter(plot_df, x="PC1", y="PC2", color="Cluster",
+                                     title="Gaussian Mixture Clusters (PCA Projection)",
+                                     opacity=0.6)
+
+                # Transform means and covariances to PCA space for ellipses
+                for i in range(n_components):
+                    if cov_type == "full":
+                        cov = model.covariances_[i]
+                    elif cov_type == "tied":
+                        cov = model.covariances_
+                    elif cov_type == "diag":
+                        cov = np.diag(model.covariances_[i])
+                    else:  # spherical
+                        cov = np.eye(X.shape[1]) * model.covariances_[i]
+
+                    mean_pca = pca.transform(model.means_[i].reshape(1, -1))[0]
+                    cov_pca = pca.components_ @ cov @ pca.components_.T
+
+                    try:
+                        eigenvalues, eigenvectors = np.linalg.eigh(cov_pca)
+                        angle = np.arctan2(eigenvectors[1, 0], eigenvectors[0, 0])
+                        theta = np.linspace(0, 2 * np.pi, 100)
+                        scale = np.sqrt(5.991)
+                        ellipse_x = (scale * np.sqrt(eigenvalues[0]) * np.cos(theta) * np.cos(angle)
+                                     - scale * np.sqrt(eigenvalues[1]) * np.sin(theta) * np.sin(angle) + mean_pca[0])
+                        ellipse_y = (scale * np.sqrt(eigenvalues[0]) * np.cos(theta) * np.sin(angle)
+                                     + scale * np.sqrt(eigenvalues[1]) * np.sin(theta) * np.cos(angle) + mean_pca[1])
+                        from modules.ui_helpers import _RDL_COLORWAY
+                        fig_ell.add_trace(go.Scatter(
+                            x=ellipse_x, y=ellipse_y, mode="lines",
+                            line=dict(color=_RDL_COLORWAY[i % len(_RDL_COLORWAY)], width=2, dash="dash"),
+                            name=f"Cluster {i} (95% CI)", showlegend=True,
+                        ))
+                    except Exception:
+                        continue
+
+                fig_ell.update_layout(height=500)
+                st.plotly_chart(fig_ell, use_container_width=True)
 
 
 def _show_cluster_results(data, X, labels, features, cat_cols, df):
@@ -436,6 +571,39 @@ def _render_classification(df: pd.DataFrame):
             fig.add_trace(go.Scatter(x=[0, 1], y=[0, 1], line=dict(dash="dash", color="gray"), name="Random"))
             fig.update_layout(title="ROC Curve", xaxis_title="FPR", yaxis_title="TPR", height=400)
             st.plotly_chart(fig, use_container_width=True)
+
+            # Precision-Recall curve
+            try:
+                if hasattr(model, "predict_proba"):
+                    pr_prob = model.predict_proba(X_test)[:, 1]
+                elif hasattr(model, "decision_function"):
+                    pr_prob = model.decision_function(X_test)
+                else:
+                    pr_prob = y_pred
+
+                precision_vals, recall_vals, _ = precision_recall_curve(y_test, pr_prob)
+                avg_precision = average_precision_score(y_test, pr_prob)
+                baseline = y_test.sum() / len(y_test)
+
+                fig_pr = go.Figure()
+                fig_pr.add_trace(go.Scatter(
+                    x=recall_vals, y=precision_vals,
+                    name=f"PR Curve (AUPRC={avg_precision:.4f})",
+                    fill="tozeroy", fillcolor="rgba(99, 102, 241, 0.1)",
+                ))
+                fig_pr.add_trace(go.Scatter(
+                    x=[0, 1], y=[baseline, baseline],
+                    line=dict(dash="dash", color="gray"),
+                    name=f"Baseline ({baseline:.3f})",
+                ))
+                fig_pr.update_layout(
+                    title="Precision-Recall Curve",
+                    xaxis_title="Recall", yaxis_title="Precision",
+                    height=400,
+                )
+                st.plotly_chart(fig_pr, use_container_width=True)
+            except Exception:
+                pass
 
         # Feature importance
         if hasattr(model, "feature_importances_"):

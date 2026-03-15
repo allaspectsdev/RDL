@@ -111,6 +111,7 @@ def _render_one_sample(df: pd.DataFrame):
         "One-Sample t-test",
         "One-Sample Wilcoxon Signed-Rank",
         "One-Sample Proportion",
+        "Runs Test (Randomness)",
     ], key="one_sample_test")
 
     alpha = st.slider("Significance level (α):", 0.001, 0.10, 0.05, 0.001, key="one_alpha")
@@ -245,6 +246,93 @@ def _render_one_sample(df: pd.DataFrame):
             except Exception:
                 pass
 
+    elif test_type == "Runs Test (Randomness)":
+        col_name = st.selectbox("Column:", num_cols, key="runs_col")
+
+        if st.button("Run Test", key="run_runs"):
+            data = df[col_name].dropna().values
+            n = len(data)
+            if n < 10:
+                st.warning("Need at least 10 data points for the runs test.")
+                return
+
+            median_val = np.median(data)
+            # Convert to binary: above (1) / below (0) median
+            binary = (data > median_val).astype(int)
+            # Remove values exactly equal to median for cleaner analysis
+            # but keep them as 0 for counting
+            n_above = np.sum(binary == 1)
+            n_below = np.sum(binary == 0)
+
+            if n_above == 0 or n_below == 0:
+                st.warning("All values are on one side of the median. Runs test cannot be computed.")
+                return
+
+            # Count runs
+            runs = 1
+            for i in range(1, len(binary)):
+                if binary[i] != binary[i - 1]:
+                    runs += 1
+
+            # Expected number of runs and variance under H0
+            n1, n2 = n_above, n_below
+            expected_runs = (2 * n1 * n2) / (n1 + n2) + 1
+            var_runs = (2 * n1 * n2 * (2 * n1 * n2 - n1 - n2)) / ((n1 + n2) ** 2 * (n1 + n2 - 1))
+
+            if var_runs <= 0:
+                st.warning("Variance of runs is zero. Cannot compute z-statistic.")
+                return
+
+            z_stat = (runs - expected_runs) / np.sqrt(var_runs)
+            p_val = 2 * (1 - stats.norm.cdf(abs(z_stat)))
+
+            # Also try statsmodels for comparison
+            try:
+                from statsmodels.sandbox.stats.runs import runstest_1samp
+                z_sm, p_sm = runstest_1samp(data, cutoff="median")
+                # Use statsmodels result if available
+                z_stat, p_val = z_sm, p_sm
+            except ImportError:
+                pass
+
+            st.markdown(f"**H₀:** The sequence is random (no pattern above/below median)")
+            c1m, c2m, c3m, c4m = st.columns(4)
+            c1m.metric("Number of Runs", str(runs))
+            c2m.metric("Expected Runs", f"{expected_runs:.2f}")
+            c3m.metric("Z-statistic", f"{z_stat:.4f}")
+            c4m.metric("p-value", f"{p_val:.6f}")
+
+            st.write(f"**Median:** {median_val:.4f}  |  **Above:** {n_above}  |  **Below:** {n_below}")
+            significance_result(p_val, alpha, "Runs Test")
+
+            try:
+                interpretation_card(interpret_p_value(p_val, alpha))
+            except Exception:
+                pass
+
+            # Sequence plot
+            section_header("Sequence Plot")
+            fig_runs = go.Figure()
+            x_idx = np.arange(len(data))
+            colors = ["#6366f1" if b == 1 else "#ef4444" for b in binary]
+            fig_runs.add_trace(go.Scatter(
+                x=x_idx, y=data, mode="lines+markers",
+                marker=dict(color=colors, size=5),
+                line=dict(color="gray", width=1),
+                name="Data",
+            ))
+            fig_runs.add_hline(y=median_val, line_dash="dash", line_color="red",
+                               annotation_text=f"Median={median_val:.3f}")
+            fig_runs.update_layout(
+                title=f"Sequence Plot with Runs: {col_name}",
+                xaxis_title="Observation Order",
+                yaxis_title=col_name,
+                height=400,
+            )
+            st.plotly_chart(fig_runs, use_container_width=True)
+            st.caption("Blue dots = above median, red dots = at or below median. "
+                       "Each change in color represents a new run.")
+
 
 def _render_two_sample(df: pd.DataFrame):
     """Two-sample hypothesis tests."""
@@ -254,12 +342,13 @@ def _render_two_sample(df: pd.DataFrame):
     test_type = st.selectbox("Test:", [
         "Independent t-test", "Welch's t-test", "Paired t-test",
         "Mann-Whitney U", "Wilcoxon Signed-Rank (paired)",
-        "Two-Sample KS Test",
+        "Two-Sample KS Test", "Bartlett's Test", "Mood's Median Test",
     ], key="two_sample_test")
 
     alpha = st.slider("Significance level (α):", 0.001, 0.10, 0.05, 0.001, key="two_alpha")
 
-    if test_type in ("Independent t-test", "Welch's t-test", "Mann-Whitney U", "Two-Sample KS Test"):
+    if test_type in ("Independent t-test", "Welch's t-test", "Mann-Whitney U", "Two-Sample KS Test",
+                      "Bartlett's Test", "Mood's Median Test"):
         # Need a grouping variable
         if not cat_cols:
             empty_state("Need a categorical column to define groups.")
@@ -312,35 +401,99 @@ def _render_two_sample(df: pd.DataFrame):
             elif test_type == "Two-Sample KS Test":
                 stat, p = stats.ks_2samp(g1, g2)
                 test_label = "D"
+            elif test_type == "Bartlett's Test":
+                stat, p = stats.bartlett(g1, g2)
+                test_label = "T"
+            elif test_type == "Mood's Median Test":
+                try:
+                    mood_stat, mood_p, mood_med, mood_table = stats.median_test(g1, g2)
+                    stat, p = mood_stat, mood_p
+                except Exception as e:
+                    st.error(f"Mood's median test failed: {e}")
+                    return
+                test_label = "chi2"
 
-            d = _cohens_d(g1, g2)
+            if test_type == "Bartlett's Test":
+                # Bartlett's tests equal variances, not means
+                st.markdown(f"**H₀:** The two groups have equal variances")
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric(f"{test_label}-statistic", f"{stat:.4f}")
+                c2.metric("p-value", f"{p:.6f}")
+                c3.metric(f"Var({g1_name})", f"{g1.var():.4f}")
+                c4.metric(f"Var({g2_name})", f"{g2.var():.4f}")
+                st.write(f"**Group 1 ({g1_name}):** n={len(g1)}, sd={g1.std():.4f}")
+                st.write(f"**Group 2 ({g2_name}):** n={len(g2)}, sd={g2.std():.4f}")
+                variance_ratio = g1.var() / g2.var() if g2.var() != 0 else np.nan
+                significance_result(p, alpha, "Bartlett's Test",
+                                    effect_size=variance_ratio, effect_label="Variance ratio")
 
-            st.markdown(f"**H₀:** The two groups have the same {'mean' if 'test' in test_type.lower() else 'distribution'}")
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric(f"{test_label}-statistic", f"{stat:.4f}")
-            c2.metric("p-value", f"{p:.6f}")
-            c3.metric("Cohen's d", f"{d:.4f} ({_effect_size_label(d)})")
-            c4.metric("Diff of Means", f"{g1.mean() - g2.mean():.4f}")
+                try:
+                    interpretation_card(interpret_p_value(p, alpha))
+                except Exception:
+                    pass
 
-            st.write(f"**Group 1 ({g1_name}):** n={len(g1)}, mean={g1.mean():.4f}, sd={g1.std():.4f}")
-            st.write(f"**Group 2 ({g2_name}):** n={len(g2)}, mean={g2.mean():.4f}, sd={g2.std():.4f}")
-            significance_result(p, alpha, test_type, effect_size=d, effect_label="Cohen's d")
+                # Visualization
+                fig = make_subplots(rows=1, cols=2, subplot_titles=("Distributions", "Box Plot"))
+                fig.add_trace(go.Histogram(x=g1, name=str(g1_name), opacity=0.6), row=1, col=1)
+                fig.add_trace(go.Histogram(x=g2, name=str(g2_name), opacity=0.6), row=1, col=1)
+                fig.update_layout(barmode="overlay")
+                fig.add_trace(go.Box(y=g1, name=str(g1_name)), row=1, col=2)
+                fig.add_trace(go.Box(y=g2, name=str(g2_name)), row=1, col=2)
+                fig.update_layout(height=400)
+                st.plotly_chart(fig, use_container_width=True)
 
-            # --- Interpretation card ---
-            try:
-                interpretation_card(interpret_p_value(p, alpha))
-            except Exception:
-                pass
+            elif test_type == "Mood's Median Test":
+                st.markdown(f"**H₀:** The two groups have the same median")
+                c1, c2, c3 = st.columns(3)
+                c1.metric(f"{test_label}-statistic", f"{stat:.4f}")
+                c2.metric("p-value", f"{p:.6f}")
+                c3.metric("Grand Median", f"{mood_med:.4f}")
 
-            # Visualization
-            fig = make_subplots(rows=1, cols=2, subplot_titles=("Distributions", "Box Plot"))
-            fig.add_trace(go.Histogram(x=g1, name=str(g1_name), opacity=0.6), row=1, col=1)
-            fig.add_trace(go.Histogram(x=g2, name=str(g2_name), opacity=0.6), row=1, col=1)
-            fig.update_layout(barmode="overlay")
-            fig.add_trace(go.Box(y=g1, name=str(g1_name)), row=1, col=2)
-            fig.add_trace(go.Box(y=g2, name=str(g2_name)), row=1, col=2)
-            fig.update_layout(height=400)
-            st.plotly_chart(fig, use_container_width=True)
+                st.markdown("**Contingency Table (above/below grand median):**")
+                cont_df = pd.DataFrame(
+                    mood_table,
+                    index=["Above median", "At or below median"],
+                    columns=[str(g1_name), str(g2_name)],
+                )
+                st.dataframe(cont_df, use_container_width=True)
+                st.write(f"**Group 1 ({g1_name}):** n={len(g1)}, median={g1.median():.4f}")
+                st.write(f"**Group 2 ({g2_name}):** n={len(g2)}, median={g2.median():.4f}")
+                significance_result(p, alpha, "Mood's Median Test")
+
+                try:
+                    interpretation_card(interpret_p_value(p, alpha))
+                except Exception:
+                    pass
+
+            else:
+                d = _cohens_d(g1, g2)
+
+                st.markdown(f"**H₀:** The two groups have the same {'mean' if 'test' in test_type.lower() else 'distribution'}")
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric(f"{test_label}-statistic", f"{stat:.4f}")
+                c2.metric("p-value", f"{p:.6f}")
+                c3.metric("Cohen's d", f"{d:.4f} ({_effect_size_label(d)})")
+                c4.metric("Diff of Means", f"{g1.mean() - g2.mean():.4f}")
+
+                st.write(f"**Group 1 ({g1_name}):** n={len(g1)}, mean={g1.mean():.4f}, sd={g1.std():.4f}")
+                st.write(f"**Group 2 ({g2_name}):** n={len(g2)}, mean={g2.mean():.4f}, sd={g2.std():.4f}")
+                significance_result(p, alpha, test_type, effect_size=d, effect_label="Cohen's d")
+
+                # --- Interpretation card ---
+                try:
+                    interpretation_card(interpret_p_value(p, alpha))
+                except Exception:
+                    pass
+
+                # Visualization
+                fig = make_subplots(rows=1, cols=2, subplot_titles=("Distributions", "Box Plot"))
+                fig.add_trace(go.Histogram(x=g1, name=str(g1_name), opacity=0.6), row=1, col=1)
+                fig.add_trace(go.Histogram(x=g2, name=str(g2_name), opacity=0.6), row=1, col=1)
+                fig.update_layout(barmode="overlay")
+                fig.add_trace(go.Box(y=g1, name=str(g1_name)), row=1, col=2)
+                fig.add_trace(go.Box(y=g2, name=str(g2_name)), row=1, col=2)
+                fig.update_layout(height=400)
+                st.plotly_chart(fig, use_container_width=True)
 
     elif test_type in ("Paired t-test", "Wilcoxon Signed-Rank (paired)"):
         if len(num_cols) < 2:
@@ -423,6 +576,7 @@ def _render_chi_square(df: pd.DataFrame):
     test_type = st.selectbox("Test:", [
         "Chi-Square Test of Independence",
         "Chi-Square Goodness of Fit",
+        "McNemar's Test (paired binary)",
     ], key="chi_test_type")
 
     alpha = st.slider("α:", 0.001, 0.10, 0.05, 0.001, key="chi_alpha")
@@ -547,6 +701,82 @@ def _render_chi_square(df: pd.DataFrame):
             fig.update_layout(title="Observed vs Expected Frequencies", height=400)
             st.plotly_chart(fig, use_container_width=True)
 
+    elif test_type == "McNemar's Test (paired binary)":
+        # Identify binary columns (categorical with 2 levels or numeric with 2 unique values)
+        binary_cols = []
+        for c in df.columns:
+            if df[c].dropna().nunique() == 2:
+                binary_cols.append(c)
+        if len(binary_cols) < 2:
+            empty_state("Need at least 2 binary columns for McNemar's test.",
+                        "Each column must have exactly 2 unique non-null values.")
+            return
+
+        c1_sel, c2_sel = st.columns(2)
+        col1 = c1_sel.selectbox("Column 1 (before/condition A):", binary_cols, key="mcn_col1")
+        col2 = c2_sel.selectbox("Column 2 (after/condition B):",
+                                 [c for c in binary_cols if c != col1], key="mcn_col2")
+
+        if st.button("Run McNemar's Test", key="run_mcnemar"):
+            paired_data = df[[col1, col2]].dropna()
+            if len(paired_data) < 5:
+                st.warning("Need at least 5 paired observations.")
+                return
+
+            vals1 = paired_data[col1].unique()
+            vals2 = paired_data[col2].unique()
+            all_vals = list(set(list(vals1) | set(vals2)))
+            if len(all_vals) != 2:
+                st.warning("Both columns must share the same 2 categories.")
+                return
+            pos, neg = all_vals[0], all_vals[1]
+
+            # Build 2x2 contingency table of concordant/discordant pairs
+            a = ((paired_data[col1] == pos) & (paired_data[col2] == pos)).sum()  # both positive
+            b = ((paired_data[col1] == pos) & (paired_data[col2] == neg)).sum()  # changed neg
+            c_val = ((paired_data[col1] == neg) & (paired_data[col2] == pos)).sum()  # changed pos
+            d_val = ((paired_data[col1] == neg) & (paired_data[col2] == neg)).sum()  # both negative
+
+            st.markdown("**2x2 Contingency Table (paired outcomes):**")
+            ct_df = pd.DataFrame(
+                [[a, b], [c_val, d_val]],
+                index=[f"{col1}={pos}", f"{col1}={neg}"],
+                columns=[f"{col2}={pos}", f"{col2}={neg}"],
+            )
+            st.dataframe(ct_df, use_container_width=True)
+
+            discordant = b + c_val
+            if discordant == 0:
+                st.warning("No discordant pairs found. McNemar's test cannot be computed.")
+                return
+
+            # Try statsmodels first, fall back to manual
+            try:
+                from statsmodels.stats.contingency_tables import mcnemar as sm_mcnemar
+                table = np.array([[a, b], [c_val, d_val]])
+                # Use exact=False for chi-square version when discordant pairs >= 25
+                exact = discordant < 25
+                result = sm_mcnemar(table, exact=exact)
+                chi2_stat = result.statistic
+                p_val = result.pvalue
+            except ImportError:
+                # Manual calculation: chi2 = (b - c)^2 / (b + c)
+                chi2_stat = (b - c_val) ** 2 / discordant
+                p_val = 1 - stats.chi2.cdf(chi2_stat, df=1)
+
+            c1m, c2m, c3m = st.columns(3)
+            c1m.metric("Test Statistic", f"{chi2_stat:.4f}")
+            c2m.metric("p-value", f"{p_val:.6f}")
+            c3m.metric("Discordant Pairs", f"{discordant}")
+
+            st.write(f"**Concordant:** {a + d_val} pairs  |  **Discordant:** {b} + {c_val} = {discordant} pairs")
+            significance_result(p_val, alpha, "McNemar's Test")
+
+            try:
+                interpretation_card(interpret_p_value(p_val, alpha))
+            except Exception:
+                pass
+
 
 def _render_normality(df: pd.DataFrame):
     """Comprehensive normality tests."""
@@ -628,28 +858,36 @@ def _render_normality(df: pd.DataFrame):
     st.plotly_chart(fig, use_container_width=True)
 
 
+def _power_t_test(effect_size, n, alpha, two_sample=False):
+    """Compute power for a one- or two-sample t-test."""
+    ncp = effect_size * np.sqrt(n)
+    df_val = n - 1 if not two_sample else 2 * n - 2
+    crit = stats.t.ppf(1 - alpha / 2, df=df_val)
+    return 1 - stats.t.cdf(crit, df=df_val, loc=ncp)
+
+
 def _render_power_analysis():
     """Statistical power analysis."""
     analysis_type = st.selectbox("Analysis for:", [
         "One-Sample t-test", "Two-Sample t-test", "One-Way ANOVA",
+        "Two-Proportions", "Chi-Square Independence", "Correlation (r)",
+        "Paired t-test", "Equivalence (TOST)",
     ], key="power_type")
 
     calc_mode = st.radio("Calculate:", ["Required Sample Size", "Achievable Power"], horizontal=True, key="power_mode")
 
     if analysis_type in ("One-Sample t-test", "Two-Sample t-test"):
         effect_size = st.slider("Cohen's d (effect size):", 0.1, 2.0, 0.5, 0.05, key="power_d")
-        alpha = st.slider("α:", 0.001, 0.10, 0.05, 0.001, key="power_alpha")
+        alpha = st.slider("alpha:", 0.001, 0.10, 0.05, 0.001, key="power_alpha")
+        two_samp = analysis_type == "Two-Sample t-test"
 
         if calc_mode == "Required Sample Size":
             target_power = st.slider("Target power:", 0.5, 0.99, 0.80, 0.01, key="power_target")
             if st.button("Calculate", key="calc_power_n"):
-                from scipy.stats import norm
-                # Using formula: n = ((z_alpha + z_beta) / d)^2
-                z_alpha = norm.ppf(1 - alpha / 2)
-                z_beta = norm.ppf(target_power)
-                n = ((z_alpha + z_beta) / effect_size) ** 2
-                n = int(np.ceil(n))
-                if analysis_type == "Two-Sample t-test":
+                z_alpha = stats.norm.ppf(1 - alpha / 2)
+                z_beta = stats.norm.ppf(target_power)
+                n = int(np.ceil(((z_alpha + z_beta) / effect_size) ** 2))
+                if two_samp:
                     st.metric("Required n per group", n)
                     st.write(f"Total sample size: **{n * 2}**")
                 else:
@@ -657,11 +895,7 @@ def _render_power_analysis():
 
                 # Power curve
                 ns = np.arange(5, max(n * 2, 100))
-                powers = []
-                for ni in ns:
-                    ncp = effect_size * np.sqrt(ni)
-                    power_i = 1 - stats.t.cdf(stats.t.ppf(1 - alpha / 2, df=ni - 1), df=ni - 1, loc=ncp)
-                    powers.append(power_i)
+                powers = [_power_t_test(effect_size, ni, alpha, two_samp) for ni in ns]
                 fig = go.Figure()
                 fig.add_trace(go.Scatter(x=ns, y=powers, mode="lines", name="Power"))
                 fig.add_hline(y=target_power, line_dash="dash", line_color="red",
@@ -672,24 +906,20 @@ def _render_power_analysis():
                                   height=400)
                 st.plotly_chart(fig, use_container_width=True)
 
+                # Sample size lookup table
+                _render_power_lookup_table(analysis_type, alpha)
+
         else:
             sample_n = st.number_input("Sample size (per group):", 5, 10000, 30, key="power_n")
             if st.button("Calculate", key="calc_power_p"):
-                ncp = effect_size * np.sqrt(sample_n)
-                crit = stats.t.ppf(1 - alpha / 2, df=sample_n - 1)
-                power = 1 - stats.t.cdf(crit, df=sample_n - 1, loc=ncp)
+                power = _power_t_test(effect_size, sample_n, alpha, two_samp)
                 st.metric("Achievable Power", f"{power:.4f}")
 
-                # Power for different effect sizes
                 ds = [0.2, 0.5, 0.8, 1.0, 1.5]
                 fig = go.Figure()
                 ns = np.arange(5, 200)
                 for d in ds:
-                    powers = []
-                    for ni in ns:
-                        ncp_i = d * np.sqrt(ni)
-                        power_i = 1 - stats.t.cdf(stats.t.ppf(1 - alpha / 2, df=ni - 1), df=ni - 1, loc=ncp_i)
-                        powers.append(power_i)
+                    powers = [_power_t_test(d, ni, alpha, two_samp) for ni in ns]
                     fig.add_trace(go.Scatter(x=ns, y=powers, name=f"d={d}"))
                 fig.add_hline(y=0.8, line_dash="dash", line_color="gray")
                 fig.update_layout(title="Power vs Sample Size by Effect Size",
@@ -699,12 +929,11 @@ def _render_power_analysis():
     elif analysis_type == "One-Way ANOVA":
         effect_size = st.slider("Cohen's f (effect size):", 0.05, 1.0, 0.25, 0.05, key="power_f")
         k = st.number_input("Number of groups:", 2, 20, 3, key="power_k")
-        alpha = st.slider("α:", 0.001, 0.10, 0.05, 0.001, key="power_anova_alpha")
+        alpha = st.slider("alpha:", 0.001, 0.10, 0.05, 0.001, key="power_anova_alpha")
 
         if calc_mode == "Required Sample Size":
             target_power = st.slider("Target power:", 0.5, 0.99, 0.80, 0.01, key="power_anova_target")
             if st.button("Calculate", key="calc_power_anova_n"):
-                # Iterative search
                 for n in range(5, 5000):
                     dfn = k - 1
                     dfd = k * (n - 1)
@@ -715,6 +944,25 @@ def _render_power_analysis():
                         break
                 st.metric("Required n per group", n)
                 st.write(f"Total sample size: **{n * k}**")
+
+                # Power curve for ANOVA
+                ns = np.arange(5, max(n * 2, 100))
+                powers = []
+                for ni in ns:
+                    dfn_i = k - 1
+                    dfd_i = k * (ni - 1)
+                    ncp_i = k * ni * effect_size ** 2
+                    crit_i = stats.f.ppf(1 - alpha, dfn_i, dfd_i)
+                    powers.append(1 - stats.f.cdf(crit_i, dfn_i, dfd_i, ncp_i))
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(x=ns, y=powers, mode="lines", name="Power"))
+                fig.add_hline(y=target_power, line_dash="dash", line_color="red",
+                              annotation_text=f"Target={target_power}")
+                fig.add_vline(x=n, line_dash="dash", line_color="green",
+                              annotation_text=f"n={n}")
+                fig.update_layout(title="ANOVA Power Curve", xaxis_title="n per group",
+                                  yaxis_title="Power", height=400)
+                st.plotly_chart(fig, use_container_width=True)
         else:
             n_per_group = st.number_input("n per group:", 5, 5000, 30, key="power_anova_n")
             if st.button("Calculate", key="calc_power_anova_p"):
@@ -724,6 +972,341 @@ def _render_power_analysis():
                 crit = stats.f.ppf(1 - alpha, dfn, dfd)
                 power = 1 - stats.f.cdf(crit, dfn, dfd, ncp)
                 st.metric("Achievable Power", f"{power:.4f}")
+
+    elif analysis_type == "Two-Proportions":
+        c1_p, c2_p = st.columns(2)
+        p1 = c1_p.number_input("Proportion 1 (p1):", 0.01, 0.99, 0.50, 0.01, key="power_p1")
+        p2 = c2_p.number_input("Proportion 2 (p2):", 0.01, 0.99, 0.30, 0.01, key="power_p2")
+        alpha = st.slider("alpha:", 0.001, 0.10, 0.05, 0.001, key="power_prop_alpha")
+
+        if calc_mode == "Required Sample Size":
+            target_power = st.slider("Target power:", 0.5, 0.99, 0.80, 0.01, key="power_prop_target")
+            if st.button("Calculate", key="calc_power_prop_n"):
+                z_alpha = stats.norm.ppf(1 - alpha / 2)
+                z_beta = stats.norm.ppf(target_power)
+                p_bar = (p1 + p2) / 2
+                n = ((z_alpha * np.sqrt(2 * p_bar * (1 - p_bar)) +
+                      z_beta * np.sqrt(p1 * (1 - p1) + p2 * (1 - p2))) / (p1 - p2)) ** 2
+                n = int(np.ceil(n))
+                st.metric("Required n per group", n)
+                st.write(f"Total sample size: **{n * 2}**")
+
+                # Power curve
+                ns = np.arange(10, max(n * 2, 200))
+                powers = []
+                for ni in ns:
+                    p_bar_i = (p1 + p2) / 2
+                    se0 = np.sqrt(2 * p_bar_i * (1 - p_bar_i) / ni)
+                    se1 = np.sqrt((p1 * (1 - p1) + p2 * (1 - p2)) / ni)
+                    if se0 > 0 and se1 > 0:
+                        z_crit = stats.norm.ppf(1 - alpha / 2)
+                        pw = 1 - stats.norm.cdf((z_crit * se0 - abs(p1 - p2)) / se1) + \
+                             stats.norm.cdf((-z_crit * se0 - abs(p1 - p2)) / se1)
+                        powers.append(pw)
+                    else:
+                        powers.append(0)
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(x=ns, y=powers, mode="lines", name="Power"))
+                fig.add_hline(y=target_power, line_dash="dash", line_color="red",
+                              annotation_text=f"Target={target_power}")
+                fig.add_vline(x=n, line_dash="dash", line_color="green",
+                              annotation_text=f"n={n}")
+                fig.update_layout(title="Power Curve (Two-Proportions)", xaxis_title="n per group",
+                                  yaxis_title="Power", height=400)
+                st.plotly_chart(fig, use_container_width=True)
+        else:
+            sample_n = st.number_input("Sample size per group:", 5, 10000, 100, key="power_prop_n")
+            if st.button("Calculate", key="calc_power_prop_p"):
+                p_bar = (p1 + p2) / 2
+                se0 = np.sqrt(2 * p_bar * (1 - p_bar) / sample_n)
+                se1 = np.sqrt((p1 * (1 - p1) + p2 * (1 - p2)) / sample_n)
+                if se0 > 0 and se1 > 0:
+                    z_crit = stats.norm.ppf(1 - alpha / 2)
+                    power = 1 - stats.norm.cdf((z_crit * se0 - abs(p1 - p2)) / se1) + \
+                            stats.norm.cdf((-z_crit * se0 - abs(p1 - p2)) / se1)
+                    st.metric("Achievable Power", f"{power:.4f}")
+                else:
+                    st.warning("Cannot compute power with these parameters.")
+
+    elif analysis_type == "Chi-Square Independence":
+        effect_w = st.slider("Effect size w:", 0.05, 1.0, 0.30, 0.05, key="power_chi_w")
+        df_chi = st.number_input("Degrees of freedom:", 1, 100, 1, key="power_chi_df")
+        alpha = st.slider("alpha:", 0.001, 0.10, 0.05, 0.001, key="power_chi_alpha")
+
+        if calc_mode == "Required Sample Size":
+            target_power = st.slider("Target power:", 0.5, 0.99, 0.80, 0.01, key="power_chi_target")
+            if st.button("Calculate", key="calc_power_chi_n"):
+                # Iterative search using non-central chi-square
+                for n in range(10, 10000):
+                    ncp = n * effect_w ** 2
+                    crit = stats.chi2.ppf(1 - alpha, df_chi)
+                    power = 1 - stats.ncx2.cdf(crit, df_chi, ncp)
+                    if power >= target_power:
+                        break
+                st.metric("Required total n", n)
+
+                # Power curve
+                ns = np.arange(10, max(n * 2, 200))
+                powers = []
+                for ni in ns:
+                    ncp_i = ni * effect_w ** 2
+                    crit_i = stats.chi2.ppf(1 - alpha, df_chi)
+                    powers.append(1 - stats.ncx2.cdf(crit_i, df_chi, ncp_i))
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(x=ns, y=powers, mode="lines", name="Power"))
+                fig.add_hline(y=target_power, line_dash="dash", line_color="red",
+                              annotation_text=f"Target={target_power}")
+                fig.add_vline(x=n, line_dash="dash", line_color="green",
+                              annotation_text=f"n={n}")
+                fig.update_layout(title="Chi-Square Power Curve", xaxis_title="Total n",
+                                  yaxis_title="Power", height=400)
+                st.plotly_chart(fig, use_container_width=True)
+        else:
+            sample_n = st.number_input("Total sample size:", 10, 10000, 100, key="power_chi_n")
+            if st.button("Calculate", key="calc_power_chi_p"):
+                ncp = sample_n * effect_w ** 2
+                crit = stats.chi2.ppf(1 - alpha, df_chi)
+                power = 1 - stats.ncx2.cdf(crit, df_chi, ncp)
+                st.metric("Achievable Power", f"{power:.4f}")
+
+    elif analysis_type == "Correlation (r)":
+        target_r = st.slider("Target correlation (|r|):", 0.05, 0.95, 0.30, 0.05, key="power_r")
+        alpha = st.slider("alpha:", 0.001, 0.10, 0.05, 0.001, key="power_corr_alpha")
+
+        if calc_mode == "Required Sample Size":
+            target_power = st.slider("Target power:", 0.5, 0.99, 0.80, 0.01, key="power_corr_target")
+            if st.button("Calculate", key="calc_power_corr_n"):
+                # Fisher z-transform: z_r = arctanh(r), SE = 1/sqrt(n-3)
+                z_r = np.arctanh(target_r)
+                z_alpha = stats.norm.ppf(1 - alpha / 2)
+                z_beta = stats.norm.ppf(target_power)
+                n = int(np.ceil(((z_alpha + z_beta) / z_r) ** 2 + 3))
+                st.metric("Required n (pairs)", n)
+
+                # Power curve
+                ns = np.arange(10, max(n * 2, 100))
+                powers = []
+                for ni in ns:
+                    se = 1 / np.sqrt(max(ni - 3, 1))
+                    pw = 1 - stats.norm.cdf(z_alpha - z_r / se) + stats.norm.cdf(-z_alpha - z_r / se)
+                    powers.append(pw)
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(x=ns, y=powers, mode="lines", name="Power"))
+                fig.add_hline(y=target_power, line_dash="dash", line_color="red",
+                              annotation_text=f"Target={target_power}")
+                fig.add_vline(x=n, line_dash="dash", line_color="green",
+                              annotation_text=f"n={n}")
+                fig.update_layout(title="Correlation Power Curve", xaxis_title="n (pairs)",
+                                  yaxis_title="Power", height=400)
+                st.plotly_chart(fig, use_container_width=True)
+        else:
+            sample_n = st.number_input("Sample size (pairs):", 10, 10000, 50, key="power_corr_n")
+            if st.button("Calculate", key="calc_power_corr_p"):
+                z_r = np.arctanh(target_r)
+                se = 1 / np.sqrt(max(sample_n - 3, 1))
+                z_alpha = stats.norm.ppf(1 - alpha / 2)
+                power = 1 - stats.norm.cdf(z_alpha - z_r / se) + stats.norm.cdf(-z_alpha - z_r / se)
+                st.metric("Achievable Power", f"{power:.4f}")
+
+    elif analysis_type == "Paired t-test":
+        effect_size = st.slider("Cohen's d (effect size):", 0.1, 2.0, 0.5, 0.05, key="power_paired_d")
+        corr = st.slider("Correlation between pairs:", 0.0, 0.99, 0.50, 0.01, key="power_paired_corr")
+        alpha = st.slider("alpha:", 0.001, 0.10, 0.05, 0.001, key="power_paired_alpha")
+
+        if calc_mode == "Required Sample Size":
+            target_power = st.slider("Target power:", 0.5, 0.99, 0.80, 0.01, key="power_paired_target")
+            if st.button("Calculate", key="calc_power_paired_n"):
+                # For paired t-test: effective d = d / sqrt(2*(1-r))
+                d_eff = effect_size / np.sqrt(2 * (1 - corr)) if corr < 1 else effect_size * 10
+                z_alpha = stats.norm.ppf(1 - alpha / 2)
+                z_beta = stats.norm.ppf(target_power)
+                n = int(np.ceil(((z_alpha + z_beta) / d_eff) ** 2))
+                n = max(n, 5)
+                st.metric("Required n (pairs)", n)
+
+                # Power curve
+                ns = np.arange(5, max(n * 2, 100))
+                powers = []
+                for ni in ns:
+                    ncp_i = d_eff * np.sqrt(ni)
+                    crit_i = stats.t.ppf(1 - alpha / 2, df=ni - 1)
+                    pw = 1 - stats.t.cdf(crit_i, df=ni - 1, loc=ncp_i)
+                    powers.append(pw)
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(x=ns, y=powers, mode="lines", name="Power"))
+                fig.add_hline(y=target_power, line_dash="dash", line_color="red",
+                              annotation_text=f"Target={target_power}")
+                fig.add_vline(x=n, line_dash="dash", line_color="green",
+                              annotation_text=f"n={n}")
+                fig.update_layout(title="Paired t-test Power Curve", xaxis_title="n (pairs)",
+                                  yaxis_title="Power", height=400)
+                st.plotly_chart(fig, use_container_width=True)
+        else:
+            sample_n = st.number_input("Number of pairs:", 5, 10000, 30, key="power_paired_n")
+            if st.button("Calculate", key="calc_power_paired_p"):
+                d_eff = effect_size / np.sqrt(2 * (1 - corr)) if corr < 1 else effect_size * 10
+                ncp = d_eff * np.sqrt(sample_n)
+                crit = stats.t.ppf(1 - alpha / 2, df=sample_n - 1)
+                power = 1 - stats.t.cdf(crit, df=sample_n - 1, loc=ncp)
+                st.metric("Achievable Power", f"{power:.4f}")
+
+    elif analysis_type == "Equivalence (TOST)":
+        c1_eq, c2_eq = st.columns(2)
+        eq_margin = c1_eq.number_input("Equivalence margin (delta):", 0.01, 10.0, 1.0, 0.1, key="power_tost_delta")
+        true_diff = c2_eq.number_input("True difference:", -10.0, 10.0, 0.0, 0.1, key="power_tost_diff")
+        sigma = st.number_input("Standard deviation (sigma):", 0.01, 100.0, 1.0, 0.1, key="power_tost_sigma")
+        alpha = st.slider("alpha:", 0.001, 0.10, 0.05, 0.001, key="power_tost_alpha")
+
+        if calc_mode == "Required Sample Size":
+            target_power = st.slider("Target power:", 0.5, 0.99, 0.80, 0.01, key="power_tost_target")
+            if st.button("Calculate", key="calc_power_tost_n"):
+                # TOST power: both one-sided tests must be significant
+                # Approximate using the more conservative bound
+                z_alpha = stats.norm.ppf(1 - alpha)
+                z_beta = stats.norm.ppf(target_power)
+                # Most conservative: use the smaller margin minus true_diff
+                effective_margin = eq_margin - abs(true_diff)
+                if effective_margin <= 0:
+                    st.warning("True difference exceeds equivalence margin. Equivalence cannot be shown.")
+                else:
+                    n = int(np.ceil(2 * ((z_alpha + z_beta) * sigma / effective_margin) ** 2))
+                    n = max(n, 5)
+                    st.metric("Required n per group", n)
+                    st.write(f"Total sample size: **{n * 2}**")
+
+                    # Power curve
+                    ns = np.arange(5, max(n * 3, 100))
+                    powers = []
+                    for ni in ns:
+                        se = sigma * np.sqrt(2 / ni)
+                        if se > 0:
+                            # Power = P(reject both one-sided)
+                            pw_lower = 1 - stats.norm.cdf(stats.norm.ppf(1 - alpha) - (eq_margin + true_diff) / se)
+                            pw_upper = 1 - stats.norm.cdf(stats.norm.ppf(1 - alpha) - (eq_margin - true_diff) / se)
+                            pw = pw_lower * pw_upper
+                            powers.append(pw)
+                        else:
+                            powers.append(0)
+                    fig = go.Figure()
+                    fig.add_trace(go.Scatter(x=ns, y=powers, mode="lines", name="Power"))
+                    fig.add_hline(y=target_power, line_dash="dash", line_color="red",
+                                  annotation_text=f"Target={target_power}")
+                    fig.add_vline(x=n, line_dash="dash", line_color="green",
+                                  annotation_text=f"n={n}")
+                    fig.update_layout(title="TOST Power Curve", xaxis_title="n per group",
+                                      yaxis_title="Power", height=400)
+                    st.plotly_chart(fig, use_container_width=True)
+        else:
+            sample_n = st.number_input("Sample size per group:", 5, 10000, 50, key="power_tost_n")
+            if st.button("Calculate", key="calc_power_tost_p"):
+                se = sigma * np.sqrt(2 / sample_n)
+                if se > 0:
+                    pw_lower = 1 - stats.norm.cdf(stats.norm.ppf(1 - alpha) - (eq_margin + true_diff) / se)
+                    pw_upper = 1 - stats.norm.cdf(stats.norm.ppf(1 - alpha) - (eq_margin - true_diff) / se)
+                    power = pw_lower * pw_upper
+                    st.metric("Achievable Power", f"{power:.4f}")
+                else:
+                    st.warning("Cannot compute power with these parameters.")
+
+    # Sample size lookup table (shown as expandable for all types)
+    try:
+        _alpha_val = alpha
+    except NameError:
+        _alpha_val = 0.05
+    with st.expander("Sample Size Lookup Table"):
+        _render_power_lookup_table(analysis_type, _alpha_val)
+
+
+def _render_power_lookup_table(analysis_type, alpha):
+    """Render a grid of required sample sizes for effect size x power combinations."""
+    if analysis_type in ("One-Sample t-test", "Two-Sample t-test"):
+        effect_sizes = [0.2, 0.3, 0.5, 0.8, 1.0, 1.2, 1.5]
+        power_levels = [0.70, 0.80, 0.85, 0.90, 0.95]
+        z_a = stats.norm.ppf(1 - alpha / 2)
+        records = []
+        for es in effect_sizes:
+            row = {"Cohen's d": es}
+            for pw in power_levels:
+                z_b = stats.norm.ppf(pw)
+                n = int(np.ceil(((z_a + z_b) / es) ** 2))
+                label = f"n (power={pw})"
+                if analysis_type == "Two-Sample t-test":
+                    row[label] = f"{n} per group"
+                else:
+                    row[label] = str(n)
+            records.append(row)
+        st.dataframe(pd.DataFrame(records), use_container_width=True, hide_index=True)
+
+    elif analysis_type == "Correlation (r)":
+        rs = [0.1, 0.15, 0.2, 0.3, 0.4, 0.5]
+        power_levels = [0.70, 0.80, 0.85, 0.90, 0.95]
+        z_a = stats.norm.ppf(1 - alpha / 2)
+        records = []
+        for r in rs:
+            z_r = np.arctanh(r)
+            row = {"|r|": r}
+            for pw in power_levels:
+                z_b = stats.norm.ppf(pw)
+                n = int(np.ceil(((z_a + z_b) / z_r) ** 2 + 3))
+                row[f"n (power={pw})"] = str(n)
+            records.append(row)
+        st.dataframe(pd.DataFrame(records), use_container_width=True, hide_index=True)
+
+    elif analysis_type == "Chi-Square Independence":
+        ws = [0.1, 0.2, 0.3, 0.5, 0.7]
+        power_levels = [0.70, 0.80, 0.85, 0.90, 0.95]
+        records = []
+        for w in ws:
+            row = {"Effect w": w}
+            for pw in power_levels:
+                for n in range(10, 10000):
+                    ncp = n * w ** 2
+                    crit = stats.chi2.ppf(1 - alpha, 1)
+                    power = 1 - stats.ncx2.cdf(crit, 1, ncp)
+                    if power >= pw:
+                        break
+                row[f"n (power={pw})"] = str(n)
+            records.append(row)
+        st.dataframe(pd.DataFrame(records), use_container_width=True, hide_index=True)
+
+    elif analysis_type == "Two-Proportions":
+        # Grid of |p1-p2| differences vs power
+        deltas = [0.05, 0.10, 0.15, 0.20, 0.30, 0.40]
+        power_levels = [0.70, 0.80, 0.85, 0.90, 0.95]
+        z_a = stats.norm.ppf(1 - alpha / 2)
+        records = []
+        for delta in deltas:
+            p1 = 0.5 + delta / 2
+            p2 = 0.5 - delta / 2
+            row = {"|p1-p2|": delta}
+            for pw in power_levels:
+                z_b = stats.norm.ppf(pw)
+                p_bar = (p1 + p2) / 2
+                n_val = ((z_a * np.sqrt(2 * p_bar * (1 - p_bar)) +
+                          z_b * np.sqrt(p1 * (1 - p1) + p2 * (1 - p2))) / (p1 - p2)) ** 2
+                row[f"n/group (power={pw})"] = str(int(np.ceil(n_val)))
+            records.append(row)
+        st.dataframe(pd.DataFrame(records), use_container_width=True, hide_index=True)
+        st.caption("Assumes symmetric proportions around 0.5 (worst-case variance).")
+
+    elif analysis_type == "Paired t-test":
+        effect_sizes = [0.2, 0.3, 0.5, 0.8, 1.0, 1.2, 1.5]
+        power_levels = [0.70, 0.80, 0.85, 0.90, 0.95]
+        z_a = stats.norm.ppf(1 - alpha / 2)
+        records = []
+        for es in effect_sizes:
+            row = {"Cohen's d": es}
+            for pw in power_levels:
+                z_b = stats.norm.ppf(pw)
+                # Paired: n = ((z_a + z_b)/d)^2 assuming rho=0.5 => factor 1
+                n_val = int(np.ceil(((z_a + z_b) / es) ** 2))
+                row[f"n pairs (power={pw})"] = str(max(n_val, 5))
+            records.append(row)
+        st.dataframe(pd.DataFrame(records), use_container_width=True, hide_index=True)
+        st.caption("Assumes correlation between pairs = 0.5. Actual n depends on pair correlation.")
+
+    else:
+        st.info("Lookup table is available for t-tests, proportions, correlation, paired t-test, and chi-square tests.")
 
 
 def _render_multiple_comparisons(df: pd.DataFrame):

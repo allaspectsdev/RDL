@@ -38,6 +38,7 @@ def render_regression(df: pd.DataFrame):
         "Logistic", "Curve Fitting", "Diagnostics",
         "GLM", "Robust & Quantile", "Mixed Models",
         "Regularized", "Nonlinear", "Profiler",
+        "Variable Selection",
     ])
 
     with tabs[0]:
@@ -64,6 +65,8 @@ def render_regression(df: pd.DataFrame):
         _render_nonlinear(df)
     with tabs[11]:
         _render_profiler(df)
+    with tabs[12]:
+        _render_variable_selection(df)
 
 
 def _render_simple_linear(df: pd.DataFrame):
@@ -180,7 +183,7 @@ def _render_simple_linear(df: pd.DataFrame):
 
 
 def _render_multiple_linear(df: pd.DataFrame):
-    """Multiple linear regression."""
+    """Multiple linear regression with optional WLS."""
     if not HAS_SM:
         empty_state("statsmodels required for multiple regression.", "Install with: pip install statsmodels")
         return
@@ -197,12 +200,58 @@ def _render_multiple_linear(df: pd.DataFrame):
         st.info("Select predictor variables.")
         return
 
+    # WLS option
+    use_wls = st.checkbox("Use Weighted Least Squares (WLS)", value=False, key="mlr_wls")
+    wls_weight_col = None
+    wls_method = None
+    if use_wls:
+        wls_method = st.selectbox(
+            "Weight source:",
+            ["Inverse Variance (automatic)"] + [c for c in num_cols if c != y_col and c not in x_cols],
+            key="mlr_wls_method",
+        )
+        if wls_method != "Inverse Variance (automatic)":
+            wls_weight_col = wls_method
+        help_tip("Weighted Least Squares", """
+WLS is used when residuals have non-constant variance (heteroscedasticity).
+- **Inverse Variance:** Weights are estimated from a preliminary OLS fit (1/fitted_values^2 of |residuals| regressed on predictors).
+- **Custom column:** Use a column of known weights (e.g., sample sizes, inverse measurement variance).
+Observations with higher weight have more influence on the fitted model.
+""")
+
     if st.button("Fit Model", key="fit_mlr"):
         data = df[[y_col] + x_cols].dropna()
+        if wls_weight_col:
+            data = df[[y_col] + x_cols + [wls_weight_col]].dropna()
+
         y = data[y_col].values
         X = sm.add_constant(data[x_cols].values)
         n = len(y)
-        model = sm.OLS(y, X).fit()
+
+        # Fit OLS first (always needed for comparison or as base)
+        ols_model = sm.OLS(y, X).fit()
+
+        if use_wls:
+            # Determine weights
+            if wls_method == "Inverse Variance (automatic)":
+                # Estimate weights from OLS residuals
+                abs_resid = np.abs(ols_model.resid)
+                # Regress |residuals| on X to get fitted variance proxy
+                resid_model = sm.OLS(abs_resid, X).fit()
+                fitted_var = resid_model.fittedvalues ** 2
+                # Avoid zero/negative weights
+                fitted_var = np.maximum(fitted_var, 1e-10)
+                weights = 1.0 / fitted_var
+            else:
+                weights = data[wls_weight_col].values.astype(float)
+                if (weights <= 0).any():
+                    st.warning("Weight column contains non-positive values. Replacing with small positive value.")
+                    weights = np.maximum(weights, 1e-10)
+
+            from statsmodels.regression.linear_model import WLS
+            model = WLS(y, X, weights=weights).fit()
+        else:
+            model = ols_model
 
         # --- Validation checks ---
         try:
@@ -219,7 +268,8 @@ def _render_multiple_linear(df: pd.DataFrame):
         except Exception:
             pass
 
-        section_header("Model Summary")
+        model_label = "WLS" if use_wls else "OLS"
+        section_header(f"Model Summary ({model_label})")
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("R²", f"{model.rsquared:.4f}")
         c2.metric("Adj R²", f"{model.rsquared_adj:.4f}")
@@ -245,6 +295,35 @@ def _render_multiple_linear(df: pd.DataFrame):
         st.dataframe(coef_df, use_container_width=True, hide_index=True)
 
         st.markdown(f"**AIC:** {model.aic:.2f}  |  **BIC:** {model.bic:.2f}  |  **RMSE:** {np.sqrt(model.mse_resid):.4f}")
+
+        # WLS vs OLS comparison
+        if use_wls:
+            with st.expander("WLS vs OLS Comparison"):
+                comp_df = pd.DataFrame({
+                    "Variable": coef_names,
+                    "OLS Coef": ols_model.params.round(6),
+                    "WLS Coef": model.params.round(6),
+                    "OLS SE": ols_model.bse.round(6),
+                    "WLS SE": model.bse.round(6),
+                    "OLS p-value": ols_model.pvalues.round(6),
+                    "WLS p-value": model.pvalues.round(6),
+                })
+                st.dataframe(comp_df, use_container_width=True, hide_index=True)
+
+                comp_metrics = pd.DataFrame({
+                    "Metric": ["R²", "Adj R²", "AIC", "BIC", "RMSE"],
+                    "OLS": [
+                        f"{ols_model.rsquared:.4f}", f"{ols_model.rsquared_adj:.4f}",
+                        f"{ols_model.aic:.2f}", f"{ols_model.bic:.2f}",
+                        f"{np.sqrt(ols_model.mse_resid):.4f}",
+                    ],
+                    "WLS": [
+                        f"{model.rsquared:.4f}", f"{model.rsquared_adj:.4f}",
+                        f"{model.aic:.2f}", f"{model.bic:.2f}",
+                        f"{np.sqrt(model.mse_resid):.4f}",
+                    ],
+                })
+                st.dataframe(comp_metrics, use_container_width=True, hide_index=True)
 
         # VIF
         section_header("Variance Inflation Factors")
@@ -393,23 +472,51 @@ def _render_polynomial(df: pd.DataFrame):
 
 
 def _render_logistic(df: pd.DataFrame):
-    """Logistic regression."""
+    """Logistic regression - Binary, Multinomial, Ordinal."""
     num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
     all_cols = df.columns.tolist()
 
-    # Find potential binary targets
-    binary_cols = [c for c in all_cols if df[c].nunique() == 2]
-    if not binary_cols:
-        empty_state("No binary target variable found.", "Need a column with exactly 2 unique values for logistic regression.")
+    # Find potential target columns (binary or multiclass)
+    target_cols = [c for c in all_cols if 2 <= df[c].nunique() <= 50]
+    if not target_cols:
+        empty_state("No suitable target variable found.", "Need a column with 2-50 unique values for logistic regression.")
         return
 
-    target = st.selectbox("Target (binary):", binary_cols, key="log_target")
+    target = st.selectbox("Target variable:", target_cols, key="log_target")
+    n_classes = df[target].nunique()
+
+    # Determine logistic regression type
+    if n_classes == 2:
+        log_type = st.radio("Model type:", ["Binary (2 classes)"], key="log_type", horizontal=True)
+    else:
+        log_type = st.radio(
+            "Model type:",
+            ["Binary (2 classes)", "Multinomial (3+ classes)", "Ordinal (ordered classes)"],
+            index=1,
+            key="log_type",
+            horizontal=True,
+        )
+        if log_type == "Binary (2 classes)" and n_classes > 2:
+            st.warning(f"Target has {n_classes} classes. Binary logistic requires exactly 2 classes. Consider Multinomial or Ordinal.")
+            return
+
     features = st.multiselect("Features:", [c for c in num_cols if c != target], key="log_features")
 
     if not features:
         st.info("Select feature variables.")
         return
 
+    # ---- Multinomial Logistic ----
+    if log_type == "Multinomial (3+ classes)":
+        _render_multinomial_logistic(df, target, features, n_classes)
+        return
+
+    # ---- Ordinal Logistic ----
+    if log_type == "Ordinal (ordered classes)":
+        _render_ordinal_logistic(df, target, features, n_classes)
+        return
+
+    # ---- Binary Logistic (original code) ----
     if st.button("Fit Model", key="fit_log"):
         from sklearn.linear_model import LogisticRegression
         from sklearn.metrics import confusion_matrix, classification_report, roc_curve, auc
@@ -508,6 +615,262 @@ def _render_logistic(df: pd.DataFrame):
         fig_roc.update_layout(title="ROC Curve (Test Set)", xaxis_title="False Positive Rate",
                               yaxis_title="True Positive Rate", height=400)
         st.plotly_chart(fig_roc, use_container_width=True)
+
+
+def _render_multinomial_logistic(df, target, features, n_classes):
+    """Multinomial logistic regression for 3+ classes."""
+    if not HAS_SM:
+        empty_state("statsmodels required for multinomial logistic regression.", "Install with: pip install statsmodels")
+        return
+
+    if st.button("Fit Multinomial Model", key="fit_mnlogit"):
+        from sklearn.preprocessing import LabelEncoder
+        from sklearn.metrics import confusion_matrix, classification_report, accuracy_score
+
+        data = df[[target] + features].dropna()
+        X = data[features].values
+        y_raw = data[target]
+
+        # Encode target
+        le = LabelEncoder()
+        y = le.fit_transform(y_raw)
+        classes = le.classes_
+
+        # --- Validation checks ---
+        try:
+            checks = [check_sample_size(len(y), "regression")]
+            min_class_n = pd.Series(y).value_counts().min()
+            if min_class_n < 10:
+                from modules.validation import ValidationCheck
+                checks.append(ValidationCheck(
+                    name="Min class size", status="warn",
+                    detail=f"Smallest class has {min_class_n} observations",
+                    suggestion="Consider merging rare classes or collecting more data",
+                ))
+            validation_panel(checks)
+        except Exception:
+            pass
+
+        X_const = sm.add_constant(X)
+
+        try:
+            with st.spinner("Fitting multinomial logistic model..."):
+                from statsmodels.discrete.discrete_model import MNLogit
+                mnlogit_model = MNLogit(y, X_const).fit(disp=0, method="newton", maxiter=100)
+
+            section_header("Multinomial Logistic Regression Summary")
+
+            # Model fit metrics
+            c1, c2, c3 = st.columns(3)
+            c1.metric("AIC", f"{mnlogit_model.aic:.2f}")
+            c2.metric("BIC", f"{mnlogit_model.bic:.2f}")
+            c3.metric("Pseudo R²", f"{mnlogit_model.prsquared:.4f}")
+
+            try:
+                interpretation_card(interpret_r_squared(mnlogit_model.prsquared))
+            except Exception:
+                pass
+
+            # Coefficients per class (reference class is 0)
+            section_header("Coefficients by Class")
+            coef_names = ["Intercept"] + features
+            params = mnlogit_model.params
+            pvalues = mnlogit_model.pvalues
+            bse = mnlogit_model.bse
+
+            # MNLogit params shape: (n_features+1, n_classes-1)
+            for j in range(params.shape[1]):
+                class_label = classes[j + 1] if j + 1 < len(classes) else f"Class {j + 1}"
+                ref_label = classes[0]
+                with st.expander(f"Class '{class_label}' vs Reference '{ref_label}'", expanded=(j == 0)):
+                    coef_df = pd.DataFrame({
+                        "Variable": coef_names,
+                        "Coefficient": params[:, j],
+                        "Std Error": bse[:, j],
+                        "z-value": mnlogit_model.tvalues[:, j],
+                        "p-value": pvalues[:, j],
+                        "Odds Ratio": np.exp(params[:, j]),
+                    }).round(6)
+                    st.dataframe(coef_df, use_container_width=True, hide_index=True)
+
+            # Predicted probabilities and confusion matrix
+            section_header("Classification Performance")
+            y_pred_probs = mnlogit_model.predict(X_const)
+            y_pred = y_pred_probs.argmax(axis=1)
+
+            accuracy = accuracy_score(y, y_pred)
+            st.metric("Training Accuracy", f"{accuracy:.4f}")
+
+            # Multi-class confusion matrix
+            cm = confusion_matrix(y, y_pred)
+            fig_cm = px.imshow(cm, text_auto=True, color_continuous_scale="Blues",
+                               x=[str(c) for c in classes], y=[str(c) for c in classes],
+                               labels=dict(x="Predicted", y="Actual"),
+                               title="Confusion Matrix")
+            st.plotly_chart(fig_cm, use_container_width=True)
+
+            # Classification report
+            report = classification_report(y, y_pred, target_names=[str(c) for c in classes], output_dict=True)
+            st.dataframe(pd.DataFrame(report).transpose().round(4), use_container_width=True)
+
+            # Predicted probability plot (for first feature)
+            if len(features) >= 1:
+                section_header("Predicted Probabilities")
+                plot_feature = st.selectbox("Plot probabilities vs:", features, key="mnlogit_plot_feat")
+                feat_idx = features.index(plot_feature)
+
+                x_range = np.linspace(X[:, feat_idx].min(), X[:, feat_idx].max(), 100)
+                # Hold other features at their means
+                X_plot = np.tile(X.mean(axis=0), (100, 1))
+                X_plot[:, feat_idx] = x_range
+                X_plot_const = sm.add_constant(X_plot)
+                probs = mnlogit_model.predict(X_plot_const)
+
+                fig = go.Figure()
+                for j in range(probs.shape[1]):
+                    class_label = str(classes[j])
+                    fig.add_trace(go.Scatter(x=x_range, y=probs[:, j], mode="lines",
+                                             name=class_label, line=dict(width=2)))
+                fig.update_layout(title=f"Predicted Probabilities vs {plot_feature}",
+                                  xaxis_title=plot_feature, yaxis_title="Probability",
+                                  height=450)
+                st.plotly_chart(fig, use_container_width=True)
+
+        except Exception as e:
+            st.error(f"Multinomial logistic regression failed: {e}")
+
+
+def _render_ordinal_logistic(df, target, features, n_classes):
+    """Ordinal logistic regression for ordered categories."""
+    if not HAS_SM:
+        empty_state("statsmodels required for ordinal logistic regression.", "Install with: pip install statsmodels")
+        return
+
+    # Let user specify the ordering
+    unique_vals = sorted(df[target].dropna().unique())
+    st.info(f"Target has {n_classes} ordered categories. Verify the ordering below.")
+    st.write(f"Current order: {unique_vals}")
+
+    distr = st.selectbox("Distribution:", ["logit", "probit"], key="ordinal_dist")
+
+    if st.button("Fit Ordinal Model", key="fit_ordinal"):
+        from sklearn.preprocessing import LabelEncoder
+        from sklearn.metrics import confusion_matrix, classification_report, accuracy_score
+
+        data = df[[target] + features].dropna()
+        X = data[features].values
+        y_raw = data[target]
+
+        # Encode target to ordered integers
+        le = LabelEncoder()
+        le.classes_ = np.array(unique_vals)
+        y = le.transform(y_raw)
+        classes = le.classes_
+
+        # --- Validation checks ---
+        try:
+            checks = [check_sample_size(len(y), "regression")]
+            validation_panel(checks)
+        except Exception:
+            pass
+
+        try:
+            with st.spinner("Fitting ordinal logistic model..."):
+                from statsmodels.miscmodels.ordinal_model import OrderedModel
+                ordinal_model = OrderedModel(y, X, distr=distr).fit(method="bfgs", disp=0)
+
+            section_header("Ordinal Logistic Regression Summary")
+
+            # Model fit metrics
+            c1, c2, c3 = st.columns(3)
+            c1.metric("AIC", f"{ordinal_model.aic:.2f}")
+            c2.metric("BIC", f"{ordinal_model.bic:.2f}")
+            pseudo_r2 = 1 - ordinal_model.llf / ordinal_model.llnull if hasattr(ordinal_model, "llnull") and ordinal_model.llnull != 0 else 0
+            c3.metric("Pseudo R²", f"{pseudo_r2:.4f}")
+
+            try:
+                interpretation_card(interpret_r_squared(pseudo_r2))
+            except Exception:
+                pass
+
+            # Coefficients
+            section_header("Coefficients")
+            # OrderedModel params: first len(features) are coefficients, rest are thresholds
+            n_coefs = len(features)
+            coef_params = ordinal_model.params[:n_coefs]
+            coef_bse = ordinal_model.bse[:n_coefs]
+            coef_pvalues = ordinal_model.pvalues[:n_coefs]
+            coef_tvalues = ordinal_model.tvalues[:n_coefs]
+
+            coef_df = pd.DataFrame({
+                "Variable": features,
+                "Coefficient": coef_params,
+                "Std Error": coef_bse,
+                "z-value": coef_tvalues,
+                "p-value": coef_pvalues,
+            }).round(6)
+            st.dataframe(coef_df, use_container_width=True, hide_index=True)
+
+            # Threshold parameters
+            section_header("Threshold Parameters")
+            n_thresholds = len(ordinal_model.params) - n_coefs
+            threshold_params = ordinal_model.params[n_coefs:]
+            threshold_bse = ordinal_model.bse[n_coefs:]
+            threshold_names = [f"Threshold {i+1} ({classes[i]}|{classes[i+1]})" for i in range(n_thresholds)]
+
+            thresh_df = pd.DataFrame({
+                "Threshold": threshold_names,
+                "Estimate": threshold_params,
+                "Std Error": threshold_bse,
+            }).round(6)
+            st.dataframe(thresh_df, use_container_width=True, hide_index=True)
+
+            # Predicted cumulative probabilities
+            section_header("Classification Performance")
+            y_pred_probs = ordinal_model.predict()
+            y_pred = y_pred_probs.argmax(axis=1)
+
+            accuracy = accuracy_score(y, y_pred)
+            st.metric("Training Accuracy", f"{accuracy:.4f}")
+
+            # Confusion matrix
+            cm = confusion_matrix(y, y_pred)
+            fig_cm = px.imshow(cm, text_auto=True, color_continuous_scale="Blues",
+                               x=[str(c) for c in classes], y=[str(c) for c in classes],
+                               labels=dict(x="Predicted", y="Actual"),
+                               title="Confusion Matrix")
+            st.plotly_chart(fig_cm, use_container_width=True)
+
+            # Classification report
+            report = classification_report(y, y_pred, target_names=[str(c) for c in classes], output_dict=True)
+            st.dataframe(pd.DataFrame(report).transpose().round(4), use_container_width=True)
+
+            # Predicted cumulative probability plot
+            if len(features) >= 1:
+                section_header("Predicted Cumulative Probabilities")
+                plot_feature = st.selectbox("Plot vs:", features, key="ordinal_plot_feat")
+                feat_idx = features.index(plot_feature)
+
+                x_range = np.linspace(X[:, feat_idx].min(), X[:, feat_idx].max(), 100)
+                X_plot = np.tile(X.mean(axis=0), (100, 1))
+                X_plot[:, feat_idx] = x_range
+
+                # Predict probabilities for each category
+                probs = ordinal_model.model.predict(ordinal_model.params, X_plot)
+
+                fig = go.Figure()
+                cum_prob = np.zeros(100)
+                for j in range(probs.shape[1]):
+                    cum_prob = cum_prob + probs[:, j]
+                    fig.add_trace(go.Scatter(x=x_range, y=cum_prob, mode="lines",
+                                             name=f"P(Y <= {classes[j]})", line=dict(width=2)))
+                fig.update_layout(title=f"Cumulative Probabilities vs {plot_feature}",
+                                  xaxis_title=plot_feature, yaxis_title="Cumulative Probability",
+                                  height=450)
+                st.plotly_chart(fig, use_container_width=True)
+
+        except Exception as e:
+            st.error(f"Ordinal logistic regression failed: {e}")
 
 
 def _render_curve_fitting(df: pd.DataFrame):
@@ -1717,3 +2080,481 @@ Interactively explore how each predictor affects the response:
         fig.update_layout(height=350 * rows_plot,
                           title_text="Marginal Effect Plots (with 95% CI)")
         st.plotly_chart(fig, use_container_width=True)
+
+
+# ===================================================================
+# Tab 13 -- Variable Selection (Stepwise & Best Subsets)
+# ===================================================================
+
+def _render_variable_selection(df: pd.DataFrame):
+    """Stepwise and best subsets regression for variable selection."""
+    if not HAS_SM:
+        empty_state("statsmodels required for variable selection.", "Install with: pip install statsmodels")
+        return
+
+    num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    if len(num_cols) < 3:
+        empty_state("Need at least 3 numeric columns.", "Upload a dataset with multiple numeric predictors.")
+        return
+
+    section_header("Variable Selection", "Identify the best subset of predictors using stepwise or exhaustive search methods.")
+    help_tip("Variable Selection Methods", """
+- **Forward Selection:** Start with no predictors. Add the one that improves the criterion most at each step.
+- **Backward Elimination:** Start with all predictors. Remove the worst one at each step.
+- **Bidirectional Stepwise:** After each forward addition, check if any existing predictor should be removed.
+- **Best Subsets:** Exhaustively evaluate all 2^p predictor combinations (limited to p <= 15).
+""")
+
+    y_col = st.selectbox("Dependent variable (Y):", num_cols, key="vs_y")
+    candidate_cols = [c for c in num_cols if c != y_col]
+    x_cols = st.multiselect("Candidate predictors:", candidate_cols, default=candidate_cols[:min(8, len(candidate_cols))], key="vs_x")
+
+    if len(x_cols) < 2:
+        st.info("Select at least 2 candidate predictors.")
+        return
+
+    p = len(x_cols)
+    methods = ["Forward Selection", "Backward Elimination", "Bidirectional Stepwise"]
+    if p <= 15:
+        methods.append("Best Subsets")
+
+    c1, c2 = st.columns(2)
+    method = c1.selectbox("Method:", methods, key="vs_method")
+    criterion = c2.selectbox("Criterion:", ["AIC", "BIC", "Adjusted R²", "p-value threshold"], key="vs_criterion")
+
+    p_enter = 0.05
+    p_remove = 0.10
+    if criterion == "p-value threshold":
+        c3, c4 = st.columns(2)
+        p_enter = c3.slider("Entry p-value:", 0.001, 0.20, 0.05, 0.005, key="vs_p_enter")
+        p_remove = c4.slider("Removal p-value:", 0.01, 0.30, 0.10, 0.005, key="vs_p_remove")
+
+    if st.button("Run Variable Selection", key="vs_run"):
+        data = df[[y_col] + x_cols].dropna()
+        y = data[y_col].values
+        X_all = data[x_cols]
+        n = len(y)
+
+        if n < p + 2:
+            st.error(f"Not enough observations ({n}) for {p} predictors.")
+            return
+
+        def _fit_ols_subset(predictors):
+            """Fit OLS with a given subset and return model."""
+            if not predictors:
+                X_sub = np.ones((n, 1))
+            else:
+                X_sub = sm.add_constant(X_all[list(predictors)].values)
+            return sm.OLS(y, X_sub).fit()
+
+        def _get_criterion(model, predictors, n_total_predictors):
+            """Get the selected criterion value for a model."""
+            if criterion == "AIC":
+                return model.aic
+            elif criterion == "BIC":
+                return model.bic
+            elif criterion == "Adjusted R²":
+                return -model.rsquared_adj  # Negate so lower is better
+            else:  # p-value threshold - return max p-value
+                if not predictors:
+                    return 0
+                return max(model.pvalues[1:])  # Skip intercept
+
+        with st.spinner("Running variable selection..."):
+            step_log = []
+
+            if method == "Forward Selection":
+                selected = []
+                remaining = list(x_cols)
+                step_criteria = []
+
+                # Null model
+                null_model = _fit_ols_subset([])
+                step_criteria.append({"Step": 0, "Action": "Start (null model)", "Variable": "-",
+                                      "AIC": null_model.aic, "BIC": null_model.bic,
+                                      "Adj R²": 0.0, "n_predictors": 0})
+
+                for step in range(p):
+                    best_crit = float("inf")
+                    best_var = None
+                    best_model = None
+
+                    for var in remaining:
+                        trial = selected + [var]
+                        trial_model = _fit_ols_subset(trial)
+                        crit_val = _get_criterion(trial_model, trial, p)
+
+                        if crit_val < best_crit:
+                            best_crit = crit_val
+                            best_var = var
+                            best_model = trial_model
+
+                    if best_var is None:
+                        break
+
+                    # Check stopping condition
+                    if criterion == "p-value threshold":
+                        # Check if the new variable's p-value is below threshold
+                        var_idx = selected + [best_var]
+                        var_pos = len(var_idx)  # Position in params (1-indexed after intercept)
+                        if best_model.pvalues[var_pos] > p_enter:
+                            step_log.append(f"Step {step+1}: No variable meets p < {p_enter}. Stopping.")
+                            break
+                    else:
+                        # Check if criterion improved
+                        current_model = _fit_ols_subset(selected) if selected else null_model
+                        current_crit = _get_criterion(current_model, selected, p)
+                        if best_crit >= current_crit:
+                            step_log.append(f"Step {step+1}: No improvement in {criterion}. Stopping.")
+                            break
+
+                    selected.append(best_var)
+                    remaining.remove(best_var)
+                    step_log.append(f"Step {step+1}: ADD '{best_var}' (AIC={best_model.aic:.2f}, Adj R²={best_model.rsquared_adj:.4f})")
+                    step_criteria.append({
+                        "Step": step + 1, "Action": f"Add '{best_var}'", "Variable": best_var,
+                        "AIC": round(best_model.aic, 2), "BIC": round(best_model.bic, 2),
+                        "Adj R²": round(best_model.rsquared_adj, 4),
+                        "n_predictors": len(selected),
+                    })
+
+                final_predictors = selected
+                criteria_df = pd.DataFrame(step_criteria)
+
+            elif method == "Backward Elimination":
+                selected = list(x_cols)
+                step_criteria = []
+
+                full_model = _fit_ols_subset(selected)
+                step_criteria.append({
+                    "Step": 0, "Action": "Start (full model)", "Variable": "-",
+                    "AIC": full_model.aic, "BIC": full_model.bic,
+                    "Adj R²": round(full_model.rsquared_adj, 4),
+                    "n_predictors": len(selected),
+                })
+
+                for step in range(p):
+                    if len(selected) == 0:
+                        break
+
+                    current_model = _fit_ols_subset(selected)
+
+                    if criterion == "p-value threshold":
+                        # Find the predictor with highest p-value
+                        pvals = current_model.pvalues[1:]  # Skip intercept
+                        worst_idx = np.argmax(pvals)
+                        worst_pval = pvals[worst_idx]
+                        if worst_pval <= p_remove:
+                            step_log.append(f"Step {step+1}: All p-values <= {p_remove}. Stopping.")
+                            break
+                        worst_var = selected[worst_idx]
+                    else:
+                        best_crit = float("inf")
+                        worst_var = None
+                        for var in selected:
+                            trial = [v for v in selected if v != var]
+                            if not trial:
+                                trial_model = _fit_ols_subset([])
+                            else:
+                                trial_model = _fit_ols_subset(trial)
+                            crit_val = _get_criterion(trial_model, trial, p)
+                            if crit_val < best_crit:
+                                best_crit = crit_val
+                                worst_var = var
+
+                        if worst_var is None:
+                            break
+
+                        # Check if removing improves criterion
+                        current_crit = _get_criterion(current_model, selected, p)
+                        if best_crit >= current_crit:
+                            step_log.append(f"Step {step+1}: No improvement from removal. Stopping.")
+                            break
+
+                    selected.remove(worst_var)
+                    new_model = _fit_ols_subset(selected) if selected else _fit_ols_subset([])
+                    step_log.append(f"Step {step+1}: REMOVE '{worst_var}' (AIC={new_model.aic:.2f}, Adj R²={new_model.rsquared_adj:.4f})")
+                    step_criteria.append({
+                        "Step": step + 1, "Action": f"Remove '{worst_var}'", "Variable": worst_var,
+                        "AIC": round(new_model.aic, 2), "BIC": round(new_model.bic, 2),
+                        "Adj R²": round(new_model.rsquared_adj, 4),
+                        "n_predictors": len(selected),
+                    })
+
+                final_predictors = selected
+                criteria_df = pd.DataFrame(step_criteria)
+
+            elif method == "Bidirectional Stepwise":
+                selected = []
+                remaining = list(x_cols)
+                step_criteria = []
+
+                null_model = _fit_ols_subset([])
+                step_criteria.append({"Step": 0, "Action": "Start (null model)", "Variable": "-",
+                                      "AIC": null_model.aic, "BIC": null_model.bic,
+                                      "Adj R²": 0.0, "n_predictors": 0})
+
+                step_count = 0
+                for _ in range(2 * p):
+                    # Forward step: try adding
+                    best_add_crit = float("inf")
+                    best_add_var = None
+                    best_add_model = None
+
+                    for var in remaining:
+                        trial = selected + [var]
+                        trial_model = _fit_ols_subset(trial)
+                        crit_val = _get_criterion(trial_model, trial, p)
+                        if crit_val < best_add_crit:
+                            best_add_crit = crit_val
+                            best_add_var = var
+                            best_add_model = trial_model
+
+                    added = False
+                    if best_add_var is not None:
+                        current_model = _fit_ols_subset(selected) if selected else null_model
+                        current_crit = _get_criterion(current_model, selected, p)
+
+                        should_add = False
+                        if criterion == "p-value threshold":
+                            trial = selected + [best_add_var]
+                            trial_model = _fit_ols_subset(trial)
+                            var_pos = len(trial)
+                            if trial_model.pvalues[var_pos] < p_enter:
+                                should_add = True
+                        else:
+                            if best_add_crit < current_crit:
+                                should_add = True
+
+                        if should_add:
+                            selected.append(best_add_var)
+                            remaining.remove(best_add_var)
+                            added = True
+                            step_count += 1
+                            m = _fit_ols_subset(selected)
+                            step_log.append(f"Step {step_count}: ADD '{best_add_var}' (AIC={m.aic:.2f}, Adj R²={m.rsquared_adj:.4f})")
+                            step_criteria.append({
+                                "Step": step_count, "Action": f"Add '{best_add_var}'", "Variable": best_add_var,
+                                "AIC": round(m.aic, 2), "BIC": round(m.bic, 2),
+                                "Adj R²": round(m.rsquared_adj, 4),
+                                "n_predictors": len(selected),
+                            })
+
+                    # Backward step: try removing (only if we have predictors)
+                    removed = False
+                    if len(selected) > 1:
+                        current_model = _fit_ols_subset(selected)
+                        current_crit = _get_criterion(current_model, selected, p)
+
+                        best_rem_crit = float("inf")
+                        best_rem_var = None
+
+                        for var in selected:
+                            trial = [v for v in selected if v != var]
+                            trial_model = _fit_ols_subset(trial)
+                            crit_val = _get_criterion(trial_model, trial, p)
+                            if crit_val < best_rem_crit:
+                                best_rem_crit = crit_val
+                                best_rem_var = var
+
+                        should_remove = False
+                        if criterion == "p-value threshold":
+                            pvals = current_model.pvalues[1:]
+                            worst_idx = np.argmax(pvals)
+                            if pvals[worst_idx] > p_remove:
+                                best_rem_var = selected[worst_idx]
+                                should_remove = True
+                        else:
+                            if best_rem_crit < current_crit:
+                                should_remove = True
+
+                        if should_remove and best_rem_var is not None:
+                            selected.remove(best_rem_var)
+                            remaining.append(best_rem_var)
+                            removed = True
+                            step_count += 1
+                            m = _fit_ols_subset(selected) if selected else _fit_ols_subset([])
+                            step_log.append(f"Step {step_count}: REMOVE '{best_rem_var}' (AIC={m.aic:.2f}, Adj R²={m.rsquared_adj:.4f})")
+                            step_criteria.append({
+                                "Step": step_count, "Action": f"Remove '{best_rem_var}'", "Variable": best_rem_var,
+                                "AIC": round(m.aic, 2), "BIC": round(m.bic, 2),
+                                "Adj R²": round(m.rsquared_adj, 4),
+                                "n_predictors": len(selected),
+                            })
+
+                    if not added and not removed:
+                        step_log.append("No further improvements. Stopping.")
+                        break
+
+                final_predictors = selected
+                criteria_df = pd.DataFrame(step_criteria)
+
+            else:  # Best Subsets
+                from itertools import combinations
+
+                all_results = []
+                best_by_size = {}
+
+                total_combos = sum(1 for k in range(1, p + 1) for _ in combinations(x_cols, k))
+                progress_bar = st.progress(0)
+                combo_count = 0
+
+                for k in range(1, p + 1):
+                    for combo in combinations(x_cols, k):
+                        combo_count += 1
+                        progress_bar.progress(min(combo_count / total_combos, 1.0))
+
+                        predictors = list(combo)
+                        model_k = _fit_ols_subset(predictors)
+
+                        # Mallows' Cp
+                        full_model = _fit_ols_subset(x_cols)
+                        mse_full = full_model.mse_resid
+                        sse_p = np.sum(model_k.resid ** 2)
+                        cp = sse_p / mse_full - n + 2 * (k + 1)
+
+                        result = {
+                            "Predictors": ", ".join(predictors),
+                            "n_predictors": k,
+                            "R²": round(model_k.rsquared, 4),
+                            "Adj R²": round(model_k.rsquared_adj, 4),
+                            "AIC": round(model_k.aic, 2),
+                            "BIC": round(model_k.bic, 2),
+                            "Cp": round(cp, 2),
+                        }
+                        all_results.append(result)
+
+                        # Track best per size
+                        crit_val = _get_criterion(model_k, predictors, p)
+                        if k not in best_by_size or crit_val < best_by_size[k]["crit"]:
+                            best_by_size[k] = {"crit": crit_val, "predictors": predictors, "result": result}
+
+                progress_bar.empty()
+
+                # Find overall best
+                overall_best = min(best_by_size.values(), key=lambda x: x["crit"])
+                final_predictors = overall_best["predictors"]
+
+                all_results_df = pd.DataFrame(all_results)
+
+                # Show best subset per size
+                section_header("Best Subset per Number of Predictors")
+                best_df = pd.DataFrame([v["result"] for v in best_by_size.values()])
+                st.dataframe(best_df, use_container_width=True, hide_index=True)
+
+                # Full results in expander
+                with st.expander(f"All {len(all_results)} Model Combinations"):
+                    st.dataframe(all_results_df.sort_values("AIC"), use_container_width=True, hide_index=True)
+
+                # Criterion vs number of predictors plot
+                section_header("Criterion vs Number of Predictors")
+                crit_col = criterion if criterion in ["AIC", "BIC"] else "Adj R²"
+                if crit_col not in all_results_df.columns:
+                    crit_col = "AIC"
+
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(
+                    x=all_results_df["n_predictors"], y=all_results_df[crit_col],
+                    mode="markers", marker=dict(size=5, opacity=0.3, color="#6366f1"),
+                    name="All subsets",
+                ))
+                # Highlight best per size
+                best_x = [v["result"]["n_predictors"] for v in best_by_size.values()]
+                best_y = [v["result"][crit_col] for v in best_by_size.values()]
+                fig.add_trace(go.Scatter(
+                    x=best_x, y=best_y,
+                    mode="markers+lines", marker=dict(size=10, color="red", symbol="star"),
+                    line=dict(color="red", width=2), name="Best subset",
+                ))
+                fig.update_layout(title=f"{crit_col} vs Number of Predictors",
+                                  xaxis_title="Number of Predictors", yaxis_title=crit_col,
+                                  height=450)
+                st.plotly_chart(fig, use_container_width=True)
+
+                # Mallows' Cp plot
+                fig_cp = go.Figure()
+                fig_cp.add_trace(go.Scatter(
+                    x=all_results_df["n_predictors"], y=all_results_df["Cp"],
+                    mode="markers", marker=dict(size=5, opacity=0.3, color="#6366f1"),
+                    name="All subsets",
+                ))
+                # Reference line Cp = p
+                cp_ref = np.arange(1, p + 1)
+                fig_cp.add_trace(go.Scatter(x=cp_ref, y=cp_ref, mode="lines",
+                                             line=dict(color="red", dash="dash"), name="Cp = p"))
+                fig_cp.update_layout(title="Mallows' Cp vs Number of Predictors",
+                                      xaxis_title="Number of Predictors", yaxis_title="Mallows' Cp",
+                                      height=400)
+                st.plotly_chart(fig_cp, use_container_width=True)
+
+                criteria_df = None  # Already shown above
+
+        # Step-by-step log (for stepwise methods)
+        if step_log:
+            with st.expander("Step-by-Step Log", expanded=True):
+                for entry in step_log:
+                    st.write(entry)
+
+        # Criterion at each step (for stepwise methods)
+        if method != "Best Subsets" and criteria_df is not None and len(criteria_df) > 1:
+            section_header("Criterion at Each Step")
+            st.dataframe(criteria_df, use_container_width=True, hide_index=True)
+
+            fig_step = go.Figure()
+            fig_step.add_trace(go.Scatter(
+                x=criteria_df["Step"], y=criteria_df["AIC"],
+                mode="lines+markers", name="AIC", line=dict(width=2),
+            ))
+            fig_step.add_trace(go.Scatter(
+                x=criteria_df["Step"], y=criteria_df["BIC"],
+                mode="lines+markers", name="BIC", line=dict(width=2),
+            ))
+            fig_step.update_layout(title="Information Criteria at Each Step",
+                                   xaxis_title="Step", yaxis_title="Criterion Value",
+                                   height=400)
+            st.plotly_chart(fig_step, use_container_width=True)
+
+        # Final model summary
+        if final_predictors:
+            section_header("Selected Model Summary")
+            st.write(f"**Selected predictors ({len(final_predictors)}):** {', '.join(final_predictors)}")
+
+            final_model = _fit_ols_subset(final_predictors)
+
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("R²", f"{final_model.rsquared:.4f}")
+            c2.metric("Adj R²", f"{final_model.rsquared_adj:.4f}")
+            c3.metric("AIC", f"{final_model.aic:.2f}")
+            c4.metric("BIC", f"{final_model.bic:.2f}")
+
+            try:
+                interpretation_card(interpret_r_squared(final_model.rsquared, final_model.rsquared_adj))
+            except Exception:
+                pass
+
+            # Coefficients table with VIF
+            coef_names = ["Intercept"] + final_predictors
+            coef_df = pd.DataFrame({
+                "Variable": coef_names,
+                "Coefficient": final_model.params,
+                "Std Error": final_model.bse,
+                "t-value": final_model.tvalues,
+                "p-value": final_model.pvalues,
+            }).round(6)
+
+            # Add VIF for selected predictors
+            if len(final_predictors) > 1:
+                X_selected = X_all[final_predictors].values
+                vif_vals = [np.nan]  # Intercept
+                for i in range(X_selected.shape[1]):
+                    try:
+                        vif_vals.append(round(variance_inflation_factor(X_selected, i), 4))
+                    except Exception:
+                        vif_vals.append(float("inf"))
+                coef_df["VIF"] = vif_vals
+
+            st.dataframe(coef_df, use_container_width=True, hide_index=True)
+
+            st.markdown(f"**RMSE:** {np.sqrt(final_model.mse_resid):.4f}")
+        else:
+            st.warning("No predictors were selected. The null model (intercept only) was chosen.")

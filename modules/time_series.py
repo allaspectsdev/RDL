@@ -27,6 +27,12 @@ try:
 except ImportError:
     HAS_SM = False
 
+try:
+    import ruptures as rpt
+    HAS_RUPTURES = True
+except ImportError:
+    HAS_RUPTURES = False
+
 
 @st.cache_data(show_spinner="Searching for best ARIMA order...")
 def _auto_arima_search(values, index):
@@ -62,7 +68,7 @@ def render_time_series(df: pd.DataFrame):
     tabs = st.tabs([
         "Exploration", "Decomposition", "Stationarity",
         "ACF/PACF", "Smoothing", "ARIMA/SARIMA", "Forecast Comparison",
-        "Multiple Series", "Spectral Analysis",
+        "Multiple Series", "Spectral Analysis", "Change Point Detection",
     ])
 
     with tabs[0]:
@@ -83,6 +89,8 @@ def render_time_series(df: pd.DataFrame):
         _render_multiple_series(df)
     with tabs[8]:
         _render_spectral(df)
+    with tabs[9]:
+        _render_change_point(df)
 
 
 def _get_ts_data(df, date_col, value_col):
@@ -963,3 +971,277 @@ Analyzes the frequency content of a time series:
                 "Power": peak_powers[:5],
             }).round(4)
             st.dataframe(peaks_df, use_container_width=True, hide_index=True)
+
+
+# ===================================================================
+# Tab 10 -- Change Point Detection
+# ===================================================================
+
+def _binary_segmentation(values, min_size, penalty):
+    """Binary segmentation for change point detection.
+
+    Cost function: sum of squared deviations from segment mean.
+    Recursively splits at the point that maximises cost reduction
+    until the reduction falls below *penalty* or segments are smaller
+    than *min_size*.
+
+    Returns a sorted list of change-point indices (exclusive end of segment).
+    """
+    n = len(values)
+    change_points = []
+
+    def _segment_cost(segment):
+        if len(segment) == 0:
+            return 0.0
+        return np.sum((segment - segment.mean()) ** 2)
+
+    def _search(start, end):
+        if end - start < 2 * min_size:
+            return
+        seg = values[start:end]
+        base_cost = _segment_cost(seg)
+        best_gain = -np.inf
+        best_split = None
+
+        for k in range(start + min_size, end - min_size + 1):
+            left_cost = _segment_cost(values[start:k])
+            right_cost = _segment_cost(values[k:end])
+            gain = base_cost - (left_cost + right_cost)
+            if gain > best_gain:
+                best_gain = gain
+                best_split = k
+
+        if best_split is not None and best_gain > penalty:
+            change_points.append(best_split)
+            _search(start, best_split)
+            _search(best_split, end)
+
+    _search(0, n)
+    return sorted(set(change_points))
+
+
+def _render_change_point(df: pd.DataFrame):
+    """Change point detection using CUSUM, Binary Segmentation, or PELT."""
+    section_header(
+        "Change Point Detection",
+        "Identify points in a time series where the statistical properties change.",
+    )
+    help_tip("About Change Point Detection", """
+**Change point detection** finds locations in a time series where the underlying
+data-generating process shifts (e.g., a change in mean, variance, or trend).
+
+**Methods available:**
+
+- **CUSUM (Cumulative Sum):** Tracks the cumulative deviation of observations from the
+  overall mean. When the CUSUM crosses a threshold, a change point is flagged.
+  Good for detecting sustained shifts in the mean.
+
+- **Binary Segmentation:** Recursively splits the series at the point that gives the
+  largest reduction in the sum-of-squared-errors cost. A penalty parameter controls
+  the trade-off between fit and number of change points.
+
+- **PELT (Pruned Exact Linear Time):** Available when the *ruptures* library is
+  installed. An exact method that is efficient for long series. Supports multiple
+  cost models (L2, L1, RBF).
+""")
+
+    date_col, value_col = _select_ts_columns(df, "cpd")
+
+    ts = _get_ts_data(df, date_col, value_col)
+    if ts is None:
+        return
+
+    ts_clean = ts.dropna()
+    if len(ts_clean) < 10:
+        empty_state(
+            "Need at least 10 data points for change point detection.",
+            "Upload a longer time series.",
+        )
+        return
+
+    values = ts_clean.values.astype(float)
+    index = ts_clean.index
+
+    # ---- Method selector ----
+    methods = ["CUSUM", "Binary Segmentation"]
+    if HAS_RUPTURES:
+        methods.append("PELT (ruptures)")
+    method = st.selectbox("Detection method:", methods, key="cpd_method")
+
+    change_points = []  # indices into values array
+
+    # ==========================
+    # CUSUM
+    # ==========================
+    if method == "CUSUM":
+        mean_val = values.mean()
+        std_val = values.std()
+        if std_val == 0:
+            st.warning("Series has zero variance — no change points can be detected.")
+            return
+
+        default_h = round(4.0 * std_val, 4)
+        h = st.number_input(
+            "Threshold (h):",
+            min_value=0.01,
+            value=default_h,
+            step=0.1 * std_val if std_val > 0 else 0.1,
+            key="cpd_cusum_h",
+            help=f"Default = 4 * std = {default_h:.4f}. Lower values detect smaller shifts.",
+        )
+
+        cusum = np.cumsum(values - mean_val)
+
+        # Detect threshold crossings
+        above = np.where(np.abs(cusum) > h)[0]
+        if len(above) > 0:
+            # Group consecutive crossings and take the first of each run
+            diffs = np.diff(above)
+            break_starts = [above[0]]
+            for i, d in enumerate(diffs):
+                if d > 1:
+                    break_starts.append(above[i + 1])
+            change_points = break_starts
+
+        # ---- CUSUM plot ----
+        section_header("CUSUM Chart")
+        fig_cusum = go.Figure()
+        fig_cusum.add_trace(go.Scatter(
+            x=index, y=cusum, mode="lines", name="CUSUM",
+            line=dict(width=2),
+        ))
+        fig_cusum.add_hline(y=h, line_dash="dash", line_color="red",
+                            annotation_text=f"+h = {h:.2f}")
+        fig_cusum.add_hline(y=-h, line_dash="dash", line_color="red",
+                            annotation_text=f"-h = {-h:.2f}")
+        fig_cusum.add_hline(y=0, line_color="gray", line_width=0.5)
+        for cp in change_points:
+            fig_cusum.add_vline(x=index[cp], line_dash="dot", line_color="orange", line_width=1)
+        fig_cusum.update_layout(title="CUSUM", height=400,
+                                xaxis_title="Date", yaxis_title="Cumulative Sum")
+        st.plotly_chart(fig_cusum, use_container_width=True)
+
+    # ==========================
+    # Binary Segmentation
+    # ==========================
+    elif method == "Binary Segmentation":
+        c1, c2 = st.columns(2)
+        min_size = c1.slider(
+            "Minimum segment size:", 2, max(2, len(values) // 4),
+            min(10, max(2, len(values) // 10)), key="cpd_bs_min",
+        )
+        default_penalty = float(np.var(values) * np.log(len(values)))
+        penalty = c2.number_input(
+            "Penalty:",
+            min_value=0.0,
+            value=round(default_penalty, 2),
+            step=round(max(0.1, default_penalty * 0.1), 2),
+            key="cpd_bs_pen",
+            help="Higher penalty = fewer change points. Default is var(x)*log(n).",
+        )
+
+        if st.button("Detect Change Points", key="cpd_bs_run"):
+            with st.spinner("Running binary segmentation..."):
+                change_points = _binary_segmentation(values, min_size, penalty)
+
+    # ==========================
+    # PELT (ruptures)
+    # ==========================
+    elif method == "PELT (ruptures)":
+        c1, c2 = st.columns(2)
+        model_type = c1.selectbox("Cost model:", ["l2", "l1", "rbf"], key="cpd_pelt_model")
+        min_size = c2.slider(
+            "Minimum segment size:", 2, max(2, len(values) // 4),
+            min(10, max(2, len(values) // 10)), key="cpd_pelt_min",
+        )
+        default_pen = float(np.var(values) * np.log(len(values)))
+        pen = st.number_input(
+            "Penalty:",
+            min_value=0.0,
+            value=round(default_pen, 2),
+            step=round(max(0.1, default_pen * 0.1), 2),
+            key="cpd_pelt_pen",
+            help="Higher penalty = fewer change points.",
+        )
+
+        if st.button("Detect Change Points", key="cpd_pelt_run"):
+            with st.spinner("Running PELT algorithm..."):
+                algo = rpt.Pelt(model=model_type, min_size=min_size).fit(values)
+                bkps = algo.predict(pen=pen)
+                # ruptures returns breakpoints as 1-based end indices; last is len(values)
+                change_points = [b for b in bkps if b < len(values)]
+
+    # ---- Common visualisation (for methods that use a button) ----
+    # For CUSUM change_points are computed above without a button;
+    # for the others we need the button to have been pressed.
+    if method == "CUSUM" or change_points:
+        _display_change_point_results(index, values, change_points, value_col)
+
+
+def _display_change_point_results(index, values, change_points, value_col):
+    """Shared visualisation for change point results."""
+    n_cp = len(change_points)
+    st.write(f"**Detected change points:** {n_cp}")
+
+    if n_cp == 0:
+        st.info("No change points detected. Try adjusting the threshold / penalty.")
+        # Still show the plain series
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=index, y=values, mode="lines", name=value_col))
+        fig.update_layout(title="Time Series (no change points)", height=450)
+        st.plotly_chart(fig, use_container_width=True)
+        return
+
+    # ---- Original series with change points and coloured segments ----
+    section_header("Time Series with Change Points")
+
+    boundaries = sorted([0] + list(change_points) + [len(values)])
+    palette = px.colors.qualitative.Set2
+    n_colors = len(palette)
+
+    fig = go.Figure()
+    for seg_idx in range(len(boundaries) - 1):
+        s, e = boundaries[seg_idx], boundaries[seg_idx + 1]
+        color = palette[seg_idx % n_colors]
+        fig.add_trace(go.Scatter(
+            x=index[s:e], y=values[s:e],
+            mode="lines", name=f"Segment {seg_idx + 1}",
+            line=dict(color=color, width=2),
+        ))
+
+    for cp in change_points:
+        fig.add_vline(x=index[cp], line_dash="dash", line_color="red", line_width=1.5)
+
+    fig.update_layout(
+        title=f"Time Series with {n_cp} Change Point{'s' if n_cp != 1 else ''}",
+        xaxis_title="Date",
+        yaxis_title=value_col,
+        height=500,
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+    # ---- Segment statistics table ----
+    section_header("Segment Statistics")
+    rows = []
+    for seg_idx in range(len(boundaries) - 1):
+        s, e = boundaries[seg_idx], boundaries[seg_idx + 1]
+        seg_vals = values[s:e]
+        rows.append({
+            "Segment": seg_idx + 1,
+            "Start": str(index[s]),
+            "End": str(index[e - 1]),
+            "Mean": round(float(seg_vals.mean()), 4),
+            "Std": round(float(seg_vals.std()), 4),
+            "N": e - s,
+        })
+    seg_df = pd.DataFrame(rows)
+    st.dataframe(seg_df, use_container_width=True, hide_index=True)
+
+    # ---- Change point dates ----
+    with st.expander("Change point dates"):
+        cp_df = pd.DataFrame({
+            "Change Point": range(1, n_cp + 1),
+            "Date": [str(index[cp]) for cp in change_points],
+            "Index": change_points,
+        })
+        st.dataframe(cp_df, use_container_width=True, hide_index=True)

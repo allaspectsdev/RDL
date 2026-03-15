@@ -14,7 +14,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from modules.ui_helpers import (
     section_header, empty_state, validation_panel,
-    interpretation_card, alternative_suggestion,
+    interpretation_card, alternative_suggestion, help_tip,
 )
 from modules.validation import (
     check_sample_size, check_kmo_bartlett, interpret_correlation,
@@ -51,7 +51,7 @@ def render_correlation(df: pd.DataFrame):
     tabs = st.tabs([
         "Correlation Matrix", "Scatter Matrix", "Pairwise Scatter",
         "PCA", "t-SNE", "Factor Analysis", "Partial Correlation",
-        "Discriminant Analysis", "MDS",
+        "Discriminant Analysis", "MDS", "Correspondence Analysis",
     ])
 
     with tabs[0]:
@@ -72,6 +72,8 @@ def render_correlation(df: pd.DataFrame):
         _render_discriminant(df)
     with tabs[8]:
         _render_mds(df)
+    with tabs[9]:
+        _render_correspondence_analysis(df)
 
 
 def _render_corr_matrix(df: pd.DataFrame):
@@ -735,3 +737,248 @@ def _render_mds(df: pd.DataFrame):
             st.info(f"Stress = {stress:.4f}: Fair fit")
         else:
             st.warning(f"Stress = {stress:.4f}: Poor fit — consider more dimensions")
+
+
+# ===================================================================
+# Tab 10 -- Correspondence Analysis
+# ===================================================================
+
+def _render_correspondence_analysis(df: pd.DataFrame):
+    """Correspondence Analysis on two categorical variables."""
+    cat_cols = df.select_dtypes(include=["object", "category"]).columns.tolist()
+
+    if len(cat_cols) < 2:
+        empty_state(
+            "Need at least 2 categorical columns.",
+            "Correspondence analysis explores relationships between categorical variables.",
+        )
+        return
+
+    section_header(
+        "Correspondence Analysis",
+        "Visualise row and column categories of a contingency table in a shared low-dimensional space.",
+    )
+    help_tip("About Correspondence Analysis", """
+Correspondence Analysis (CA) is a multivariate technique for exploring associations
+between two categorical variables. It decomposes the chi-square statistic of a
+contingency table into orthogonal dimensions and plots both row and column categories
+as points in the same space. Points that are close together are more strongly associated.
+
+**Key outputs:**
+- **Inertia** measures the amount of association captured by each dimension (analogous to explained variance in PCA).
+- **Contributions** show how much each category contributes to a dimension.
+- **Quality (cos²)** indicates how well a point is represented on the chosen dimensions.
+""")
+
+    c1, c2 = st.columns(2)
+    row_var = c1.selectbox("Row variable:", cat_cols, key="ca_row")
+    remaining = [c for c in cat_cols if c != row_var]
+    col_var = c2.selectbox("Column variable:", remaining, key="ca_col")
+
+    if st.button("Run Correspondence Analysis", key="run_ca"):
+        # ---- Build contingency table ----
+        ct = pd.crosstab(df[row_var], df[col_var])
+
+        # Edge-case: remove rows/columns that are all zero
+        ct = ct.loc[ct.sum(axis=1) > 0, ct.sum(axis=0) > 0]
+
+        if ct.shape[0] < 2 or ct.shape[1] < 2:
+            st.warning("The contingency table must have at least 2 non-empty rows and 2 non-empty columns.")
+            return
+
+        st.subheader("Contingency Table")
+        st.dataframe(ct, use_container_width=True)
+
+        # ---- Chi-square test ----
+        chi2, p_val, dof, expected = stats.chi2_contingency(ct)
+        section_header("Chi-Square Test of Independence")
+        c1m, c2m, c3m = st.columns(3)
+        c1m.metric("Chi-square", f"{chi2:.4f}")
+        c2m.metric("p-value", f"{p_val:.6f}")
+        c3m.metric("df", str(dof))
+        if p_val < 0.05:
+            st.success("Significant association between the two variables (p < 0.05).")
+        else:
+            st.info("No significant association detected (p >= 0.05). CA may still reveal patterns.")
+
+        # ---- SVD on standardised residuals ----
+        O = ct.values.astype(float)
+        grand_total = O.sum()
+        row_sums = O.sum(axis=1)
+        col_sums = O.sum(axis=0)
+
+        E = np.outer(row_sums, col_sums) / grand_total
+        # Guard against zero expected frequencies
+        with np.errstate(divide="ignore", invalid="ignore"):
+            S = np.where(E > 0, (O - E) / np.sqrt(E), 0.0)
+
+        U, sigma, Vt = np.linalg.svd(S, full_matrices=False)
+
+        # Number of non-trivial dimensions
+        n_dim = min(ct.shape[0] - 1, ct.shape[1] - 1)
+        if n_dim < 1:
+            st.warning("Not enough dimensions for correspondence analysis (need at least 2 categories in each variable).")
+            return
+
+        sigma = sigma[:n_dim]
+        U = U[:, :n_dim]
+        Vt = Vt[:n_dim, :]
+
+        eigenvalues = sigma ** 2
+        total_inertia = eigenvalues.sum()
+
+        # ---- Inertia table ----
+        section_header("Inertia (Explained Association)")
+        pct_inertia = eigenvalues / total_inertia * 100 if total_inertia > 0 else np.zeros_like(eigenvalues)
+        cum_inertia = np.cumsum(pct_inertia)
+
+        inertia_df = pd.DataFrame({
+            "Dimension": [f"Dim {i+1}" for i in range(n_dim)],
+            "Eigenvalue": eigenvalues.round(6),
+            "% Inertia": pct_inertia.round(2),
+            "Cumulative %": cum_inertia.round(2),
+        })
+        st.dataframe(inertia_df, use_container_width=True, hide_index=True)
+
+        c1m, c2m = st.columns(2)
+        c1m.metric("Total Inertia", f"{total_inertia:.6f}")
+        c2m.metric("Chi-square / N", f"{chi2 / grand_total:.6f}")
+
+        # ---- Coordinates ----
+        # Row principal coordinates: D_r^{-1/2} U sigma
+        row_masses = row_sums / grand_total
+        col_masses = col_sums / grand_total
+
+        row_coords = U * sigma  # (n_rows, n_dim)
+        col_coords = Vt.T * sigma  # (n_cols, n_dim)
+
+        # ---- Biplot (Dim1 vs Dim2) ----
+        if n_dim >= 2:
+            section_header("Biplot (Dim 1 vs Dim 2)")
+
+            fig = go.Figure()
+
+            # Row points
+            fig.add_trace(go.Scatter(
+                x=row_coords[:, 0], y=row_coords[:, 1],
+                mode="markers+text",
+                text=ct.index.astype(str).tolist(),
+                textposition="top center",
+                marker=dict(color="#6366f1", size=10, symbol="circle"),
+                name=f"Rows ({row_var})",
+            ))
+
+            # Column points
+            fig.add_trace(go.Scatter(
+                x=col_coords[:, 0], y=col_coords[:, 1],
+                mode="markers+text",
+                text=ct.columns.astype(str).tolist(),
+                textposition="bottom center",
+                marker=dict(color="#ef4444", size=10, symbol="diamond"),
+                name=f"Columns ({col_var})",
+            ))
+
+            # Origin lines
+            x_range = np.concatenate([row_coords[:, 0], col_coords[:, 0]])
+            y_range = np.concatenate([row_coords[:, 1], col_coords[:, 1]])
+            x_pad = (x_range.max() - x_range.min()) * 0.15 + 0.01
+            y_pad = (y_range.max() - y_range.min()) * 0.15 + 0.01
+
+            fig.add_shape(type="line",
+                          x0=x_range.min() - x_pad, x1=x_range.max() + x_pad,
+                          y0=0, y1=0,
+                          line=dict(color="gray", dash="dot", width=1))
+            fig.add_shape(type="line",
+                          x0=0, x1=0,
+                          y0=y_range.min() - y_pad, y1=y_range.max() + y_pad,
+                          line=dict(color="gray", dash="dot", width=1))
+
+            dim1_pct = pct_inertia[0] if len(pct_inertia) > 0 else 0
+            dim2_pct = pct_inertia[1] if len(pct_inertia) > 1 else 0
+
+            fig.update_layout(
+                title="Correspondence Analysis Biplot",
+                xaxis_title=f"Dimension 1 ({dim1_pct:.1f}%)",
+                yaxis_title=f"Dimension 2 ({dim2_pct:.1f}%)",
+                height=600,
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            # Only 1 dimension available
+            section_header("Dimension 1 Projection")
+            all_labels = ct.index.astype(str).tolist() + ct.columns.astype(str).tolist()
+            all_coords = np.concatenate([row_coords[:, 0], col_coords[:, 0]])
+            all_types = [row_var] * len(ct.index) + [col_var] * len(ct.columns)
+
+            proj_df = pd.DataFrame({
+                "Label": all_labels,
+                "Dim 1": all_coords,
+                "Variable": all_types,
+            })
+            fig = px.strip(proj_df, x="Dim 1", color="Variable", hover_name="Label",
+                           title="Dimension 1 Projection")
+            fig.update_layout(height=350)
+            st.plotly_chart(fig, use_container_width=True)
+
+        # ---- Contributions ----
+        section_header("Contributions (% contribution to each dimension)")
+
+        # Row contributions: (row_mass * coord^2) / eigenvalue
+        row_contrib = np.zeros_like(row_coords)
+        for k in range(n_dim):
+            if eigenvalues[k] > 0:
+                row_contrib[:, k] = (row_masses * row_coords[:, k] ** 2) / eigenvalues[k] * 100
+
+        row_contrib_df = pd.DataFrame(
+            row_contrib.round(2),
+            index=ct.index,
+            columns=[f"Dim {i+1}" for i in range(n_dim)],
+        )
+        row_contrib_df.index.name = row_var
+        st.write(f"**Row contributions ({row_var}):**")
+        st.dataframe(row_contrib_df, use_container_width=True)
+
+        # Column contributions
+        col_contrib = np.zeros_like(col_coords)
+        for k in range(n_dim):
+            if eigenvalues[k] > 0:
+                col_contrib[:, k] = (col_masses * col_coords[:, k] ** 2) / eigenvalues[k] * 100
+
+        col_contrib_df = pd.DataFrame(
+            col_contrib.round(2),
+            index=ct.columns,
+            columns=[f"Dim {i+1}" for i in range(n_dim)],
+        )
+        col_contrib_df.index.name = col_var
+        st.write(f"**Column contributions ({col_var}):**")
+        st.dataframe(col_contrib_df, use_container_width=True)
+
+        # ---- Quality of representation (cos²) ----
+        section_header("Quality of Representation (cos²)")
+
+        # cos² for rows: coord_k^2 / sum(coord^2 over all dims)
+        row_dist_sq = (row_coords ** 2).sum(axis=1, keepdims=True)
+        row_dist_sq = np.where(row_dist_sq > 0, row_dist_sq, 1.0)
+        row_cos2 = row_coords ** 2 / row_dist_sq
+
+        row_cos2_df = pd.DataFrame(
+            row_cos2.round(4),
+            index=ct.index,
+            columns=[f"Dim {i+1}" for i in range(n_dim)],
+        )
+        row_cos2_df.index.name = row_var
+        st.write(f"**Row cos² ({row_var}):**")
+        st.dataframe(row_cos2_df, use_container_width=True)
+
+        col_dist_sq = (col_coords ** 2).sum(axis=1, keepdims=True)
+        col_dist_sq = np.where(col_dist_sq > 0, col_dist_sq, 1.0)
+        col_cos2 = col_coords ** 2 / col_dist_sq
+
+        col_cos2_df = pd.DataFrame(
+            col_cos2.round(4),
+            index=ct.columns,
+            columns=[f"Dim {i+1}" for i in range(n_dim)],
+        )
+        col_cos2_df.index.name = col_var
+        st.write(f"**Column cos² ({col_var}):**")
+        st.dataframe(col_cos2_df, use_container_width=True)
