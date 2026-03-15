@@ -68,18 +68,17 @@ def significance_result(p_value, alpha, test_name, effect_size=None, effect_labe
     if effect_size is not None and effect_label:
         effect_html = f'<span class="rdl-sig-effect">{effect_label} = {effect_size:.4f}</span>'
 
-    html = f"""
-    <div class="rdl-sig-card {css_class}">
-        <div class="rdl-sig-header">
-            <span class="rdl-sig-test">{test_name}</span>
-            <span class="rdl-sig-badge">{badge}</span>
-        </div>
-        <div class="rdl-sig-body">
-            <strong>{verdict}</strong> &mdash; p = {p_value:.6f} {comparator} \u03b1 = {alpha}
-            {effect_html}
-        </div>
-    </div>
-    """
+    html = (
+        f'<div class="rdl-sig-card {css_class}">'
+        f'<div class="rdl-sig-header">'
+        f'<span class="rdl-sig-test">{test_name}</span>'
+        f'<span class="rdl-sig-badge">{badge}</span>'
+        f'</div>'
+        f'<div class="rdl-sig-body">'
+        f'<strong>{verdict}</strong> &mdash; p = {p_value:.6f} {comparator} \u03b1 = {alpha}'
+        f'{effect_html}'
+        f'</div></div>'
+    )
     st.markdown(html, unsafe_allow_html=True)
 
 
@@ -106,12 +105,12 @@ def section_header(title, help_text=None):
 def empty_state(message, suggestion=None):
     """Branded empty-state block replacing generic st.warning calls."""
     suggestion_html = f'<p class="rdl-empty-suggestion">{suggestion}</p>' if suggestion else ""
-    html = f"""
-    <div class="rdl-empty-state">
-        <p class="rdl-empty-msg">{message}</p>
-        {suggestion_html}
-    </div>
-    """
+    html = (
+        f'<div class="rdl-empty-state">'
+        f'<p class="rdl-empty-msg">{message}</p>'
+        f'{suggestion_html}'
+        f'</div>'
+    )
     st.markdown(html, unsafe_allow_html=True)
 
 
@@ -176,7 +175,7 @@ def validation_panel(checks, title="Assumption Checks"):
 
     _icons = {"pass": ("&#10003;", "pass"), "warn": ("&#9888;", "warn"), "fail": ("&#10007;", "fail")}
 
-    rows_html = ""
+    rows_parts = []
     for c in sorted_checks:
         icon_char, icon_class = _icons.get(c.status, ("&#8226;", "pass"))
         suggestion_html = ""
@@ -185,26 +184,24 @@ def validation_panel(checks, title="Assumption Checks"):
                 f'<span class="rdl-vp-suggestion">'
                 f'{_html.escape(c.suggestion)}</span>'
             )
-        rows_html += f"""
-        <div class="rdl-vp-check">
-            <span class="rdl-vp-icon rdl-vp-icon--{icon_class}">{icon_char}</span>
-            <div class="rdl-vp-content">
-                <span class="rdl-vp-name">{_html.escape(c.name)}</span>
-                <span class="rdl-vp-detail">&mdash; {_html.escape(c.detail)}</span>
-                {suggestion_html}
-            </div>
-        </div>
-        """
+        rows_parts.append(
+            f'<div class="rdl-vp-check">'
+            f'<span class="rdl-vp-icon rdl-vp-icon--{icon_class}">{icon_char}</span>'
+            f'<div class="rdl-vp-content">'
+            f'<span class="rdl-vp-name">{_html.escape(c.name)}</span>'
+            f'<span class="rdl-vp-detail">&mdash; {_html.escape(c.detail)}</span>'
+            f'{suggestion_html}'
+            f'</div></div>'
+        )
 
-    html = f"""
-    <div class="rdl-validation-panel">
-        <div class="rdl-vp-header">
-            <span class="rdl-vp-title">{_html.escape(title)}</span>
-            <span class="rdl-vp-badge {badge_class}">{badge_text}</span>
-        </div>
-        {rows_html}
-    </div>
-    """
+    rows_html = "".join(rows_parts)
+    html = (
+        f'<div class="rdl-validation-panel">'
+        f'<div class="rdl-vp-header">'
+        f'<span class="rdl-vp-title">{_html.escape(title)}</span>'
+        f'<span class="rdl-vp-badge {badge_class}">{badge_text}</span>'
+        f'</div>{rows_html}</div>'
+    )
     st.markdown(html, unsafe_allow_html=True)
 
 
@@ -255,13 +252,13 @@ def interpretation_card(interp):
     if detail:
         detail_html = f'<div class="rdl-interp-detail">{_html.escape(detail)}</div>'
 
-    html = f"""
-    <div class="rdl-interp-card">
-        <div class="rdl-interp-title">{_html.escape(title)}</div>
-        {_html.escape(body)}
-        {detail_html}
-    </div>
-    """
+    html = (
+        f'<div class="rdl-interp-card">'
+        f'<div class="rdl-interp-title">{_html.escape(title)}</div>'
+        f'{_html.escape(body)}'
+        f'{detail_html}'
+        f'</div>'
+    )
     st.markdown(html, unsafe_allow_html=True)
 
 
@@ -280,11 +277,11 @@ def alternative_suggestion(issue, alternatives):
     if not alternatives:
         return
     tags = " ".join(f'<span class="rdl-alt-tag">{_html.escape(a)}</span>' for a in alternatives)
-    html = f"""
-    <div class="rdl-alt-card">
-        {_html.escape(issue)} &mdash; consider: {tags}
-    </div>
-    """
+    html = (
+        f'<div class="rdl-alt-card">'
+        f'{_html.escape(issue)} &mdash; consider: {tags}'
+        f'</div>'
+    )
     st.markdown(html, unsafe_allow_html=True)
 
 
