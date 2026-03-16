@@ -159,9 +159,9 @@ def _render_exploration(df: pd.DataFrame):
     fig.add_trace(go.Scatter(x=ts.index, y=ts.values, name="Original",
                              line=dict(width=1), opacity=0.7))
     fig.add_trace(go.Scatter(x=ts.index, y=rolling_mean.values, name=f"Rolling Mean ({window})",
-                             line=dict(color="red", width=2)))
+                             line=dict(color="#ef4444", width=2)))
     fig.add_trace(go.Scatter(x=ts.index, y=rolling_std.values, name=f"Rolling Std ({window})",
-                             line=dict(color="green", width=2)))
+                             line=dict(color="#22c55e", width=2)))
     fig.update_layout(title="Rolling Statistics", height=400)
     rdl_plotly_chart(fig)
 
@@ -212,11 +212,11 @@ def _render_decomposition(df: pd.DataFrame):
                                 vertical_spacing=0.05)
             fig.add_trace(go.Scatter(x=ts_clean.index, y=ts_clean.values, name="Observed"), row=1, col=1)
             fig.add_trace(go.Scatter(x=ts_clean.index, y=result.trend, name="Trend",
-                                     line=dict(color="red")), row=2, col=1)
+                                     line=dict(color="#ef4444")), row=2, col=1)
             fig.add_trace(go.Scatter(x=ts_clean.index, y=result.seasonal, name="Seasonal",
-                                     line=dict(color="green")), row=3, col=1)
+                                     line=dict(color="#22c55e")), row=3, col=1)
             fig.add_trace(go.Scatter(x=ts_clean.index, y=result.resid, name="Residual",
-                                     line=dict(color="purple")), row=4, col=1)
+                                     line=dict(color="#8b5cf6")), row=4, col=1)
             fig.update_layout(height=800, title=f"Decomposition ({model_type}, period={period})")
             rdl_plotly_chart(fig)
 
@@ -430,7 +430,7 @@ def _render_smoothing(df: pd.DataFrame):
     fig.add_trace(go.Scatter(x=ts_clean.index, y=ts_clean.values, name="Original",
                              line=dict(color="#6366f1", width=1), opacity=0.7))
     fig.add_trace(go.Scatter(x=ts_clean.index, y=smoothed.values, name=label,
-                             line=dict(color="red", width=2)))
+                             line=dict(color="#ef4444", width=2)))
     fig.update_layout(title=f"Smoothing: {label}", height=500)
     rdl_plotly_chart(fig)
 
@@ -526,7 +526,7 @@ def _render_arima(df: pd.DataFrame):
                 fig.add_trace(go.Scatter(x=theoretical, y=sorted_resid, mode="markers",
                                          marker=dict(size=3), name="QQ"), row=2, col=1)
                 fig.add_trace(go.Scatter(x=[-3, 3], y=[-3, 3], mode="lines",
-                                         line=dict(dash="dash", color="red")), row=2, col=1)
+                                         line=dict(dash="dash", color="#ef4444")), row=2, col=1)
 
                 acf_vals = acf(resid, nlags=20)
                 for i, val in enumerate(acf_vals):
@@ -561,13 +561,13 @@ def _render_arima(df: pd.DataFrame):
                                      line=dict(color="#6366f1")))
             if len(test) > 0:
                 fig.add_trace(go.Scatter(x=test.index, y=test.values, name="Test",
-                                         line=dict(color="green")))
+                                         line=dict(color="#22c55e")))
             fig.add_trace(go.Scatter(x=fc_mean.index, y=fc_mean.values, name="Forecast",
-                                     line=dict(color="red", width=2)))
+                                     line=dict(color="#ef4444", width=2)))
             fig.add_trace(go.Scatter(x=fc_ci.index.tolist() + fc_ci.index.tolist()[::-1],
                                      y=fc_ci.iloc[:, 1].tolist() + fc_ci.iloc[:, 0].tolist()[::-1],
-                                     fill="toself", fillcolor="rgba(255,0,0,0.1)",
-                                     line=dict(color="rgba(255,0,0,0)"), name="95% CI"))
+                                     fill="toself", fillcolor="rgba(239,68,68,0.1)",
+                                     line=dict(color="rgba(239,68,68,0)"), name="95% CI"))
             fig.update_layout(title="Forecast", height=500)
             rdl_plotly_chart(fig)
 
@@ -1119,7 +1119,7 @@ data-generating process shifts (e.g., a change in mean, variance, or trend).
                             annotation_text=f"-h = {-h:.2f}")
         fig_cusum.add_hline(y=0, line_color="gray", line_width=0.5)
         for cp in change_points:
-            fig_cusum.add_vline(x=index[cp], line_dash="dot", line_color="orange", line_width=1)
+            fig_cusum.add_vline(x=index[cp], line_dash="dot", line_color="#f97316", line_width=1)
         fig_cusum.update_layout(title="CUSUM", height=400,
                                 xaxis_title="Date", yaxis_title="Cumulative Sum")
         rdl_plotly_chart(fig_cusum)

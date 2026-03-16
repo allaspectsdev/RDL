@@ -122,55 +122,56 @@ def _render_one_sample(df: pd.DataFrame):
         alt = st.selectbox("Alternative:", ["two-sided", "less", "greater"], key="one_t_alt")
 
         if st.button("Run Test", key="run_one_t"):
-            data = df[col_name].dropna()
-            n = len(data)
+            with st.spinner("Running test..."):
+                data = df[col_name].dropna()
+                n = len(data)
 
-            # --- Validation checks ---
-            try:
-                checks = [
-                    check_sample_size(n, "t-test"),
-                    check_normality(data, label=col_name),
-                ]
-                validation_panel(checks)
-            except Exception:
-                pass
+                # --- Validation checks ---
+                try:
+                    checks = [
+                        check_sample_size(n, "t-test"),
+                        check_normality(data, label=col_name),
+                    ]
+                    validation_panel(checks)
+                except Exception:
+                    pass
 
-            stat, p = stats.ttest_1samp(data, mu_0, alternative=alt)
-            se = data.std() / np.sqrt(n)
-            d = (data.mean() - mu_0) / data.std() if data.std() != 0 else 0
-            ci = stats.t.interval(1 - alpha, df=n - 1, loc=data.mean(), scale=se)
+                stat, p = stats.ttest_1samp(data, mu_0, alternative=alt)
+                se = data.std() / np.sqrt(n)
+                d = (data.mean() - mu_0) / data.std() if data.std() != 0 else 0
+                ci = stats.t.interval(1 - alpha, df=n - 1, loc=data.mean(), scale=se)
 
-            st.markdown(f"**H₀:** μ = {mu_0}  |  **H₁:** μ {'≠' if alt == 'two-sided' else '<' if alt == 'less' else '>'} {mu_0}")
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("t-statistic", f"{stat:.4f}")
-            c2.metric("p-value", f"{p:.6f}")
-            c3.metric("Cohen's d", f"{d:.4f} ({_effect_size_label(d)})")
-            c4.metric("Sample Mean", f"{data.mean():.4f}")
-            st.write(f"**{1 - alpha:.0%} CI for mean:** [{ci[0]:.4f}, {ci[1]:.4f}]")
-            significance_result(p, alpha, "One-Sample t-test", effect_size=d, effect_label="Cohen's d")
+                st.markdown(f"**H₀:** μ = {mu_0}  |  **H₁:** μ {'≠' if alt == 'two-sided' else '<' if alt == 'less' else '>'} {mu_0}")
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric("t-statistic", f"{stat:.4f}")
+                c2.metric("p-value", f"{p:.6f}")
+                c3.metric("Cohen's d", f"{d:.4f} ({_effect_size_label(d)})")
+                c4.metric("Sample Mean", f"{data.mean():.4f}")
+                st.write(f"**{1 - alpha:.0%} CI for mean:** [{ci[0]:.4f}, {ci[1]:.4f}]")
+                significance_result(p, alpha, "One-Sample t-test", effect_size=d, effect_label="Cohen's d")
 
-            # --- Interpretation card ---
-            try:
-                interpretation_card(interpret_p_value(p, alpha))
-            except Exception:
-                pass
+                # --- Interpretation card ---
+                try:
+                    interpretation_card(interpret_p_value(p, alpha))
+                except Exception:
+                    pass
 
-            # Visualization
-            fig = make_subplots(rows=1, cols=2, subplot_titles=("Distribution", "t-Distribution"))
-            fig.add_trace(go.Histogram(x=data, name="Data", opacity=0.7), row=1, col=1)
-            fig.add_vline(x=mu_0, line_dash="dash", line_color="red", row=1, col=1,
-                          annotation_text=f"μ₀={mu_0}")
-            fig.add_vline(x=data.mean(), line_dash="dash", line_color="green", row=1, col=1,
-                          annotation_text=f"x̄={data.mean():.3f}")
+                # Visualization
+                fig = make_subplots(rows=1, cols=2, subplot_titles=("Distribution", "t-Distribution"))
+                fig.add_trace(go.Histogram(x=data, name="Data", opacity=0.7), row=1, col=1)
+                fig.add_vline(x=mu_0, line_dash="dash", line_color="red", row=1, col=1,
+                              annotation_text=f"μ₀={mu_0}")
+                fig.add_vline(x=data.mean(), line_dash="dash", line_color="green", row=1, col=1,
+                              annotation_text=f"x̄={data.mean():.3f}")
 
-            # t-distribution with rejection region
-            t_x = np.linspace(-4, 4, 200)
-            t_y = stats.t.pdf(t_x, df=n - 1)
-            fig.add_trace(go.Scatter(x=t_x, y=t_y, name="t-dist", line=dict(color="blue")), row=1, col=2)
-            fig.add_vline(x=stat, line_dash="solid", line_color="red", row=1, col=2,
-                          annotation_text=f"t={stat:.3f}")
-            fig.update_layout(height=400)
-            rdl_plotly_chart(fig)
+                # t-distribution with rejection region
+                t_x = np.linspace(-4, 4, 200)
+                t_y = stats.t.pdf(t_x, df=n - 1)
+                fig.add_trace(go.Scatter(x=t_x, y=t_y, name="t-dist", line=dict(color="#3b82f6")), row=1, col=2)
+                fig.add_vline(x=stat, line_dash="solid", line_color="red", row=1, col=2,
+                              annotation_text=f"t={stat:.3f}")
+                fig.update_layout(height=400)
+                rdl_plotly_chart(fig)
 
     elif test_type == "One-Sample Wilcoxon Signed-Rank":
         col_name = st.selectbox("Column:", num_cols, key="one_wilc_col")
@@ -178,31 +179,32 @@ def _render_one_sample(df: pd.DataFrame):
         alt = st.selectbox("Alternative:", ["two-sided", "less", "greater"], key="one_wilc_alt")
 
         if st.button("Run Test", key="run_one_wilc"):
-            data = df[col_name].dropna()
-            adjusted = data - mu_0
-            # Remove zeros for Wilcoxon
-            adjusted = adjusted[adjusted != 0]
-            if len(adjusted) < 10:
-                st.warning("Need at least 10 non-zero differences.")
-                return
-            stat, p = stats.wilcoxon(adjusted, alternative=alt)
-            # Effect size r = Z / sqrt(N)
-            n_w = len(adjusted)
-            z_approx = (stat - n_w * (n_w + 1) / 4) / np.sqrt(n_w * (n_w + 1) * (2 * n_w + 1) / 24)
-            r = abs(z_approx) / np.sqrt(n_w)
+            with st.spinner("Running test..."):
+                data = df[col_name].dropna()
+                adjusted = data - mu_0
+                # Remove zeros for Wilcoxon
+                adjusted = adjusted[adjusted != 0]
+                if len(adjusted) < 10:
+                    st.warning("Need at least 10 non-zero differences.")
+                    return
+                stat, p = stats.wilcoxon(adjusted, alternative=alt)
+                # Effect size r = Z / sqrt(N)
+                n_w = len(adjusted)
+                z_approx = (stat - n_w * (n_w + 1) / 4) / np.sqrt(n_w * (n_w + 1) * (2 * n_w + 1) / 24)
+                r = abs(z_approx) / np.sqrt(n_w)
 
-            st.markdown(f"**H₀:** median = {mu_0}")
-            c1, c2, c3 = st.columns(3)
-            c1.metric("W-statistic", f"{stat:.4f}")
-            c2.metric("p-value", f"{p:.6f}")
-            c3.metric("Effect size r", f"{r:.4f}")
-            significance_result(p, alpha, "Wilcoxon Signed-Rank", effect_size=r, effect_label="Effect size r")
+                st.markdown(f"**H₀:** median = {mu_0}")
+                c1, c2, c3 = st.columns(3)
+                c1.metric("W-statistic", f"{stat:.4f}")
+                c2.metric("p-value", f"{p:.6f}")
+                c3.metric("Effect size r", f"{r:.4f}")
+                significance_result(p, alpha, "Wilcoxon Signed-Rank", effect_size=r, effect_label="Effect size r")
 
-            # --- Interpretation card ---
-            try:
-                interpretation_card(interpret_p_value(p, alpha))
-            except Exception:
-                pass
+                # --- Interpretation card ---
+                try:
+                    interpretation_card(interpret_p_value(p, alpha))
+                except Exception:
+                    pass
 
     elif test_type == "One-Sample Proportion":
         cat_cols = df.select_dtypes(include=["object", "category"]).columns.tolist()
@@ -218,120 +220,122 @@ def _render_one_sample(df: pd.DataFrame):
         p_0 = st.number_input("Hypothesized proportion (p₀):", 0.0, 1.0, 0.5, 0.01, key="one_prop_p0")
 
         if st.button("Run Test", key="run_one_prop"):
-            data = df[col_name].dropna()
-            n = len(data)
-            x = (data == success_val).sum()
-            p_hat = x / n
-            # Z-test for proportion
-            se = np.sqrt(p_0 * (1 - p_0) / n)
-            z_stat = (p_hat - p_0) / se if se > 0 else 0
-            p_val = 2 * (1 - stats.norm.cdf(abs(z_stat)))
+            with st.spinner("Running test..."):
+                data = df[col_name].dropna()
+                n = len(data)
+                x = (data == success_val).sum()
+                p_hat = x / n
+                # Z-test for proportion
+                se = np.sqrt(p_0 * (1 - p_0) / n)
+                z_stat = (p_hat - p_0) / se if se > 0 else 0
+                p_val = 2 * (1 - stats.norm.cdf(abs(z_stat)))
 
-            st.markdown(f"**H₀:** p = {p_0}  |  **H₁:** p ≠ {p_0}")
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Z-statistic", f"{z_stat:.4f}")
-            c2.metric("p-value", f"{p_val:.6f}")
-            c3.metric("Sample proportion", f"{p_hat:.4f}")
-            # Wilson CI
-            z_crit = stats.norm.ppf(1 - alpha / 2)
-            denom = 1 + z_crit ** 2 / n
-            center = (p_hat + z_crit ** 2 / (2 * n)) / denom
-            margin = z_crit * np.sqrt((p_hat * (1 - p_hat) + z_crit ** 2 / (4 * n)) / n) / denom
-            st.write(f"**{1 - alpha:.0%} Wilson CI:** [{center - margin:.4f}, {center + margin:.4f}]")
-            significance_result(p_val, alpha, "One-Sample Proportion")
+                st.markdown(f"**H₀:** p = {p_0}  |  **H₁:** p ≠ {p_0}")
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Z-statistic", f"{z_stat:.4f}")
+                c2.metric("p-value", f"{p_val:.6f}")
+                c3.metric("Sample proportion", f"{p_hat:.4f}")
+                # Wilson CI
+                z_crit = stats.norm.ppf(1 - alpha / 2)
+                denom = 1 + z_crit ** 2 / n
+                center = (p_hat + z_crit ** 2 / (2 * n)) / denom
+                margin = z_crit * np.sqrt((p_hat * (1 - p_hat) + z_crit ** 2 / (4 * n)) / n) / denom
+                st.write(f"**{1 - alpha:.0%} Wilson CI:** [{center - margin:.4f}, {center + margin:.4f}]")
+                significance_result(p_val, alpha, "One-Sample Proportion")
 
-            # --- Interpretation card ---
-            try:
-                interpretation_card(interpret_p_value(p_val, alpha))
-            except Exception:
-                pass
+                # --- Interpretation card ---
+                try:
+                    interpretation_card(interpret_p_value(p_val, alpha))
+                except Exception:
+                    pass
 
     elif test_type == "Runs Test (Randomness)":
         col_name = st.selectbox("Column:", num_cols, key="runs_col")
 
         if st.button("Run Test", key="run_runs"):
-            data = df[col_name].dropna().values
-            n = len(data)
-            if n < 10:
-                st.warning("Need at least 10 data points for the runs test.")
-                return
+            with st.spinner("Running test..."):
+                data = df[col_name].dropna().values
+                n = len(data)
+                if n < 10:
+                    st.warning("Need at least 10 data points for the runs test.")
+                    return
 
-            median_val = np.median(data)
-            # Convert to binary: above (1) / below (0) median
-            binary = (data > median_val).astype(int)
-            # Remove values exactly equal to median for cleaner analysis
-            # but keep them as 0 for counting
-            n_above = np.sum(binary == 1)
-            n_below = np.sum(binary == 0)
+                median_val = np.median(data)
+                # Convert to binary: above (1) / below (0) median
+                binary = (data > median_val).astype(int)
+                # Remove values exactly equal to median for cleaner analysis
+                # but keep them as 0 for counting
+                n_above = np.sum(binary == 1)
+                n_below = np.sum(binary == 0)
 
-            if n_above == 0 or n_below == 0:
-                st.warning("All values are on one side of the median. Runs test cannot be computed.")
-                return
+                if n_above == 0 or n_below == 0:
+                    st.warning("All values are on one side of the median. Runs test cannot be computed.")
+                    return
 
-            # Count runs
-            runs = 1
-            for i in range(1, len(binary)):
-                if binary[i] != binary[i - 1]:
-                    runs += 1
+                # Count runs
+                runs = 1
+                for i in range(1, len(binary)):
+                    if binary[i] != binary[i - 1]:
+                        runs += 1
 
-            # Expected number of runs and variance under H0
-            n1, n2 = n_above, n_below
-            expected_runs = (2 * n1 * n2) / (n1 + n2) + 1
-            var_runs = (2 * n1 * n2 * (2 * n1 * n2 - n1 - n2)) / ((n1 + n2) ** 2 * (n1 + n2 - 1))
+                # Expected number of runs and variance under H0
+                n1, n2 = n_above, n_below
+                expected_runs = (2 * n1 * n2) / (n1 + n2) + 1
+                var_runs = (2 * n1 * n2 * (2 * n1 * n2 - n1 - n2)) / ((n1 + n2) ** 2 * (n1 + n2 - 1))
 
-            if var_runs <= 0:
-                st.warning("Variance of runs is zero. Cannot compute z-statistic.")
-                return
+                if var_runs <= 0:
+                    st.warning("Variance of runs is zero. Cannot compute z-statistic.")
+                    return
 
-            z_stat = (runs - expected_runs) / np.sqrt(var_runs)
-            p_val = 2 * (1 - stats.norm.cdf(abs(z_stat)))
+                z_stat = (runs - expected_runs) / np.sqrt(var_runs)
+                p_val = 2 * (1 - stats.norm.cdf(abs(z_stat)))
 
-            # Also try statsmodels for comparison
-            try:
-                from statsmodels.sandbox.stats.runs import runstest_1samp
-                z_sm, p_sm = runstest_1samp(data, cutoff="median")
-                # Use statsmodels result if available
-                z_stat, p_val = z_sm, p_sm
-            except ImportError:
-                pass
+                # Also try statsmodels for comparison
+                try:
+                    from statsmodels.sandbox.stats.runs import runstest_1samp
+                    z_sm, p_sm = runstest_1samp(data, cutoff="median")
+                    # Use statsmodels result if available
+                    z_stat, p_val = z_sm, p_sm
+                except ImportError:
+                    pass
 
-            st.markdown(f"**H₀:** The sequence is random (no pattern above/below median)")
-            c1m, c2m, c3m, c4m = st.columns(4)
-            c1m.metric("Number of Runs", str(runs))
-            c2m.metric("Expected Runs", f"{expected_runs:.2f}")
-            c3m.metric("Z-statistic", f"{z_stat:.4f}")
-            c4m.metric("p-value", f"{p_val:.6f}")
+                st.markdown(f"**H₀:** The sequence is random (no pattern above/below median)")
+                c1m, c2m, c3m, c4m = st.columns(4)
+                c1m.metric("Number of Runs", str(runs))
+                c2m.metric("Expected Runs", f"{expected_runs:.2f}")
+                c3m.metric("Z-statistic", f"{z_stat:.4f}")
+                c4m.metric("p-value", f"{p_val:.6f}")
 
-            st.write(f"**Median:** {median_val:.4f}  |  **Above:** {n_above}  |  **Below:** {n_below}")
-            significance_result(p_val, alpha, "Runs Test")
+                st.write(f"**Median:** {median_val:.4f}  |  **Above:** {n_above}  |  **Below:** {n_below}")
+                significance_result(p_val, alpha, "Runs Test")
 
-            try:
-                interpretation_card(interpret_p_value(p_val, alpha))
-            except Exception:
-                pass
+                try:
+                    interpretation_card(interpret_p_value(p_val, alpha))
+                except Exception:
+                    pass
 
-            # Sequence plot
-            section_header("Sequence Plot")
-            fig_runs = go.Figure()
-            x_idx = np.arange(len(data))
-            colors = ["#6366f1" if b == 1 else "#ef4444" for b in binary]
-            fig_runs.add_trace(go.Scatter(
-                x=x_idx, y=data, mode="lines+markers",
-                marker=dict(color=colors, size=5),
-                line=dict(color="gray", width=1),
-                name="Data",
-            ))
-            fig_runs.add_hline(y=median_val, line_dash="dash", line_color="red",
-                               annotation_text=f"Median={median_val:.3f}")
-            fig_runs.update_layout(
-                title=f"Sequence Plot with Runs: {col_name}",
-                xaxis_title="Observation Order",
-                yaxis_title=col_name,
-                height=400,
-            )
-            rdl_plotly_chart(fig_runs)
-            st.caption("Blue dots = above median, red dots = at or below median. "
-                       "Each change in color represents a new run.")
+                # Sequence plot
+                section_header("Sequence Plot")
+                fig_runs = go.Figure()
+                x_idx = np.arange(len(data))
+                colors = ["#6366f1" if b == 1 else "#ef4444" for b in binary]
+                fig_runs.add_trace(go.Scatter(
+                    x=x_idx, y=data, mode="lines+markers",
+                    marker=dict(color=colors, size=5),
+                    line=dict(color="gray", width=1),
+                    name="Data",
+                ))
+                fig_runs.add_hline(y=median_val, line_dash="dash", line_color="red",
+                                   annotation_text=f"Median={median_val:.3f}")
+                fig_runs.update_layout(
+                    title=f"Sequence Plot with Runs: {col_name}",
+                    xaxis_title="Observation Order",
+                    yaxis_title=col_name,
+                    height=400,
+                )
+                rdl_plotly_chart(fig_runs)
+                st.caption("Blue dots = above median, red dots = at or below median. "
+                           "Each change in color represents a new run.")
 
 
 def _render_two_sample(df: pd.DataFrame):
@@ -368,132 +372,133 @@ def _render_two_sample(df: pd.DataFrame):
         g2_name = st.selectbox("Group 2:", groups, index=min(1, len(groups) - 1), key="two_g2")
 
         if st.button("Run Test", key="run_two"):
-            g1 = df[df[group_col] == g1_name][value_col].dropna()
-            g2 = df[df[group_col] == g2_name][value_col].dropna()
+            with st.spinner("Running test..."):
+                g1 = df[df[group_col] == g1_name][value_col].dropna()
+                g2 = df[df[group_col] == g2_name][value_col].dropna()
 
-            # --- Validation checks (for parametric t-tests) ---
-            if test_type in ("Independent t-test", "Welch's t-test"):
-                try:
-                    checks = [
-                        check_sample_size(min(len(g1), len(g2)), "t-test"),
-                        check_normality(g1, label=str(g1_name)),
-                        check_normality(g2, label=str(g2_name)),
-                        check_equal_variance(g1, g2),
-                    ]
-                    validation_panel(checks)
-                    failed = [c for c in checks if c.status in ("warn", "fail")]
-                    if failed:
-                        alts = recommend_alternative("independent-t", failed)
-                        if alts:
-                            alternative_suggestion("Some assumptions may be violated", alts)
-                except Exception:
-                    pass
+                # --- Validation checks (for parametric t-tests) ---
+                if test_type in ("Independent t-test", "Welch's t-test"):
+                    try:
+                        checks = [
+                            check_sample_size(min(len(g1), len(g2)), "t-test"),
+                            check_normality(g1, label=str(g1_name)),
+                            check_normality(g2, label=str(g2_name)),
+                            check_equal_variance(g1, g2),
+                        ]
+                        validation_panel(checks)
+                        failed = [c for c in checks if c.status in ("warn", "fail")]
+                        if failed:
+                            alts = recommend_alternative("independent-t", failed)
+                            if alts:
+                                alternative_suggestion("Some assumptions may be violated", alts)
+                    except Exception:
+                        pass
 
-            if test_type == "Independent t-test":
-                stat, p = stats.ttest_ind(g1, g2, equal_var=True)
-                test_label = "t"
-            elif test_type == "Welch's t-test":
-                stat, p = stats.ttest_ind(g1, g2, equal_var=False)
-                test_label = "t"
-            elif test_type == "Mann-Whitney U":
-                stat, p = stats.mannwhitneyu(g1, g2, alternative="two-sided")
-                test_label = "U"
-            elif test_type == "Two-Sample KS Test":
-                stat, p = stats.ks_2samp(g1, g2)
-                test_label = "D"
-            elif test_type == "Bartlett's Test":
-                stat, p = stats.bartlett(g1, g2)
-                test_label = "T"
-            elif test_type == "Mood's Median Test":
-                try:
-                    mood_stat, mood_p, mood_med, mood_table = stats.median_test(g1, g2)
-                    stat, p = mood_stat, mood_p
-                except Exception as e:
-                    st.error(f"Mood's median test failed: {e}")
-                    return
-                test_label = "chi2"
+                if test_type == "Independent t-test":
+                    stat, p = stats.ttest_ind(g1, g2, equal_var=True)
+                    test_label = "t"
+                elif test_type == "Welch's t-test":
+                    stat, p = stats.ttest_ind(g1, g2, equal_var=False)
+                    test_label = "t"
+                elif test_type == "Mann-Whitney U":
+                    stat, p = stats.mannwhitneyu(g1, g2, alternative="two-sided")
+                    test_label = "U"
+                elif test_type == "Two-Sample KS Test":
+                    stat, p = stats.ks_2samp(g1, g2)
+                    test_label = "D"
+                elif test_type == "Bartlett's Test":
+                    stat, p = stats.bartlett(g1, g2)
+                    test_label = "T"
+                elif test_type == "Mood's Median Test":
+                    try:
+                        mood_stat, mood_p, mood_med, mood_table = stats.median_test(g1, g2)
+                        stat, p = mood_stat, mood_p
+                    except Exception as e:
+                        st.error(f"Mood's median test failed: {e}")
+                        return
+                    test_label = "chi2"
 
-            if test_type == "Bartlett's Test":
-                # Bartlett's tests equal variances, not means
-                st.markdown(f"**H₀:** The two groups have equal variances")
-                c1, c2, c3, c4 = st.columns(4)
-                c1.metric(f"{test_label}-statistic", f"{stat:.4f}")
-                c2.metric("p-value", f"{p:.6f}")
-                c3.metric(f"Var({g1_name})", f"{g1.var():.4f}")
-                c4.metric(f"Var({g2_name})", f"{g2.var():.4f}")
-                st.write(f"**Group 1 ({g1_name}):** n={len(g1)}, sd={g1.std():.4f}")
-                st.write(f"**Group 2 ({g2_name}):** n={len(g2)}, sd={g2.std():.4f}")
-                variance_ratio = g1.var() / g2.var() if g2.var() != 0 else np.nan
-                significance_result(p, alpha, "Bartlett's Test",
-                                    effect_size=variance_ratio, effect_label="Variance ratio")
+                if test_type == "Bartlett's Test":
+                    # Bartlett's tests equal variances, not means
+                    st.markdown(f"**H₀:** The two groups have equal variances")
+                    c1, c2, c3, c4 = st.columns(4)
+                    c1.metric(f"{test_label}-statistic", f"{stat:.4f}")
+                    c2.metric("p-value", f"{p:.6f}")
+                    c3.metric(f"Var({g1_name})", f"{g1.var():.4f}")
+                    c4.metric(f"Var({g2_name})", f"{g2.var():.4f}")
+                    st.write(f"**Group 1 ({g1_name}):** n={len(g1)}, sd={g1.std():.4f}")
+                    st.write(f"**Group 2 ({g2_name}):** n={len(g2)}, sd={g2.std():.4f}")
+                    variance_ratio = g1.var() / g2.var() if g2.var() != 0 else np.nan
+                    significance_result(p, alpha, "Bartlett's Test",
+                                        effect_size=variance_ratio, effect_label="Variance ratio")
 
-                try:
-                    interpretation_card(interpret_p_value(p, alpha))
-                except Exception:
-                    pass
+                    try:
+                        interpretation_card(interpret_p_value(p, alpha))
+                    except Exception:
+                        pass
 
-                # Visualization
-                fig = make_subplots(rows=1, cols=2, subplot_titles=("Distributions", "Box Plot"))
-                fig.add_trace(go.Histogram(x=g1, name=str(g1_name), opacity=0.6), row=1, col=1)
-                fig.add_trace(go.Histogram(x=g2, name=str(g2_name), opacity=0.6), row=1, col=1)
-                fig.update_layout(barmode="overlay")
-                fig.add_trace(go.Box(y=g1, name=str(g1_name)), row=1, col=2)
-                fig.add_trace(go.Box(y=g2, name=str(g2_name)), row=1, col=2)
-                fig.update_layout(height=400)
-                rdl_plotly_chart(fig)
+                    # Visualization
+                    fig = make_subplots(rows=1, cols=2, subplot_titles=("Distributions", "Box Plot"))
+                    fig.add_trace(go.Histogram(x=g1, name=str(g1_name), opacity=0.6), row=1, col=1)
+                    fig.add_trace(go.Histogram(x=g2, name=str(g2_name), opacity=0.6), row=1, col=1)
+                    fig.update_layout(barmode="overlay")
+                    fig.add_trace(go.Box(y=g1, name=str(g1_name)), row=1, col=2)
+                    fig.add_trace(go.Box(y=g2, name=str(g2_name)), row=1, col=2)
+                    fig.update_layout(height=400)
+                    rdl_plotly_chart(fig)
 
-            elif test_type == "Mood's Median Test":
-                st.markdown(f"**H₀:** The two groups have the same median")
-                c1, c2, c3 = st.columns(3)
-                c1.metric(f"{test_label}-statistic", f"{stat:.4f}")
-                c2.metric("p-value", f"{p:.6f}")
-                c3.metric("Grand Median", f"{mood_med:.4f}")
+                elif test_type == "Mood's Median Test":
+                    st.markdown(f"**H₀:** The two groups have the same median")
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric(f"{test_label}-statistic", f"{stat:.4f}")
+                    c2.metric("p-value", f"{p:.6f}")
+                    c3.metric("Grand Median", f"{mood_med:.4f}")
 
-                st.markdown("**Contingency Table (above/below grand median):**")
-                cont_df = pd.DataFrame(
-                    mood_table,
-                    index=["Above median", "At or below median"],
-                    columns=[str(g1_name), str(g2_name)],
-                )
-                st.dataframe(cont_df, use_container_width=True)
-                st.write(f"**Group 1 ({g1_name}):** n={len(g1)}, median={g1.median():.4f}")
-                st.write(f"**Group 2 ({g2_name}):** n={len(g2)}, median={g2.median():.4f}")
-                significance_result(p, alpha, "Mood's Median Test")
+                    st.markdown("**Contingency Table (above/below grand median):**")
+                    cont_df = pd.DataFrame(
+                        mood_table,
+                        index=["Above median", "At or below median"],
+                        columns=[str(g1_name), str(g2_name)],
+                    )
+                    st.dataframe(cont_df, use_container_width=True)
+                    st.write(f"**Group 1 ({g1_name}):** n={len(g1)}, median={g1.median():.4f}")
+                    st.write(f"**Group 2 ({g2_name}):** n={len(g2)}, median={g2.median():.4f}")
+                    significance_result(p, alpha, "Mood's Median Test")
 
-                try:
-                    interpretation_card(interpret_p_value(p, alpha))
-                except Exception:
-                    pass
+                    try:
+                        interpretation_card(interpret_p_value(p, alpha))
+                    except Exception:
+                        pass
 
-            else:
-                d = _cohens_d(g1, g2)
+                else:
+                    d = _cohens_d(g1, g2)
 
-                st.markdown(f"**H₀:** The two groups have the same {'mean' if 'test' in test_type.lower() else 'distribution'}")
-                c1, c2, c3, c4 = st.columns(4)
-                c1.metric(f"{test_label}-statistic", f"{stat:.4f}")
-                c2.metric("p-value", f"{p:.6f}")
-                c3.metric("Cohen's d", f"{d:.4f} ({_effect_size_label(d)})")
-                c4.metric("Diff of Means", f"{g1.mean() - g2.mean():.4f}")
+                    st.markdown(f"**H₀:** The two groups have the same {'mean' if 'test' in test_type.lower() else 'distribution'}")
+                    c1, c2, c3, c4 = st.columns(4)
+                    c1.metric(f"{test_label}-statistic", f"{stat:.4f}")
+                    c2.metric("p-value", f"{p:.6f}")
+                    c3.metric("Cohen's d", f"{d:.4f} ({_effect_size_label(d)})")
+                    c4.metric("Diff of Means", f"{g1.mean() - g2.mean():.4f}")
 
-                st.write(f"**Group 1 ({g1_name}):** n={len(g1)}, mean={g1.mean():.4f}, sd={g1.std():.4f}")
-                st.write(f"**Group 2 ({g2_name}):** n={len(g2)}, mean={g2.mean():.4f}, sd={g2.std():.4f}")
-                significance_result(p, alpha, test_type, effect_size=d, effect_label="Cohen's d")
+                    st.write(f"**Group 1 ({g1_name}):** n={len(g1)}, mean={g1.mean():.4f}, sd={g1.std():.4f}")
+                    st.write(f"**Group 2 ({g2_name}):** n={len(g2)}, mean={g2.mean():.4f}, sd={g2.std():.4f}")
+                    significance_result(p, alpha, test_type, effect_size=d, effect_label="Cohen's d")
 
-                # --- Interpretation card ---
-                try:
-                    interpretation_card(interpret_p_value(p, alpha))
-                except Exception:
-                    pass
+                    # --- Interpretation card ---
+                    try:
+                        interpretation_card(interpret_p_value(p, alpha))
+                    except Exception:
+                        pass
 
-                # Visualization
-                fig = make_subplots(rows=1, cols=2, subplot_titles=("Distributions", "Box Plot"))
-                fig.add_trace(go.Histogram(x=g1, name=str(g1_name), opacity=0.6), row=1, col=1)
-                fig.add_trace(go.Histogram(x=g2, name=str(g2_name), opacity=0.6), row=1, col=1)
-                fig.update_layout(barmode="overlay")
-                fig.add_trace(go.Box(y=g1, name=str(g1_name)), row=1, col=2)
-                fig.add_trace(go.Box(y=g2, name=str(g2_name)), row=1, col=2)
-                fig.update_layout(height=400)
-                rdl_plotly_chart(fig)
+                    # Visualization
+                    fig = make_subplots(rows=1, cols=2, subplot_titles=("Distributions", "Box Plot"))
+                    fig.add_trace(go.Histogram(x=g1, name=str(g1_name), opacity=0.6), row=1, col=1)
+                    fig.add_trace(go.Histogram(x=g2, name=str(g2_name), opacity=0.6), row=1, col=1)
+                    fig.update_layout(barmode="overlay")
+                    fig.add_trace(go.Box(y=g1, name=str(g1_name)), row=1, col=2)
+                    fig.add_trace(go.Box(y=g2, name=str(g2_name)), row=1, col=2)
+                    fig.update_layout(height=400)
+                    rdl_plotly_chart(fig)
 
     elif test_type in ("Paired t-test", "Wilcoxon Signed-Rank (paired)"):
         if len(num_cols) < 2:
@@ -503,62 +508,63 @@ def _render_two_sample(df: pd.DataFrame):
         col2 = st.selectbox("Column 2 (after/condition B):", num_cols, index=min(1, len(num_cols) - 1), key="pair_c2")
 
         if st.button("Run Test", key="run_paired"):
-            data = df[[col1, col2]].dropna()
-            g1, g2 = data[col1], data[col2]
-            diff = g1 - g2
+            with st.spinner("Running test..."):
+                data = df[[col1, col2]].dropna()
+                g1, g2 = data[col1], data[col2]
+                diff = g1 - g2
 
-            # --- Validation checks (for paired t-test) ---
-            if test_type == "Paired t-test":
+                # --- Validation checks (for paired t-test) ---
+                if test_type == "Paired t-test":
+                    try:
+                        checks = [
+                            check_sample_size(len(diff), "paired-t"),
+                            check_normality(diff, label="paired differences"),
+                        ]
+                        validation_panel(checks)
+                        failed = [c for c in checks if c.status in ("warn", "fail")]
+                        if failed:
+                            alts = recommend_alternative("paired-t", failed)
+                            if alts:
+                                alternative_suggestion("Some assumptions may be violated", alts)
+                    except Exception:
+                        pass
+
+                if test_type == "Paired t-test":
+                    stat, p = stats.ttest_rel(g1, g2)
+                    d = diff.mean() / diff.std() if diff.std() != 0 else 0
+                    test_label = "t"
+                else:
+                    stat, p = stats.wilcoxon(diff[diff != 0])
+                    d = diff.mean() / diff.std() if diff.std() != 0 else 0
+                    test_label = "W"
+
+                st.markdown(f"**H₀:** No difference between paired measurements")
+                c1, c2, c3 = st.columns(3)
+                c1.metric(f"{test_label}-statistic", f"{stat:.4f}")
+                c2.metric("p-value", f"{p:.6f}")
+                c3.metric("Effect size d", f"{d:.4f} ({_effect_size_label(d)})")
+                st.write(f"**Mean difference:** {diff.mean():.4f} ± {diff.std():.4f}")
+                significance_result(p, alpha, test_type, effect_size=d, effect_label="Effect size d")
+
+                # --- Interpretation card ---
                 try:
-                    checks = [
-                        check_sample_size(len(diff), "paired-t"),
-                        check_normality(diff, label="paired differences"),
-                    ]
-                    validation_panel(checks)
-                    failed = [c for c in checks if c.status in ("warn", "fail")]
-                    if failed:
-                        alts = recommend_alternative("paired-t", failed)
-                        if alts:
-                            alternative_suggestion("Some assumptions may be violated", alts)
+                    interpretation_card(interpret_p_value(p, alpha))
                 except Exception:
                     pass
 
-            if test_type == "Paired t-test":
-                stat, p = stats.ttest_rel(g1, g2)
-                d = diff.mean() / diff.std() if diff.std() != 0 else 0
-                test_label = "t"
-            else:
-                stat, p = stats.wilcoxon(diff[diff != 0])
-                d = diff.mean() / diff.std() if diff.std() != 0 else 0
-                test_label = "W"
-
-            st.markdown(f"**H₀:** No difference between paired measurements")
-            c1, c2, c3 = st.columns(3)
-            c1.metric(f"{test_label}-statistic", f"{stat:.4f}")
-            c2.metric("p-value", f"{p:.6f}")
-            c3.metric("Effect size d", f"{d:.4f} ({_effect_size_label(d)})")
-            st.write(f"**Mean difference:** {diff.mean():.4f} ± {diff.std():.4f}")
-            significance_result(p, alpha, test_type, effect_size=d, effect_label="Effect size d")
-
-            # --- Interpretation card ---
-            try:
-                interpretation_card(interpret_p_value(p, alpha))
-            except Exception:
-                pass
-
-            fig = make_subplots(rows=1, cols=2, subplot_titles=("Paired Differences", "Before vs After"))
-            fig.add_trace(go.Histogram(x=diff, name="Differences"), row=1, col=1)
-            fig.add_vline(x=0, line_dash="dash", line_color="red", row=1, col=1)
-            fig.add_trace(go.Scatter(x=g1, y=g2, mode="markers", name="Pairs"), row=1, col=2)
-            min_val = min(g1.min(), g2.min())
-            max_val = max(g1.max(), g2.max())
-            fig.add_trace(go.Scatter(x=[min_val, max_val], y=[min_val, max_val],
-                                     mode="lines", name="y=x", line=dict(dash="dash", color="red")),
-                          row=1, col=2)
-            fig.update_layout(height=400)
-            fig.update_xaxes(title_text=col1, row=1, col=2)
-            fig.update_yaxes(title_text=col2, row=1, col=2)
-            rdl_plotly_chart(fig)
+                fig = make_subplots(rows=1, cols=2, subplot_titles=("Paired Differences", "Before vs After"))
+                fig.add_trace(go.Histogram(x=diff, name="Differences"), row=1, col=1)
+                fig.add_vline(x=0, line_dash="dash", line_color="red", row=1, col=1)
+                fig.add_trace(go.Scatter(x=g1, y=g2, mode="markers", name="Pairs"), row=1, col=2)
+                min_val = min(g1.min(), g2.min())
+                max_val = max(g1.max(), g2.max())
+                fig.add_trace(go.Scatter(x=[min_val, max_val], y=[min_val, max_val],
+                                         mode="lines", name="y=x", line=dict(dash="dash", color="red")),
+                              row=1, col=2)
+                fig.update_layout(height=400)
+                fig.update_xaxes(title_text=col1, row=1, col=2)
+                fig.update_yaxes(title_text=col2, row=1, col=2)
+                rdl_plotly_chart(fig)
 
 
 def _render_chi_square(df: pd.DataFrame):
@@ -589,117 +595,119 @@ def _render_chi_square(df: pd.DataFrame):
         col2 = st.selectbox("Variable 2:", [c for c in cat_cols if c != col1], key="chi_col2")
 
         if st.button("Run Test", key="run_chi_ind"):
-            ct = pd.crosstab(df[col1], df[col2])
-            st.markdown("**Contingency Table (Observed):**")
-            st.dataframe(ct, use_container_width=True)
+            with st.spinner("Running test..."):
+                ct = pd.crosstab(df[col1], df[col2])
+                st.markdown("**Contingency Table (Observed):**")
+                st.dataframe(ct, use_container_width=True)
 
-            chi2, p, dof, expected = stats.chi2_contingency(ct)
-            n = ct.values.sum()
-            k = min(ct.shape)
-            cramers_v = np.sqrt(chi2 / (n * (k - 1))) if (n * (k - 1)) > 0 else 0
+                chi2, p, dof, expected = stats.chi2_contingency(ct)
+                n = ct.values.sum()
+                k = min(ct.shape)
+                cramers_v = np.sqrt(chi2 / (n * (k - 1))) if (n * (k - 1)) > 0 else 0
 
-            # --- Validation checks ---
-            try:
-                checks = [
-                    check_sample_size(n, "chi-square"),
-                    check_expected_frequencies(ct.values),
-                ]
-                validation_panel(checks)
-                failed = [c for c in checks if c.status in ("warn", "fail")]
-                if failed:
-                    alts = recommend_alternative("chi-square", failed)
-                    if alts:
-                        alternative_suggestion("Some assumptions may be violated", alts)
-            except Exception:
-                pass
+                # --- Validation checks ---
+                try:
+                    checks = [
+                        check_sample_size(n, "chi-square"),
+                        check_expected_frequencies(ct.values),
+                    ]
+                    validation_panel(checks)
+                    failed = [c for c in checks if c.status in ("warn", "fail")]
+                    if failed:
+                        alts = recommend_alternative("chi-square", failed)
+                        if alts:
+                            alternative_suggestion("Some assumptions may be violated", alts)
+                except Exception:
+                    pass
 
-            st.markdown("**Expected Frequencies:**")
-            expected_df = pd.DataFrame(expected, index=ct.index, columns=ct.columns).round(2)
-            st.dataframe(expected_df, use_container_width=True)
+                st.markdown("**Expected Frequencies:**")
+                expected_df = pd.DataFrame(expected, index=ct.index, columns=ct.columns).round(2)
+                st.dataframe(expected_df, use_container_width=True)
 
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("χ²", f"{chi2:.4f}")
-            c2.metric("p-value", f"{p:.6f}")
-            c3.metric("df", str(dof))
-            c4.metric("Cramér's V", f"{cramers_v:.4f}")
-            significance_result(p, alpha, "Chi-Square Independence", effect_size=cramers_v, effect_label="Cramér's V")
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric("χ²", f"{chi2:.4f}")
+                c2.metric("p-value", f"{p:.6f}")
+                c3.metric("df", str(dof))
+                c4.metric("Cramér's V", f"{cramers_v:.4f}")
+                significance_result(p, alpha, "Chi-Square Independence", effect_size=cramers_v, effect_label="Cramér's V")
 
-            # --- Interpretation card ---
-            try:
-                interpretation_card(interpret_p_value(p, alpha))
-            except Exception:
-                pass
+                # --- Interpretation card ---
+                try:
+                    interpretation_card(interpret_p_value(p, alpha))
+                except Exception:
+                    pass
 
-            # Fisher's exact for 2x2
-            if ct.shape == (2, 2):
-                odds, fisher_p = stats.fisher_exact(ct)
-                st.write(f"**Fisher's exact test:** odds ratio = {odds:.4f}, p = {fisher_p:.6f}")
+                # Fisher's exact for 2x2
+                if ct.shape == (2, 2):
+                    odds, fisher_p = stats.fisher_exact(ct)
+                    st.write(f"**Fisher's exact test:** odds ratio = {odds:.4f}, p = {fisher_p:.6f}")
 
-            # Residuals heatmap
-            with np.errstate(divide="ignore", invalid="ignore"):
-                residuals = np.where(expected > 0, (ct.values - expected) / np.sqrt(expected), 0.0)
-            fig = px.imshow(residuals, x=ct.columns.astype(str), y=ct.index.astype(str),
-                            color_continuous_scale="RdBu_r", text_auto=".2f",
-                            title="Standardized Residuals")
-            rdl_plotly_chart(fig)
+                # Residuals heatmap
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    residuals = np.where(expected > 0, (ct.values - expected) / np.sqrt(expected), 0.0)
+                fig = px.imshow(residuals, x=ct.columns.astype(str), y=ct.index.astype(str),
+                                color_continuous_scale="RdBu_r", text_auto=".2f",
+                                title="Standardized Residuals")
+                rdl_plotly_chart(fig)
 
     elif test_type == "Chi-Square Goodness of Fit":
         col_name = st.selectbox("Variable:", cat_cols, key="chi_gof_col")
         dist_type = st.selectbox("Expected distribution:", ["Uniform", "Custom"], key="chi_gof_dist")
 
         if st.button("Run Test", key="run_chi_gof"):
-            observed = df[col_name].value_counts().sort_index()
-            n = observed.sum()
+            with st.spinner("Running test..."):
+                observed = df[col_name].value_counts().sort_index()
+                n = observed.sum()
 
-            if dist_type == "Uniform":
-                k = len(observed)
-                expected = np.full(k, n / k)
-            else:
-                expected = np.full(len(observed), n / len(observed))
+                if dist_type == "Uniform":
+                    k = len(observed)
+                    expected = np.full(k, n / k)
+                else:
+                    expected = np.full(len(observed), n / len(observed))
 
-            chi2, p = stats.chisquare(observed.values, f_exp=expected)
+                chi2, p = stats.chisquare(observed.values, f_exp=expected)
 
-            # --- Validation checks ---
-            try:
-                checks = [
-                    check_sample_size(int(n), "chi-square"),
-                    check_expected_frequencies(observed.values.reshape(1, -1)),
-                ]
-                validation_panel(checks)
-                failed = [c for c in checks if c.status in ("warn", "fail")]
-                if failed:
-                    alts = recommend_alternative("chi-square", failed)
-                    if alts:
-                        alternative_suggestion("Some assumptions may be violated", alts)
-            except Exception:
-                pass
+                # --- Validation checks ---
+                try:
+                    checks = [
+                        check_sample_size(int(n), "chi-square"),
+                        check_expected_frequencies(observed.values.reshape(1, -1)),
+                    ]
+                    validation_panel(checks)
+                    failed = [c for c in checks if c.status in ("warn", "fail")]
+                    if failed:
+                        alts = recommend_alternative("chi-square", failed)
+                        if alts:
+                            alternative_suggestion("Some assumptions may be violated", alts)
+                except Exception:
+                    pass
 
-            st.markdown("**Observed vs Expected:**")
-            comp_df = pd.DataFrame({
-                "Category": observed.index,
-                "Observed": observed.values,
-                "Expected": expected.round(2),
-            })
-            st.dataframe(comp_df, use_container_width=True, hide_index=True)
+                st.markdown("**Observed vs Expected:**")
+                comp_df = pd.DataFrame({
+                    "Category": observed.index,
+                    "Observed": observed.values,
+                    "Expected": expected.round(2),
+                })
+                st.dataframe(comp_df, use_container_width=True, hide_index=True)
 
-            c1, c2, c3 = st.columns(3)
-            c1.metric("χ²", f"{chi2:.4f}")
-            c2.metric("p-value", f"{p:.6f}")
-            c3.metric("df", str(len(observed) - 1))
-            significance_result(p, alpha, "Chi-Square Goodness of Fit")
+                c1, c2, c3 = st.columns(3)
+                c1.metric("χ²", f"{chi2:.4f}")
+                c2.metric("p-value", f"{p:.6f}")
+                c3.metric("df", str(len(observed) - 1))
+                significance_result(p, alpha, "Chi-Square Goodness of Fit")
 
-            # --- Interpretation card ---
-            try:
-                interpretation_card(interpret_p_value(p, alpha))
-            except Exception:
-                pass
+                # --- Interpretation card ---
+                try:
+                    interpretation_card(interpret_p_value(p, alpha))
+                except Exception:
+                    pass
 
-            fig = go.Figure()
-            fig.add_trace(go.Bar(x=observed.index.astype(str), y=observed.values, name="Observed"))
-            fig.add_trace(go.Scatter(x=observed.index.astype(str), y=expected, name="Expected",
-                                     mode="markers+lines", line=dict(color="red", width=2)))
-            fig.update_layout(title="Observed vs Expected Frequencies", height=400)
-            rdl_plotly_chart(fig)
+                fig = go.Figure()
+                fig.add_trace(go.Bar(x=observed.index.astype(str), y=observed.values, name="Observed"))
+                fig.add_trace(go.Scatter(x=observed.index.astype(str), y=expected, name="Expected",
+                                         mode="markers+lines", line=dict(color="#ef4444", width=2)))
+                fig.update_layout(title="Observed vs Expected Frequencies", height=400)
+                rdl_plotly_chart(fig)
 
     elif test_type == "McNemar's Test (paired binary)":
         # Identify binary columns (categorical with 2 levels or numeric with 2 unique values)
@@ -1944,11 +1952,11 @@ Adjust prior parameters to see how prior beliefs combine with data.
 
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=x_range, y=prior_pdf, mode="lines",
-                                 name="Prior", line=dict(dash="dash", color="blue")))
+                                 name="Prior", line=dict(dash="dash", color="#3b82f6")))
         fig.add_trace(go.Scatter(x=x_range, y=likelihood_pdf, mode="lines",
-                                 name="Likelihood", line=dict(dash="dot", color="green")))
+                                 name="Likelihood", line=dict(dash="dot", color="#22c55e")))
         fig.add_trace(go.Scatter(x=x_range, y=posterior_pdf, mode="lines",
-                                 name="Posterior", line=dict(color="red", width=2)))
+                                 name="Posterior", line=dict(color="#ef4444", width=2)))
         fig.add_vline(x=post_mu, line_dash="dot", line_color="red",
                       annotation_text=f"Post mean={post_mu:.3f}")
         fig.update_layout(title="Prior / Likelihood / Posterior",
@@ -1999,9 +2007,9 @@ Adjust prior parameters to see how prior beliefs combine with data.
 
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=p_range, y=prior_pdf, mode="lines",
-                                 name="Prior", line=dict(dash="dash", color="blue")))
+                                 name="Prior", line=dict(dash="dash", color="#3b82f6")))
         fig.add_trace(go.Scatter(x=p_range, y=posterior_pdf, mode="lines",
-                                 name="Posterior", line=dict(color="red", width=2)))
+                                 name="Posterior", line=dict(color="#ef4444", width=2)))
         fig.add_vline(x=post_mean, line_dash="dot", line_color="red",
                       annotation_text=f"Post mean={post_mean:.3f}")
         fig.add_vrect(x0=ci_lower, x1=ci_upper, fillcolor="red", opacity=0.1)
@@ -2051,9 +2059,9 @@ Adjust prior parameters to see how prior beliefs combine with data.
 
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=lam_range, y=prior_pdf, mode="lines",
-                                 name="Prior", line=dict(dash="dash", color="blue")))
+                                 name="Prior", line=dict(dash="dash", color="#3b82f6")))
         fig.add_trace(go.Scatter(x=lam_range, y=posterior_pdf, mode="lines",
-                                 name="Posterior", line=dict(color="red", width=2)))
+                                 name="Posterior", line=dict(color="#ef4444", width=2)))
         fig.add_vline(x=post_mean, line_dash="dot", line_color="red",
                       annotation_text=f"Post mean={post_mean:.3f}")
         fig.add_vrect(x0=ci_lower, x1=ci_upper, fillcolor="red", opacity=0.1)

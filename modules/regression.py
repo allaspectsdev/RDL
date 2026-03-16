@@ -85,103 +85,104 @@ def _render_simple_linear(df: pd.DataFrame):
     show_pi = st.checkbox("Show prediction band", value=True, key="slr_pi")
 
     if st.button("Fit Model", key="fit_slr"):
-        data = df[[x_col, y_col]].dropna()
-        x, y = data[x_col].values, data[y_col].values
-        n = len(x)
+        with st.spinner("Fitting model..."):
+            data = df[[x_col, y_col]].dropna()
+            x, y = data[x_col].values, data[y_col].values
+            n = len(x)
 
-        if HAS_SM:
-            X = sm.add_constant(x)
-            model = sm.OLS(y, X).fit()
+            if HAS_SM:
+                X = sm.add_constant(x)
+                model = sm.OLS(y, X).fit()
 
-            # --- Validation checks ---
-            try:
-                residuals = model.resid
-                checks = [check_sample_size(n, "regression")]
-                checks.extend([
-                    check_residual_normality(residuals),
-                    check_independence(residuals),
-                    check_homoscedasticity(residuals, x),
-                ])
-                validation_panel(checks)
-            except Exception:
-                pass
+                # --- Validation checks ---
+                try:
+                    residuals = model.resid
+                    checks = [check_sample_size(n, "regression")]
+                    checks.extend([
+                        check_residual_normality(residuals),
+                        check_independence(residuals),
+                        check_homoscedasticity(residuals, x),
+                    ])
+                    validation_panel(checks)
+                except Exception:
+                    pass
 
-            section_header("Regression Summary")
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("R²", f"{model.rsquared:.4f}")
-            c2.metric("Adj R²", f"{model.rsquared_adj:.4f}")
-            c3.metric("F-statistic", f"{model.fvalue:.4f}")
-            c4.metric("p (F-test)", f"{model.f_pvalue:.6f}")
+                section_header("Regression Summary")
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric("R²", f"{model.rsquared:.4f}")
+                c2.metric("Adj R²", f"{model.rsquared_adj:.4f}")
+                c3.metric("F-statistic", f"{model.fvalue:.4f}")
+                c4.metric("p (F-test)", f"{model.f_pvalue:.6f}")
 
-            # --- Interpretation card for R² ---
-            try:
-                interpretation_card(interpret_r_squared(model.rsquared, model.rsquared_adj))
-            except Exception:
-                pass
+                # --- Interpretation card for R² ---
+                try:
+                    interpretation_card(interpret_r_squared(model.rsquared, model.rsquared_adj))
+                except Exception:
+                    pass
 
-            coef_df = pd.DataFrame({
-                "Coefficient": ["Intercept", x_col],
-                "Estimate": model.params,
-                "Std Error": model.bse,
-                "t-value": model.tvalues,
-                "p-value": model.pvalues,
-                "CI Lower (95%)": model.conf_int()[0],
-                "CI Upper (95%)": model.conf_int()[1],
-            }).round(6)
-            st.dataframe(coef_df, use_container_width=True, hide_index=True)
+                coef_df = pd.DataFrame({
+                    "Coefficient": ["Intercept", x_col],
+                    "Estimate": model.params,
+                    "Std Error": model.bse,
+                    "t-value": model.tvalues,
+                    "p-value": model.pvalues,
+                    "CI Lower (95%)": model.conf_int()[0],
+                    "CI Upper (95%)": model.conf_int()[1],
+                }).round(6)
+                st.dataframe(coef_df, use_container_width=True, hide_index=True)
 
-            b0, b1 = model.params
-            st.latex(f"y = {b0:.4f} + {b1:.4f} \\cdot x")
-            st.markdown(f"**AIC:** {model.aic:.2f}  |  **BIC:** {model.bic:.2f}  |  **RMSE:** {np.sqrt(model.mse_resid):.4f}")
-            help_tip("AIC vs BIC", "Both measure model fit penalized for complexity. **AIC** favors predictive accuracy; **BIC** penalizes complexity more heavily. Lower is better for both.")
+                b0, b1 = model.params
+                st.latex(f"y = {b0:.4f} + {b1:.4f} \\cdot x")
+                st.markdown(f"**AIC:** {model.aic:.2f}  |  **BIC:** {model.bic:.2f}  |  **RMSE:** {np.sqrt(model.mse_resid):.4f}")
+                help_tip("AIC vs BIC", "Both measure model fit penalized for complexity. **AIC** favors predictive accuracy; **BIC** penalizes complexity more heavily. Lower is better for both.")
 
-            # Plot
-            x_line = np.linspace(x.min(), x.max(), 200)
-            X_line = sm.add_constant(x_line)
-            y_pred = model.predict(X_line)
-            predictions = model.get_prediction(X_line)
-            ci_frame = predictions.summary_frame(alpha=0.05)
+                # Plot
+                x_line = np.linspace(x.min(), x.max(), 200)
+                X_line = sm.add_constant(x_line)
+                y_pred = model.predict(X_line)
+                predictions = model.get_prediction(X_line)
+                ci_frame = predictions.summary_frame(alpha=0.05)
 
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(x=x, y=y, mode="markers", name="Data",
-                                     marker=dict(size=6, opacity=0.7)))
-            fig.add_trace(go.Scatter(x=x_line, y=y_pred, mode="lines", name="Fit",
-                                     line=dict(color="red", width=2)))
-            if show_ci:
-                fig.add_trace(go.Scatter(x=np.concatenate([x_line, x_line[::-1]]),
-                                         y=np.concatenate([ci_frame["mean_ci_lower"].values,
-                                                           ci_frame["mean_ci_upper"].values[::-1]]),
-                                         fill="toself", fillcolor="rgba(255,0,0,0.1)",
-                                         line=dict(color="rgba(255,0,0,0)"), name="95% CI"))
-            if show_pi:
-                fig.add_trace(go.Scatter(x=np.concatenate([x_line, x_line[::-1]]),
-                                         y=np.concatenate([ci_frame["obs_ci_lower"].values,
-                                                           ci_frame["obs_ci_upper"].values[::-1]]),
-                                         fill="toself", fillcolor="rgba(0,0,255,0.05)",
-                                         line=dict(color="rgba(0,0,255,0)"), name="95% PI"))
-            fig.update_layout(title=f"{y_col} vs {x_col}", xaxis_title=x_col, yaxis_title=y_col, height=500)
-            rdl_plotly_chart(fig)
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(x=x, y=y, mode="markers", name="Data",
+                                         marker=dict(size=6, opacity=0.7)))
+                fig.add_trace(go.Scatter(x=x_line, y=y_pred, mode="lines", name="Fit",
+                                         line=dict(color="#ef4444", width=2)))
+                if show_ci:
+                    fig.add_trace(go.Scatter(x=np.concatenate([x_line, x_line[::-1]]),
+                                             y=np.concatenate([ci_frame["mean_ci_lower"].values,
+                                                               ci_frame["mean_ci_upper"].values[::-1]]),
+                                             fill="toself", fillcolor="rgba(239,68,68,0.1)",
+                                             line=dict(color="rgba(239,68,68,0)"), name="95% CI"))
+                if show_pi:
+                    fig.add_trace(go.Scatter(x=np.concatenate([x_line, x_line[::-1]]),
+                                             y=np.concatenate([ci_frame["obs_ci_lower"].values,
+                                                               ci_frame["obs_ci_upper"].values[::-1]]),
+                                             fill="toself", fillcolor="rgba(99,102,241,0.05)",
+                                             line=dict(color="rgba(99,102,241,0)"), name="95% PI"))
+                fig.update_layout(title=f"{y_col} vs {x_col}", xaxis_title=x_col, yaxis_title=y_col, height=500)
+                rdl_plotly_chart(fig)
 
-            # Residual plots
-            _plot_residuals(model, x_col, y_col)
-        else:
-            # Fallback without statsmodels
-            slope, intercept, r_value, p_value, std_err = stats.linregress(x, y)
-            # --- Validation checks (fallback) ---
-            try:
-                checks = [check_sample_size(n, "regression")]
-                validation_panel(checks)
-            except Exception:
-                pass
-            st.metric("R²", f"{r_value**2:.4f}")
-            # --- Interpretation card for R² (fallback) ---
-            try:
-                interpretation_card(interpret_r_squared(r_value**2))
-            except Exception:
-                pass
-            st.write(f"**y = {intercept:.4f} + {slope:.4f} · x**  (p = {p_value:.6f})")
-            fig = px.scatter(data, x=x_col, y=y_col, trendline="ols")
-            rdl_plotly_chart(fig)
+                # Residual plots
+                _plot_residuals(model, x_col, y_col)
+            else:
+                # Fallback without statsmodels
+                slope, intercept, r_value, p_value, std_err = stats.linregress(x, y)
+                # --- Validation checks (fallback) ---
+                try:
+                    checks = [check_sample_size(n, "regression")]
+                    validation_panel(checks)
+                except Exception:
+                    pass
+                st.metric("R²", f"{r_value**2:.4f}")
+                # --- Interpretation card for R² (fallback) ---
+                try:
+                    interpretation_card(interpret_r_squared(r_value**2))
+                except Exception:
+                    pass
+                st.write(f"**y = {intercept:.4f} + {slope:.4f} · x**  (p = {p_value:.6f})")
+                fig = px.scatter(data, x=x_col, y=y_col, trendline="ols")
+                rdl_plotly_chart(fig)
 
 
 def _render_multiple_linear(df: pd.DataFrame):
@@ -222,148 +223,149 @@ Observations with higher weight have more influence on the fitted model.
 """)
 
     if st.button("Fit Model", key="fit_mlr"):
-        data = df[[y_col] + x_cols].dropna()
-        if wls_weight_col:
-            data = df[[y_col] + x_cols + [wls_weight_col]].dropna()
+        with st.spinner("Fitting model..."):
+            data = df[[y_col] + x_cols].dropna()
+            if wls_weight_col:
+                data = df[[y_col] + x_cols + [wls_weight_col]].dropna()
 
-        y = data[y_col].values
-        X = sm.add_constant(data[x_cols].values)
-        n = len(y)
+            y = data[y_col].values
+            X = sm.add_constant(data[x_cols].values)
+            n = len(y)
 
-        # Fit OLS first (always needed for comparison or as base)
-        ols_model = sm.OLS(y, X).fit()
+            # Fit OLS first (always needed for comparison or as base)
+            ols_model = sm.OLS(y, X).fit()
 
-        if use_wls:
-            # Determine weights
-            if wls_method == "Inverse Variance (automatic)":
-                # Estimate weights from OLS residuals
-                abs_resid = np.abs(ols_model.resid)
-                # Regress |residuals| on X to get fitted variance proxy
-                resid_model = sm.OLS(abs_resid, X).fit()
-                fitted_var = resid_model.fittedvalues ** 2
-                # Avoid zero/negative weights
-                fitted_var = np.maximum(fitted_var, 1e-10)
-                weights = 1.0 / fitted_var
+            if use_wls:
+                # Determine weights
+                if wls_method == "Inverse Variance (automatic)":
+                    # Estimate weights from OLS residuals
+                    abs_resid = np.abs(ols_model.resid)
+                    # Regress |residuals| on X to get fitted variance proxy
+                    resid_model = sm.OLS(abs_resid, X).fit()
+                    fitted_var = resid_model.fittedvalues ** 2
+                    # Avoid zero/negative weights
+                    fitted_var = np.maximum(fitted_var, 1e-10)
+                    weights = 1.0 / fitted_var
+                else:
+                    weights = data[wls_weight_col].values.astype(float)
+                    if (weights <= 0).any():
+                        st.warning("Weight column contains non-positive values. Replacing with small positive value.")
+                        weights = np.maximum(weights, 1e-10)
+
+                from statsmodels.regression.linear_model import WLS
+                model = WLS(y, X, weights=weights).fit()
             else:
-                weights = data[wls_weight_col].values.astype(float)
-                if (weights <= 0).any():
-                    st.warning("Weight column contains non-positive values. Replacing with small positive value.")
-                    weights = np.maximum(weights, 1e-10)
+                model = ols_model
 
-            from statsmodels.regression.linear_model import WLS
-            model = WLS(y, X, weights=weights).fit()
-        else:
-            model = ols_model
+            # --- Validation checks ---
+            try:
+                residuals = model.resid
+                X_df = data[x_cols]
+                checks = [check_sample_size(n, "regression")]
+                checks.append(check_multicollinearity(X_df))
+                checks.extend([
+                    check_residual_normality(residuals),
+                    check_independence(residuals),
+                    check_homoscedasticity(residuals, data[x_cols].values),
+                ])
+                validation_panel(checks)
+            except Exception:
+                pass
 
-        # --- Validation checks ---
-        try:
-            residuals = model.resid
-            X_df = data[x_cols]
-            checks = [check_sample_size(n, "regression")]
-            checks.append(check_multicollinearity(X_df))
-            checks.extend([
-                check_residual_normality(residuals),
-                check_independence(residuals),
-                check_homoscedasticity(residuals, data[x_cols].values),
-            ])
-            validation_panel(checks)
-        except Exception:
-            pass
+            model_label = "WLS" if use_wls else "OLS"
+            section_header(f"Model Summary ({model_label})")
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("R²", f"{model.rsquared:.4f}")
+            c2.metric("Adj R²", f"{model.rsquared_adj:.4f}")
+            c3.metric("F-statistic", f"{model.fvalue:.4f}")
+            c4.metric("p (F-test)", f"{model.f_pvalue:.6f}")
 
-        model_label = "WLS" if use_wls else "OLS"
-        section_header(f"Model Summary ({model_label})")
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("R²", f"{model.rsquared:.4f}")
-        c2.metric("Adj R²", f"{model.rsquared_adj:.4f}")
-        c3.metric("F-statistic", f"{model.fvalue:.4f}")
-        c4.metric("p (F-test)", f"{model.f_pvalue:.6f}")
+            # --- Interpretation card for R² ---
+            try:
+                interpretation_card(interpret_r_squared(model.rsquared, model.rsquared_adj))
+            except Exception:
+                pass
 
-        # --- Interpretation card for R² ---
-        try:
-            interpretation_card(interpret_r_squared(model.rsquared, model.rsquared_adj))
-        except Exception:
-            pass
+            coef_names = ["Intercept"] + x_cols
+            coef_df = pd.DataFrame({
+                "Variable": coef_names,
+                "Coefficient": model.params,
+                "Std Error": model.bse,
+                "t-value": model.tvalues,
+                "p-value": model.pvalues,
+                "CI Lower": model.conf_int()[0],
+                "CI Upper": model.conf_int()[1],
+            }).round(6)
+            st.dataframe(coef_df, use_container_width=True, hide_index=True)
 
-        coef_names = ["Intercept"] + x_cols
-        coef_df = pd.DataFrame({
-            "Variable": coef_names,
-            "Coefficient": model.params,
-            "Std Error": model.bse,
-            "t-value": model.tvalues,
-            "p-value": model.pvalues,
-            "CI Lower": model.conf_int()[0],
-            "CI Upper": model.conf_int()[1],
-        }).round(6)
-        st.dataframe(coef_df, use_container_width=True, hide_index=True)
+            st.markdown(f"**AIC:** {model.aic:.2f}  |  **BIC:** {model.bic:.2f}  |  **RMSE:** {np.sqrt(model.mse_resid):.4f}")
 
-        st.markdown(f"**AIC:** {model.aic:.2f}  |  **BIC:** {model.bic:.2f}  |  **RMSE:** {np.sqrt(model.mse_resid):.4f}")
+            # WLS vs OLS comparison
+            if use_wls:
+                with st.expander("WLS vs OLS Comparison"):
+                    comp_df = pd.DataFrame({
+                        "Variable": coef_names,
+                        "OLS Coef": ols_model.params.round(6),
+                        "WLS Coef": model.params.round(6),
+                        "OLS SE": ols_model.bse.round(6),
+                        "WLS SE": model.bse.round(6),
+                        "OLS p-value": ols_model.pvalues.round(6),
+                        "WLS p-value": model.pvalues.round(6),
+                    })
+                    st.dataframe(comp_df, use_container_width=True, hide_index=True)
 
-        # WLS vs OLS comparison
-        if use_wls:
-            with st.expander("WLS vs OLS Comparison"):
-                comp_df = pd.DataFrame({
-                    "Variable": coef_names,
-                    "OLS Coef": ols_model.params.round(6),
-                    "WLS Coef": model.params.round(6),
-                    "OLS SE": ols_model.bse.round(6),
-                    "WLS SE": model.bse.round(6),
-                    "OLS p-value": ols_model.pvalues.round(6),
-                    "WLS p-value": model.pvalues.round(6),
-                })
-                st.dataframe(comp_df, use_container_width=True, hide_index=True)
+                    comp_metrics = pd.DataFrame({
+                        "Metric": ["R²", "Adj R²", "AIC", "BIC", "RMSE"],
+                        "OLS": [
+                            f"{ols_model.rsquared:.4f}", f"{ols_model.rsquared_adj:.4f}",
+                            f"{ols_model.aic:.2f}", f"{ols_model.bic:.2f}",
+                            f"{np.sqrt(ols_model.mse_resid):.4f}",
+                        ],
+                        "WLS": [
+                            f"{model.rsquared:.4f}", f"{model.rsquared_adj:.4f}",
+                            f"{model.aic:.2f}", f"{model.bic:.2f}",
+                            f"{np.sqrt(model.mse_resid):.4f}",
+                        ],
+                    })
+                    st.dataframe(comp_metrics, use_container_width=True, hide_index=True)
 
-                comp_metrics = pd.DataFrame({
-                    "Metric": ["R²", "Adj R²", "AIC", "BIC", "RMSE"],
-                    "OLS": [
-                        f"{ols_model.rsquared:.4f}", f"{ols_model.rsquared_adj:.4f}",
-                        f"{ols_model.aic:.2f}", f"{ols_model.bic:.2f}",
-                        f"{np.sqrt(ols_model.mse_resid):.4f}",
-                    ],
-                    "WLS": [
-                        f"{model.rsquared:.4f}", f"{model.rsquared_adj:.4f}",
-                        f"{model.aic:.2f}", f"{model.bic:.2f}",
-                        f"{np.sqrt(model.mse_resid):.4f}",
-                    ],
-                })
-                st.dataframe(comp_metrics, use_container_width=True, hide_index=True)
+            # VIF
+            section_header("Variance Inflation Factors")
+            X_no_const = data[x_cols].values
+            if X_no_const.shape[1] > 1:
+                vif_data = []
+                for i in range(X_no_const.shape[1]):
+                    try:
+                        vif_val = variance_inflation_factor(X_no_const, i)
+                    except Exception:
+                        vif_val = float("inf")
+                    vif_data.append({"Variable": x_cols[i], "VIF": round(vif_val, 4)})
+                vif_df = pd.DataFrame(vif_data)
+                st.dataframe(vif_df, use_container_width=True, hide_index=True)
+                high_vif = vif_df[vif_df["VIF"] > 10]
+                if not high_vif.empty:
+                    st.warning(f"High multicollinearity detected (VIF > 10): {', '.join(high_vif['Variable'].tolist())}")
+            help_tip("VIF interpretation", "VIF > 5 suggests moderate multicollinearity. VIF > 10 indicates severe multicollinearity — consider removing or combining correlated predictors.")
 
-        # VIF
-        section_header("Variance Inflation Factors")
-        X_no_const = data[x_cols].values
-        if X_no_const.shape[1] > 1:
-            vif_data = []
-            for i in range(X_no_const.shape[1]):
-                try:
-                    vif_val = variance_inflation_factor(X_no_const, i)
-                except Exception:
-                    vif_val = float("inf")
-                vif_data.append({"Variable": x_cols[i], "VIF": round(vif_val, 4)})
-            vif_df = pd.DataFrame(vif_data)
-            st.dataframe(vif_df, use_container_width=True, hide_index=True)
-            high_vif = vif_df[vif_df["VIF"] > 10]
-            if not high_vif.empty:
-                st.warning(f"High multicollinearity detected (VIF > 10): {', '.join(high_vif['Variable'].tolist())}")
-        help_tip("VIF interpretation", "VIF > 5 suggests moderate multicollinearity. VIF > 10 indicates severe multicollinearity — consider removing or combining correlated predictors.")
+            # Coefficient plot
+            fig = go.Figure()
+            coefs = model.params[1:]  # Skip intercept
+            ci = model.conf_int()
+            ci_lower = ci[1:, 0]
+            ci_upper = ci[1:, 1]
+            fig.add_trace(go.Scatter(x=coefs, y=x_cols, mode="markers",
+                                     marker=dict(size=10),
+                                     error_x=dict(type="data",
+                                                  symmetric=False,
+                                                  array=ci_upper - coefs,
+                                                  arrayminus=coefs - ci_lower),
+                                     name="Coefficients"))
+            fig.add_vline(x=0, line_dash="dash", line_color="gray")
+            fig.update_layout(title="Coefficient Plot (with 95% CI)", height=400)
+            rdl_plotly_chart(fig)
 
-        # Coefficient plot
-        fig = go.Figure()
-        coefs = model.params[1:]  # Skip intercept
-        ci = model.conf_int()
-        ci_lower = ci[1:, 0]
-        ci_upper = ci[1:, 1]
-        fig.add_trace(go.Scatter(x=coefs, y=x_cols, mode="markers",
-                                 marker=dict(size=10),
-                                 error_x=dict(type="data",
-                                              symmetric=False,
-                                              array=ci_upper - coefs,
-                                              arrayminus=coefs - ci_lower),
-                                 name="Coefficients"))
-        fig.add_vline(x=0, line_dash="dash", line_color="gray")
-        fig.update_layout(title="Coefficient Plot (with 95% CI)", height=400)
-        rdl_plotly_chart(fig)
-
-        # Residuals
-        _plot_residuals(model, "Fitted", y_col)
+            # Residuals
+            _plot_residuals(model, "Fitted", y_col)
 
 
 def _render_polynomial(df: pd.DataFrame):
@@ -379,98 +381,99 @@ def _render_polynomial(df: pd.DataFrame):
     degree = c3.slider("Degree:", 2, 6, 2, key="poly_deg")
 
     if st.button("Fit Model", key="fit_poly"):
-        data = df[[x_col, y_col]].dropna()
-        x, y = data[x_col].values, data[y_col].values
+        with st.spinner("Fitting model..."):
+            data = df[[x_col, y_col]].dropna()
+            x, y = data[x_col].values, data[y_col].values
 
-        # Fit polynomial
-        coeffs = np.polyfit(x, y, degree)
-        poly_func = np.poly1d(coeffs)
-        y_pred = poly_func(x)
+            # Fit polynomial
+            coeffs = np.polyfit(x, y, degree)
+            poly_func = np.poly1d(coeffs)
+            y_pred = poly_func(x)
 
-        # R² and adjusted R²
-        ss_res = np.sum((y - y_pred) ** 2)
-        ss_tot = np.sum((y - y.mean()) ** 2)
-        n = len(x)
-        if ss_tot == 0:
-            st.warning("Constant target variable — R² is undefined.")
-            r2 = np.nan
-            adj_r2 = np.nan
-        elif n <= degree + 1:
-            st.warning(f"Too few points ({n}) for polynomial degree {degree}.")
-            r2 = 1 - ss_res / ss_tot
-            adj_r2 = np.nan
-        else:
-            r2 = 1 - ss_res / ss_tot
-            adj_r2 = 1 - (1 - r2) * (n - 1) / (n - degree - 1)
-        rmse = np.sqrt(ss_res / n)
-
-        # --- Validation checks ---
-        try:
-            checks = [check_sample_size(n, "regression")]
-            residuals_poly = y - y_pred
-            checks.append(check_residual_normality(residuals_poly))
-            validation_panel(checks)
-        except Exception:
-            pass
-
-        c1, c2, c3 = st.columns(3)
-        c1.metric("R²", f"{r2:.4f}")
-        c2.metric("Adjusted R²", f"{adj_r2:.4f}")
-        c3.metric("RMSE", f"{rmse:.4f}")
-
-        # --- Interpretation card for R² ---
-        try:
-            if not np.isnan(r2):
-                interpretation_card(interpret_r_squared(r2, adj_r2 if not np.isnan(adj_r2) else None))
-        except Exception:
-            pass
-
-        # Build LaTeX equation
-        latex_terms = []
-        for i, c in enumerate(coeffs):
-            power = degree - i
-            if power == 0:
-                latex_terms.append(f"{c:.4f}")
-            elif power == 1:
-                latex_terms.append(f"{c:.4f}x")
+            # R² and adjusted R²
+            ss_res = np.sum((y - y_pred) ** 2)
+            ss_tot = np.sum((y - y.mean()) ** 2)
+            n = len(x)
+            if ss_tot == 0:
+                st.warning("Constant target variable — R² is undefined.")
+                r2 = np.nan
+                adj_r2 = np.nan
+            elif n <= degree + 1:
+                st.warning(f"Too few points ({n}) for polynomial degree {degree}.")
+                r2 = 1 - ss_res / ss_tot
+                adj_r2 = np.nan
             else:
-                latex_terms.append(f"{c:.4f}x^{{{power}}}")
-        st.latex("y = " + " + ".join(latex_terms))
+                r2 = 1 - ss_res / ss_tot
+                adj_r2 = 1 - (1 - r2) * (n - 1) / (n - degree - 1)
+            rmse = np.sqrt(ss_res / n)
 
-        # Plot
-        x_line = np.linspace(x.min(), x.max(), 300)
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(x=x, y=y, mode="markers", name="Data",
-                                 marker=dict(size=6, opacity=0.7)))
-        fig.add_trace(go.Scatter(x=x_line, y=poly_func(x_line), mode="lines",
-                                 name=f"Degree {degree}", line=dict(color="red", width=2)))
-        fig.update_layout(title=f"Polynomial Regression (degree={degree})",
-                          xaxis_title=x_col, yaxis_title=y_col, height=500)
-        rdl_plotly_chart(fig)
+            # --- Validation checks ---
+            try:
+                checks = [check_sample_size(n, "regression")]
+                residuals_poly = y - y_pred
+                checks.append(check_residual_normality(residuals_poly))
+                validation_panel(checks)
+            except Exception:
+                pass
 
-        # Compare degrees
-        with st.expander("Compare Polynomial Degrees"):
-            comp = []
-            fig2 = go.Figure()
-            fig2.add_trace(go.Scatter(x=x, y=y, mode="markers", name="Data",
-                                      marker=dict(color="gray", size=4, opacity=0.5)))
-            colors = px.colors.qualitative.Set1
-            for d in range(1, degree + 1):
-                c_d = np.polyfit(x, y, d)
-                p_d = np.poly1d(c_d)
-                y_d = p_d(x)
-                ss_r = np.sum((y - y_d) ** 2)
-                r2_d = 1 - ss_r / ss_tot
-                adj_r2_d = 1 - (1 - r2_d) * (n - 1) / (n - d - 1)
-                comp.append({"Degree": d, "R²": round(r2_d, 4),
-                             "Adj R²": round(adj_r2_d, 4),
-                             "RMSE": round(np.sqrt(ss_r / n), 4)})
-                fig2.add_trace(go.Scatter(x=x_line, y=p_d(x_line), mode="lines",
-                                          name=f"Degree {d}",
-                                          line=dict(color=colors[d % len(colors)])))
-            st.dataframe(pd.DataFrame(comp), use_container_width=True, hide_index=True)
-            fig2.update_layout(height=400, title="Model Comparison")
-            rdl_plotly_chart(fig2)
+            c1, c2, c3 = st.columns(3)
+            c1.metric("R²", f"{r2:.4f}")
+            c2.metric("Adjusted R²", f"{adj_r2:.4f}")
+            c3.metric("RMSE", f"{rmse:.4f}")
+
+            # --- Interpretation card for R² ---
+            try:
+                if not np.isnan(r2):
+                    interpretation_card(interpret_r_squared(r2, adj_r2 if not np.isnan(adj_r2) else None))
+            except Exception:
+                pass
+
+            # Build LaTeX equation
+            latex_terms = []
+            for i, c in enumerate(coeffs):
+                power = degree - i
+                if power == 0:
+                    latex_terms.append(f"{c:.4f}")
+                elif power == 1:
+                    latex_terms.append(f"{c:.4f}x")
+                else:
+                    latex_terms.append(f"{c:.4f}x^{{{power}}}")
+            st.latex("y = " + " + ".join(latex_terms))
+
+            # Plot
+            x_line = np.linspace(x.min(), x.max(), 300)
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=x, y=y, mode="markers", name="Data",
+                                     marker=dict(size=6, opacity=0.7)))
+            fig.add_trace(go.Scatter(x=x_line, y=poly_func(x_line), mode="lines",
+                                     name=f"Degree {degree}", line=dict(color="#ef4444", width=2)))
+            fig.update_layout(title=f"Polynomial Regression (degree={degree})",
+                              xaxis_title=x_col, yaxis_title=y_col, height=500)
+            rdl_plotly_chart(fig)
+
+            # Compare degrees
+            with st.expander("Compare Polynomial Degrees"):
+                comp = []
+                fig2 = go.Figure()
+                fig2.add_trace(go.Scatter(x=x, y=y, mode="markers", name="Data",
+                                          marker=dict(color="gray", size=4, opacity=0.5)))
+                colors = px.colors.qualitative.Set1
+                for d in range(1, degree + 1):
+                    c_d = np.polyfit(x, y, d)
+                    p_d = np.poly1d(c_d)
+                    y_d = p_d(x)
+                    ss_r = np.sum((y - y_d) ** 2)
+                    r2_d = 1 - ss_r / ss_tot
+                    adj_r2_d = 1 - (1 - r2_d) * (n - 1) / (n - d - 1)
+                    comp.append({"Degree": d, "R²": round(r2_d, 4),
+                                 "Adj R²": round(adj_r2_d, 4),
+                                 "RMSE": round(np.sqrt(ss_r / n), 4)})
+                    fig2.add_trace(go.Scatter(x=x_line, y=p_d(x_line), mode="lines",
+                                              name=f"Degree {d}",
+                                              line=dict(color=colors[d % len(colors)])))
+                st.dataframe(pd.DataFrame(comp), use_container_width=True, hide_index=True)
+                fig2.update_layout(height=400, title="Model Comparison")
+                rdl_plotly_chart(fig2)
 
 
 def _render_logistic(df: pd.DataFrame):
@@ -520,103 +523,104 @@ def _render_logistic(df: pd.DataFrame):
 
     # ---- Binary Logistic (original code) ----
     if st.button("Fit Model", key="fit_log"):
-        from sklearn.linear_model import LogisticRegression
-        from sklearn.metrics import confusion_matrix, classification_report, roc_curve, auc
-        from sklearn.preprocessing import LabelEncoder
-        from sklearn.model_selection import train_test_split
+        with st.spinner("Fitting model..."):
+            from sklearn.linear_model import LogisticRegression
+            from sklearn.metrics import confusion_matrix, classification_report, roc_curve, auc
+            from sklearn.preprocessing import LabelEncoder
+            from sklearn.model_selection import train_test_split
 
-        data = df[[target] + features].dropna()
-        X = data[features].values
-        y_raw = data[target]
+            data = df[[target] + features].dropna()
+            X = data[features].values
+            y_raw = data[target]
 
-        # Encode target if needed
-        if y_raw.dtype == object or y_raw.dtype.name == "category":
-            le = LabelEncoder()
-            y = le.fit_transform(y_raw)
-            classes = le.classes_
-        else:
-            y = y_raw.values.astype(int)
-            classes = np.unique(y)
+            # Encode target if needed
+            if y_raw.dtype == object or y_raw.dtype.name == "category":
+                le = LabelEncoder()
+                y = le.fit_transform(y_raw)
+                classes = le.classes_
+            else:
+                y = y_raw.values.astype(int)
+                classes = np.unique(y)
 
-        # --- Validation checks ---
-        try:
-            n_log = len(y)
-            checks = [check_sample_size(n_log, "regression")]
-            validation_panel(checks)
-        except Exception:
-            pass
-
-        # Train/test split for honest evaluation
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=0.2, random_state=42, stratify=y)
-
-        # Fit with statsmodels for proper inference (on training data)
-        if HAS_SM:
-            X_sm_train = sm.add_constant(X_train)
-            X_sm_test = sm.add_constant(X_test)
+            # --- Validation checks ---
             try:
-                logit_model = sm.Logit(y_train, X_sm_train).fit(disp=0)
-                section_header("Model Summary")
-
-                coef_names = ["Intercept"] + features
-                coef_df = pd.DataFrame({
-                    "Variable": coef_names,
-                    "Coefficient": logit_model.params,
-                    "Std Error": logit_model.bse,
-                    "z-value": logit_model.tvalues,
-                    "p-value": logit_model.pvalues,
-                    "Odds Ratio": np.exp(logit_model.params),
-                }).round(6)
-                st.dataframe(coef_df, use_container_width=True, hide_index=True)
-
-                c1, c2, c3 = st.columns(3)
-                c1.metric("AIC", f"{logit_model.aic:.2f}")
-                c2.metric("BIC", f"{logit_model.bic:.2f}")
-                c3.metric("Pseudo R²", f"{logit_model.prsquared:.4f}")
-
-                # --- Interpretation card for Pseudo R² ---
-                try:
-                    interpretation_card(interpret_r_squared(logit_model.prsquared))
-                except Exception:
-                    pass
-
-                y_prob = logit_model.predict(X_sm_test)
+                n_log = len(y)
+                checks = [check_sample_size(n_log, "regression")]
+                validation_panel(checks)
             except Exception:
-                # Fallback to sklearn
-                st.warning("Using sklearn for logistic regression — limited statistical output.")
+                pass
+
+            # Train/test split for honest evaluation
+            X_train, X_test, y_train, y_test = train_test_split(
+                X, y, test_size=0.2, random_state=42, stratify=y)
+
+            # Fit with statsmodels for proper inference (on training data)
+            if HAS_SM:
+                X_sm_train = sm.add_constant(X_train)
+                X_sm_test = sm.add_constant(X_test)
+                try:
+                    logit_model = sm.Logit(y_train, X_sm_train).fit(disp=0)
+                    section_header("Model Summary")
+
+                    coef_names = ["Intercept"] + features
+                    coef_df = pd.DataFrame({
+                        "Variable": coef_names,
+                        "Coefficient": logit_model.params,
+                        "Std Error": logit_model.bse,
+                        "z-value": logit_model.tvalues,
+                        "p-value": logit_model.pvalues,
+                        "Odds Ratio": np.exp(logit_model.params),
+                    }).round(6)
+                    st.dataframe(coef_df, use_container_width=True, hide_index=True)
+
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric("AIC", f"{logit_model.aic:.2f}")
+                    c2.metric("BIC", f"{logit_model.bic:.2f}")
+                    c3.metric("Pseudo R²", f"{logit_model.prsquared:.4f}")
+
+                    # --- Interpretation card for Pseudo R² ---
+                    try:
+                        interpretation_card(interpret_r_squared(logit_model.prsquared))
+                    except Exception:
+                        pass
+
+                    y_prob = logit_model.predict(X_sm_test)
+                except Exception:
+                    # Fallback to sklearn
+                    st.warning("Using sklearn for logistic regression — limited statistical output.")
+                    model = LogisticRegression(max_iter=1000)
+                    model.fit(X_train, y_train)
+                    y_prob = model.predict_proba(X_test)[:, 1]
+            else:
                 model = LogisticRegression(max_iter=1000)
                 model.fit(X_train, y_train)
                 y_prob = model.predict_proba(X_test)[:, 1]
-        else:
-            model = LogisticRegression(max_iter=1000)
-            model.fit(X_train, y_train)
-            y_prob = model.predict_proba(X_test)[:, 1]
 
-        y_pred = (y_prob >= 0.5).astype(int)
+            y_pred = (y_prob >= 0.5).astype(int)
 
-        # Confusion matrix (on held-out test data)
-        cm = confusion_matrix(y_test, y_pred)
-        fig_cm = px.imshow(cm, text_auto=True, color_continuous_scale="Blues",
-                           x=[str(c) for c in classes], y=[str(c) for c in classes],
-                           labels=dict(x="Predicted", y="Actual"),
-                           title="Confusion Matrix (Test Set)")
-        rdl_plotly_chart(fig_cm)
+            # Confusion matrix (on held-out test data)
+            cm = confusion_matrix(y_test, y_pred)
+            fig_cm = px.imshow(cm, text_auto=True, color_continuous_scale="Blues",
+                               x=[str(c) for c in classes], y=[str(c) for c in classes],
+                               labels=dict(x="Predicted", y="Actual"),
+                               title="Confusion Matrix (Test Set)")
+            rdl_plotly_chart(fig_cm)
 
-        # Classification report
-        report = classification_report(y_test, y_pred, target_names=[str(c) for c in classes], output_dict=True)
-        st.dataframe(pd.DataFrame(report).transpose().round(4), use_container_width=True)
+            # Classification report
+            report = classification_report(y_test, y_pred, target_names=[str(c) for c in classes], output_dict=True)
+            st.dataframe(pd.DataFrame(report).transpose().round(4), use_container_width=True)
 
-        # ROC curve
-        fpr, tpr, thresholds = roc_curve(y_test, y_prob)
-        roc_auc = auc(fpr, tpr)
-        fig_roc = go.Figure()
-        fig_roc.add_trace(go.Scatter(x=fpr, y=tpr, name=f"ROC (AUC={roc_auc:.4f})",
-                                     line=dict(color="#6366f1", width=2)))
-        fig_roc.add_trace(go.Scatter(x=[0, 1], y=[0, 1], name="Random",
-                                     line=dict(color="gray", dash="dash")))
-        fig_roc.update_layout(title="ROC Curve (Test Set)", xaxis_title="False Positive Rate",
-                              yaxis_title="True Positive Rate", height=400)
-        rdl_plotly_chart(fig_roc)
+            # ROC curve
+            fpr, tpr, thresholds = roc_curve(y_test, y_prob)
+            roc_auc = auc(fpr, tpr)
+            fig_roc = go.Figure()
+            fig_roc.add_trace(go.Scatter(x=fpr, y=tpr, name=f"ROC (AUC={roc_auc:.4f})",
+                                         line=dict(color="#6366f1", width=2)))
+            fig_roc.add_trace(go.Scatter(x=[0, 1], y=[0, 1], name="Random",
+                                         line=dict(color="gray", dash="dash")))
+            fig_roc.update_layout(title="ROC Curve (Test Set)", xaxis_title="False Positive Rate",
+                                  yaxis_title="True Positive Rate", height=400)
+            rdl_plotly_chart(fig_roc)
 
 
 def _render_multinomial_logistic(df, target, features, n_classes):
@@ -1360,58 +1364,59 @@ def _render_robust_quantile(df: pd.DataFrame):
         quantiles_input = st.text_input("Quantiles (comma-separated):", "0.25, 0.50, 0.75", key="rq_quantiles")
 
         if st.button("Fit Quantile Models", key="fit_quantreg"):
-            from statsmodels.regression.quantile_regression import QuantReg
+            with st.spinner("Fitting model..."):
+                from statsmodels.regression.quantile_regression import QuantReg
 
-            data = df[[y_col] + x_cols].dropna()
-            y = data[y_col].values
-            X = sm.add_constant(data[x_cols].values)
-            coef_names = ["Intercept"] + x_cols
+                data = df[[y_col] + x_cols].dropna()
+                y = data[y_col].values
+                X = sm.add_constant(data[x_cols].values)
+                coef_names = ["Intercept"] + x_cols
 
-            try:
-                quantiles = [float(q.strip()) for q in quantiles_input.split(",")]
-            except ValueError:
-                st.error("Invalid quantile format.")
-                return
-
-            all_results = []
-            for q in quantiles:
                 try:
-                    model = QuantReg(y, X).fit(q=q)
-                    row = {"Quantile": q}
-                    for i, name in enumerate(coef_names):
-                        row[f"{name}"] = round(model.params[i], 6)
-                    row["Pseudo R²"] = round(model.prsquared, 4)
-                    all_results.append(row)
-                except Exception:
-                    pass
+                    quantiles = [float(q.strip()) for q in quantiles_input.split(",")]
+                except ValueError:
+                    st.error("Invalid quantile format.")
+                    return
 
-            if all_results:
-                section_header("Quantile Regression Coefficients")
-                st.dataframe(pd.DataFrame(all_results), use_container_width=True, hide_index=True)
-
-                # Plot quantile regression lines (if 1 predictor)
-                if len(x_cols) == 1:
-                    x_data = data[x_cols[0]].values
-                    x_line = np.linspace(x_data.min(), x_data.max(), 200)
-                    X_line = sm.add_constant(x_line)
-
-                    fig = go.Figure()
-                    fig.add_trace(go.Scatter(x=x_data, y=y, mode="markers", name="Data",
-                                             marker=dict(color="gray", size=4, opacity=0.5)))
-                    colors = px.colors.qualitative.Set1
-                    for i, q in enumerate(quantiles):
+                all_results = []
+                for q in quantiles:
+                    try:
                         model = QuantReg(y, X).fit(q=q)
-                        y_line = model.predict(X_line)
-                        fig.add_trace(go.Scatter(x=x_line, y=y_line, mode="lines",
-                                                 name=f"Q={q}",
-                                                 line=dict(color=colors[i % len(colors)], width=2)))
-                    # OLS for comparison
-                    ols_model = sm.OLS(y, X).fit()
-                    fig.add_trace(go.Scatter(x=x_line, y=ols_model.predict(X_line), mode="lines",
-                                             name="OLS", line=dict(color="black", dash="dash", width=2)))
-                    fig.update_layout(title="Quantile Regression Lines",
-                                      xaxis_title=x_cols[0], yaxis_title=y_col, height=500)
-                    rdl_plotly_chart(fig)
+                        row = {"Quantile": q}
+                        for i, name in enumerate(coef_names):
+                            row[f"{name}"] = round(model.params[i], 6)
+                        row["Pseudo R²"] = round(model.prsquared, 4)
+                        all_results.append(row)
+                    except Exception:
+                        pass
+
+                if all_results:
+                    section_header("Quantile Regression Coefficients")
+                    st.dataframe(pd.DataFrame(all_results), use_container_width=True, hide_index=True)
+
+                    # Plot quantile regression lines (if 1 predictor)
+                    if len(x_cols) == 1:
+                        x_data = data[x_cols[0]].values
+                        x_line = np.linspace(x_data.min(), x_data.max(), 200)
+                        X_line = sm.add_constant(x_line)
+
+                        fig = go.Figure()
+                        fig.add_trace(go.Scatter(x=x_data, y=y, mode="markers", name="Data",
+                                                 marker=dict(color="gray", size=4, opacity=0.5)))
+                        colors = px.colors.qualitative.Set1
+                        for i, q in enumerate(quantiles):
+                            model = QuantReg(y, X).fit(q=q)
+                            y_line = model.predict(X_line)
+                            fig.add_trace(go.Scatter(x=x_line, y=y_line, mode="lines",
+                                                     name=f"Q={q}",
+                                                     line=dict(color=colors[i % len(colors)], width=2)))
+                        # OLS for comparison
+                        ols_model = sm.OLS(y, X).fit()
+                        fig.add_trace(go.Scatter(x=x_line, y=ols_model.predict(X_line), mode="lines",
+                                                 name="OLS", line=dict(color="black", dash="dash", width=2)))
+                        fig.update_layout(title="Quantile Regression Lines",
+                                          xaxis_title=x_cols[0], yaxis_title=y_col, height=500)
+                        rdl_plotly_chart(fig)
 
     elif reg_type == "RANSAC":
         from sklearn.linear_model import RANSACRegressor
@@ -1420,48 +1425,49 @@ def _render_robust_quantile(df: pd.DataFrame):
         min_samples = st.slider("Min samples (fraction):", 0.1, 0.9, 0.5, 0.05, key="rq_ransac_min")
 
         if st.button("Fit RANSAC", key="fit_ransac"):
-            data = df[[y_col] + x_cols].dropna()
-            X = data[x_cols].values
-            y = data[y_col].values
+            with st.spinner("Fitting model..."):
+                data = df[[y_col] + x_cols].dropna()
+                X = data[x_cols].values
+                y = data[y_col].values
 
-            try:
-                model = RANSACRegressor(
-                    residual_threshold=residual_threshold,
-                    min_samples=min_samples,
-                    random_state=42,
-                )
-                model.fit(X, y)
-                inlier_mask = model.inlier_mask_
-                n_inliers = inlier_mask.sum()
-                n_outliers = (~inlier_mask).sum()
+                try:
+                    model = RANSACRegressor(
+                        residual_threshold=residual_threshold,
+                        min_samples=min_samples,
+                        random_state=42,
+                    )
+                    model.fit(X, y)
+                    inlier_mask = model.inlier_mask_
+                    n_inliers = inlier_mask.sum()
+                    n_outliers = (~inlier_mask).sum()
 
-                c1, c2, c3 = st.columns(3)
-                c1.metric("Inliers", n_inliers)
-                c2.metric("Outliers", n_outliers)
-                from sklearn.metrics import r2_score as r2s
-                c3.metric("R² (inliers)", f"{r2s(y[inlier_mask], model.predict(X[inlier_mask])):.4f}")
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric("Inliers", n_inliers)
+                    c2.metric("Outliers", n_outliers)
+                    from sklearn.metrics import r2_score as r2s
+                    c3.metric("R² (inliers)", f"{r2s(y[inlier_mask], model.predict(X[inlier_mask])):.4f}")
 
-                if len(x_cols) == 1:
-                    fig = go.Figure()
-                    fig.add_trace(go.Scatter(x=X[inlier_mask, 0], y=y[inlier_mask], mode="markers",
-                                             name="Inliers", marker=dict(color="#6366f1", size=5)))
-                    fig.add_trace(go.Scatter(x=X[~inlier_mask, 0], y=y[~inlier_mask], mode="markers",
-                                             name="Outliers", marker=dict(color="red", size=7, symbol="x")))
-                    x_line = np.linspace(X[:, 0].min(), X[:, 0].max(), 200).reshape(-1, 1)
-                    fig.add_trace(go.Scatter(x=x_line.ravel(), y=model.predict(x_line), mode="lines",
-                                             name="RANSAC", line=dict(color="green", width=2)))
-                    from sklearn.linear_model import LinearRegression as LR
-                    ols = LR().fit(X, y)
-                    fig.add_trace(go.Scatter(x=x_line.ravel(), y=ols.predict(x_line), mode="lines",
-                                             name="OLS", line=dict(color="orange", dash="dash", width=2)))
-                    fig.update_layout(title="RANSAC vs OLS", xaxis_title=x_cols[0], yaxis_title=y_col, height=500)
-                    rdl_plotly_chart(fig)
-                else:
-                    st.write(f"**RANSAC Coefficients:** {model.estimator_.coef_.round(6)}")
-                    st.write(f"**Intercept:** {model.estimator_.intercept_:.6f}")
+                    if len(x_cols) == 1:
+                        fig = go.Figure()
+                        fig.add_trace(go.Scatter(x=X[inlier_mask, 0], y=y[inlier_mask], mode="markers",
+                                                 name="Inliers", marker=dict(color="#6366f1", size=5)))
+                        fig.add_trace(go.Scatter(x=X[~inlier_mask, 0], y=y[~inlier_mask], mode="markers",
+                                                 name="Outliers", marker=dict(color="red", size=7, symbol="x")))
+                        x_line = np.linspace(X[:, 0].min(), X[:, 0].max(), 200).reshape(-1, 1)
+                        fig.add_trace(go.Scatter(x=x_line.ravel(), y=model.predict(x_line), mode="lines",
+                                                 name="RANSAC", line=dict(color="#22c55e", width=2)))
+                        from sklearn.linear_model import LinearRegression as LR
+                        ols = LR().fit(X, y)
+                        fig.add_trace(go.Scatter(x=x_line.ravel(), y=ols.predict(x_line), mode="lines",
+                                                 name="OLS", line=dict(color="#f97316", dash="dash", width=2)))
+                        fig.update_layout(title="RANSAC vs OLS", xaxis_title=x_cols[0], yaxis_title=y_col, height=500)
+                        rdl_plotly_chart(fig)
+                    else:
+                        st.write(f"**RANSAC Coefficients:** {model.estimator_.coef_.round(6)}")
+                        st.write(f"**Intercept:** {model.estimator_.intercept_:.6f}")
 
-            except Exception as e:
-                st.error(f"RANSAC failed: {e}")
+                except Exception as e:
+                    st.error(f"RANSAC failed: {e}")
 
 
 def _render_mixed_models(df: pd.DataFrame):
@@ -1898,12 +1904,12 @@ Built-in models:
             fig.add_trace(go.Scatter(x=x, y=y, mode="markers", name="Data",
                                      marker=dict(size=6, opacity=0.7)))
             fig.add_trace(go.Scatter(x=x_smooth, y=y_smooth, mode="lines",
-                                     name="Fitted", line=dict(color="red", width=2)))
+                                     name="Fitted", line=dict(color="#ef4444", width=2)))
             fig.add_trace(go.Scatter(
                 x=x_smooth.tolist() + x_smooth.tolist()[::-1],
                 y=y_ci_upper.tolist() + y_ci_lower.tolist()[::-1],
-                fill="toself", fillcolor="rgba(255,0,0,0.1)",
-                line=dict(color="rgba(255,0,0,0)"), name="95% CI",
+                fill="toself", fillcolor="rgba(239,68,68,0.1)",
+                line=dict(color="rgba(239,68,68,0)"), name="95% CI",
             ))
             fig.update_layout(title=f"Nonlinear Fit: {model_type}",
                               xaxis_title=x_col, yaxis_title=y_col, height=500)

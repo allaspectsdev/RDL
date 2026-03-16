@@ -1528,7 +1528,7 @@ def _apply_data_filters(df):
                             & (filtered[col].dt.date <= date_range[1])
                         ]
                 except Exception:
-                    pass
+                    st.warning(f"Could not apply date filter on column '{col}'.")
 
     n_total = len(df)
     n_filtered = len(filtered)
@@ -1665,8 +1665,12 @@ def main():
                         st.session_state["df"] = pd.read_json(uploaded_file)
                     st.session_state["data_name"] = uploaded_file.name
                     st.success(f"Loaded: {uploaded_file.name}")
-                except Exception as e:
-                    st.error(f"Error loading file: {e}")
+                except UnicodeDecodeError:
+                    st.error("File encoding not supported. Try saving as UTF-8 CSV.")
+                except ValueError as e:
+                    st.error(f"Could not parse file — check that the format matches the extension. ({type(e).__name__})")
+                except Exception:
+                    st.error("Unable to read this file. Please check it is a valid CSV, Excel, TSV, or JSON file.")
         else:
             sample = st.selectbox(
                 "Select dataset:",
@@ -1844,8 +1848,8 @@ def main():
                     _display_log = _log[-10:][::-1]
                     for _entry in _display_log:
                         st.markdown(
-                            f"**{_entry['timestamp']}** | "
-                            f"*{_entry['module']}* — {_entry['action']}"
+                            f"**{_entry.get('timestamp', '—')}** | "
+                            f"*{_entry.get('module', '—')}* — {_entry.get('action', '—')}"
                         )
                         if _entry.get("summary"):
                             st.caption(_entry["summary"])

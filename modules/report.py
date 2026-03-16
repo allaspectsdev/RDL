@@ -3,6 +3,7 @@ Report Builder - Full report assembly, section management, and multi-format expo
 (HTML, PDF via fpdf2, PowerPoint via python-pptx).
 """
 
+import html as _html
 import io
 from datetime import datetime
 
@@ -579,11 +580,11 @@ def _render_preview(sections, title, author, date_str):
                 # Plotly figure
                 rdl_plotly_chart(content, key=f"preview_fig_{i}")
             else:
-                text = str(content)
+                text = _html.escape(str(content))
                 if len(text) > 500:
-                    st.markdown(text[:500] + "...", unsafe_allow_html=True)
+                    st.markdown(text[:500] + "...")
                 else:
-                    st.markdown(text, unsafe_allow_html=True)
+                    st.markdown(text)
 
             commentary = sec.get("commentary", "")
             if commentary:

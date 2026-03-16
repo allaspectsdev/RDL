@@ -5,19 +5,29 @@ services:
     build: .
     container_name: rdl-app
     restart: unless-stopped
-    ports:
-      - "8501:8501"
+    expose:
+      - "8501"
     volumes:
       - upload_data:/app/uploads
     environment:
       - STREAMLIT_SERVER_MAX_UPLOAD_SIZE=200
     networks:
       - rdl-net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     deploy:
       resources:
         limits:
           memory: 2G
           cpus: "2.0"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   nginx:
     image: nginx:alpine
@@ -30,11 +40,17 @@ services:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/rdl.conf:/etc/nginx/conf.d/default.conf:ro
       - certbot_webroot:/var/www/certbot:ro
-      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - certbot_certs:/etc/letsencrypt:ro
     depends_on:
-      - rdl
+      rdl:
+        condition: service_healthy
     networks:
       - rdl-net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # Optional: auto-renew SSL certs
   certbot:
