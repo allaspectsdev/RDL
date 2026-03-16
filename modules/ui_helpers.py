@@ -175,9 +175,49 @@ def column_switcher(label, columns, key):
     return columns[st.session_state[idx_key]]
 
 
+# ─── Data Readiness Gauge ────────────────────────────────────────────────
+
+def data_readiness_gauge(readiness):
+    """Render a circular readiness gauge with score, grade, and breakdown.
+
+    Parameters
+    ----------
+    readiness : DataReadiness
+        Object with .score (0-100), .grade (A-F), .summary, .checks list.
+    """
+    score = readiness.score
+    # Color: red→yellow→green based on score
+    if score >= 75:
+        color = "#22c55e"  # green
+    elif score >= 50:
+        color = "#f59e0b"  # amber
+    else:
+        color = "#ef4444"  # red
+
+    n_pass = sum(1 for c in readiness.checks if c.status == "pass")
+    n_warn = sum(1 for c in readiness.checks if c.status == "warn")
+    n_fail = sum(1 for c in readiness.checks if c.status == "fail")
+
+    html = f'''<div class="rdl-readiness-gauge">
+        <div class="rdl-rg-circle" style="background: conic-gradient({color} {score * 3.6}deg, rgba(255,255,255,0.08) {score * 3.6}deg);">
+            <div class="rdl-rg-inner">
+                <span class="rdl-rg-grade">{_html.escape(readiness.grade)}</span>
+                <span class="rdl-rg-score">{score:.0f}%</span>
+            </div>
+        </div>
+        <div class="rdl-rg-label">Data Readiness</div>
+        <div class="rdl-rg-breakdown">
+            <span class="rdl-rg-stat rdl-rg-stat--pass">{n_pass} passed</span>
+            <span class="rdl-rg-stat rdl-rg-stat--warn">{n_warn} warning{"s" if n_warn != 1 else ""}</span>
+            <span class="rdl-rg-stat rdl-rg-stat--fail">{n_fail} failed</span>
+        </div>
+    </div>'''
+    st.markdown(html, unsafe_allow_html=True)
+
+
 # ─── Validation Panel ────────────────────────────────────────────────────
 
-def validation_panel(checks, title="Assumption Checks"):
+def validation_panel(checks, title="Assumption Checks", show_readiness=False):
     """Render a prominent validation status panel.
 
     Parameters
@@ -190,6 +230,11 @@ def validation_panel(checks, title="Assumption Checks"):
     """
     if not checks:
         return
+
+    if show_readiness:
+        from modules.validation import compute_data_readiness
+        readiness = compute_data_readiness(checks)
+        data_readiness_gauge(readiness)
 
     # Sort: failures first, then warnings, then passes
     _order = {"fail": 0, "warn": 1, "pass": 2}

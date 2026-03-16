@@ -5,8 +5,11 @@ and Claude AI-powered data analysis assistant.
 
 from __future__ import annotations
 
+import copy
 import json
+import os
 import io
+import time
 from collections import deque
 from datetime import datetime
 
@@ -17,7 +20,7 @@ from scipy import stats as sp_stats
 import plotly.express as px
 import plotly.graph_objects as go
 
-from modules.ui_helpers import section_header, empty_state, help_tip
+from modules.ui_helpers import section_header, empty_state, help_tip, validation_panel
 
 # ─── Optional Dependencies ───────────────────────────────────────────────
 
@@ -35,6 +38,9 @@ try:
     HAS_ANTHROPIC = True
 except ImportError:
     HAS_ANTHROPIC = False
+
+
+WORKFLOW_DIR = os.path.join(os.path.dirname(__file__), "..", "workflows")
 
 
 # ─── Constants ────────────────────────────────────────────────────────────
@@ -82,6 +88,12 @@ NODE_TYPES = {
         "desc": "Display results",
         "default_config": {"format": "table"},
     },
+    "Conditional": {
+        "color": "#f97316",
+        "icon": "\u2442",
+        "desc": "Branch on conditions",
+        "default_config": {"condition_type": "validation_status", "params": {}},
+    },
 }
 
 TRANSFORM_OPS = [
@@ -93,6 +105,84 @@ ANALYSIS_TYPES = [
     "descriptive", "t_test", "paired_t_test", "anova", "correlation",
     "linear_regression", "chi_square", "mann_whitney", "normality_test",
 ]
+
+WORKFLOW_TEMPLATES = {
+    "Quick EDA": {
+        "name": "Quick EDA",
+        "description": "Exploratory data analysis: describe, histogram, and output.",
+        "nodes": [
+            {"id": "tmpl_1", "type": "Data Source", "config": {"type": "Data Source", "columns": [], "filters": []}, "pos": (50, 150)},
+            {"id": "tmpl_2", "type": "Transform", "config": {"type": "Transform", "operation": "select_columns", "params": {}}, "pos": (270, 150)},
+            {"id": "tmpl_3", "type": "Analysis", "config": {"type": "Analysis", "analysis_type": "descriptive", "params": {}}, "pos": (490, 80)},
+            {"id": "tmpl_4", "type": "Visualization", "config": {"type": "Visualization", "chart_type": "histogram", "x": None, "y": None, "color": None, "title": ""}, "pos": (490, 220)},
+            {"id": "tmpl_5", "type": "Output", "config": {"type": "Output", "format": "table"}, "pos": (710, 150)},
+        ],
+        "edges": [
+            {"source": "tmpl_1", "target": "tmpl_2"},
+            {"source": "tmpl_2", "target": "tmpl_3"},
+            {"source": "tmpl_2", "target": "tmpl_4"},
+            {"source": "tmpl_3", "target": "tmpl_5"},
+            {"source": "tmpl_4", "target": "tmpl_5"},
+        ],
+    },
+    "Hypothesis Test Pipeline": {
+        "name": "Hypothesis Test Pipeline",
+        "description": "Validate assumptions, run a t-test, and output results.",
+        "nodes": [
+            {"id": "tmpl_1", "type": "Data Source", "config": {"type": "Data Source", "columns": [], "filters": []}, "pos": (50, 150)},
+            {"id": "tmpl_2", "type": "Validation", "config": {"type": "Validation", "checks": ["normality", "sample_size"], "columns": [], "alpha": 0.05}, "pos": (270, 150)},
+            {"id": "tmpl_3", "type": "Analysis", "config": {"type": "Analysis", "analysis_type": "t_test", "params": {}}, "pos": (490, 150)},
+            {"id": "tmpl_4", "type": "Output", "config": {"type": "Output", "format": "table"}, "pos": (710, 150)},
+        ],
+        "edges": [
+            {"source": "tmpl_1", "target": "tmpl_2"},
+            {"source": "tmpl_2", "target": "tmpl_3"},
+            {"source": "tmpl_3", "target": "tmpl_4"},
+        ],
+    },
+    "Regression Diagnostics": {
+        "name": "Regression Diagnostics",
+        "description": "Linear regression with residual diagnostics and scatter plot.",
+        "nodes": [
+            {"id": "tmpl_1", "type": "Data Source", "config": {"type": "Data Source", "columns": [], "filters": []}, "pos": (50, 150)},
+            {"id": "tmpl_2", "type": "Analysis", "config": {"type": "Analysis", "analysis_type": "linear_regression", "params": {}}, "pos": (270, 150)},
+            {"id": "tmpl_3", "type": "Validation", "config": {"type": "Validation", "checks": ["homoscedasticity", "independence", "normality"], "columns": [], "alpha": 0.05}, "pos": (490, 80)},
+            {"id": "tmpl_4", "type": "Visualization", "config": {"type": "Visualization", "chart_type": "scatter", "x": None, "y": None, "color": None, "title": ""}, "pos": (490, 220)},
+            {"id": "tmpl_5", "type": "Output", "config": {"type": "Output", "format": "table"}, "pos": (710, 150)},
+        ],
+        "edges": [
+            {"source": "tmpl_1", "target": "tmpl_2"},
+            {"source": "tmpl_2", "target": "tmpl_3"},
+            {"source": "tmpl_2", "target": "tmpl_4"},
+            {"source": "tmpl_3", "target": "tmpl_5"},
+            {"source": "tmpl_4", "target": "tmpl_5"},
+        ],
+    },
+    "Data Quality Audit": {
+        "name": "Data Quality Audit",
+        "description": "Run all 8 validation checks on your dataset.",
+        "nodes": [
+            {"id": "tmpl_1", "type": "Data Source", "config": {"type": "Data Source", "columns": [], "filters": []}, "pos": (50, 150)},
+            {"id": "tmpl_2", "type": "Validation", "config": {"type": "Validation", "checks": ["normality", "missing_data", "outliers", "sample_size", "equal_variance", "multicollinearity", "independence", "homoscedasticity"], "columns": [], "alpha": 0.05}, "pos": (320, 150)},
+            {"id": "tmpl_3", "type": "Output", "config": {"type": "Output", "format": "table"}, "pos": (590, 150)},
+        ],
+        "edges": [
+            {"source": "tmpl_1", "target": "tmpl_2"},
+            {"source": "tmpl_2", "target": "tmpl_3"},
+        ],
+    },
+}
+
+_VALID_CONNECTIONS = {
+    "Data Source": ["Transform", "Analysis", "Visualization", "Validation", "AI Prompt", "Output", "Conditional"],
+    "Transform": ["Transform", "Analysis", "Visualization", "Validation", "AI Prompt", "Output", "Conditional"],
+    "Analysis": ["Visualization", "Output", "AI Prompt", "Conditional"],
+    "Visualization": ["Output"],
+    "AI Prompt": ["Output"],
+    "Validation": ["Output", "Conditional", "AI Prompt"],
+    "Output": [],
+    "Conditional": ["Transform", "Analysis", "Visualization", "Validation", "AI Prompt", "Output"],
+}
 
 _QUICK_ACTIONS = [
     {"label": "Summarize Dataset", "icon": "\U0001f4ca",
@@ -143,6 +233,10 @@ def _init_session_state():
     for key, val in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = val
+    if "exp_node_labels" not in st.session_state:
+        st.session_state["exp_node_labels"] = {}
+    if "exp_node_timing" not in st.session_state:
+        st.session_state["exp_node_timing"] = {}
 
 
 # ─── CSS ──────────────────────────────────────────────────────────────────
@@ -425,8 +519,8 @@ def _exec_transform(config, inputs, df):
     return data
 
 
-def _exec_analysis(config, inputs, df):
-    """Run a statistical analysis and return results dict."""
+def _exec_analysis_core(config, inputs, df):
+    """Core statistical analysis computation (without auto-validation)."""
     data = _get_input_df(inputs, df)
     atype = config.get("analysis_type", "descriptive")
     params = config.get("params", {})
@@ -537,6 +631,27 @@ def _exec_analysis(config, inputs, df):
                 result.update({"test": "Shapiro-Wilk", "statistic": float(stat),
                                "p_value": float(pval), "normal": bool(pval >= 0.05)})
         return result
+
+    return result
+
+
+def _exec_analysis(config, inputs, df):
+    """Run a statistical analysis with auto-validation."""
+    result = _exec_analysis_core(config, inputs, df)
+
+    # Auto-validate
+    try:
+        from modules.validation import run_recommended_checks
+        data = _get_input_df(inputs, df)
+        atype = config.get("analysis_type", "descriptive")
+        auto_checks = run_recommended_checks(atype, data, config.get("params", {}))
+        if auto_checks:
+            result["validation"] = [
+                {"name": c.name, "status": c.status, "detail": c.detail, "suggestion": c.suggestion}
+                for c in auto_checks
+            ]
+    except Exception:
+        pass
 
     return result
 
@@ -740,6 +855,41 @@ def _exec_output(config, inputs, df):
     return {"format": config.get("format", "table"), "data": inputs}
 
 
+def _exec_conditional(config, inputs, df):
+    """Evaluate a condition and return a branch result."""
+    data = _get_input_df(inputs, df)
+    ctype = config.get("condition_type", "validation_status")
+    params = config.get("params", {})
+
+    if ctype == "validation_status":
+        # Check upstream validation results for failures
+        has_fail = False
+        for inp in inputs:
+            if isinstance(inp, dict) and "validation" in inp:
+                if any(v.get("status") == "fail" for v in inp["validation"]):
+                    has_fail = True
+                    break
+            if isinstance(inp, dict) and "validation_results" in inp:
+                if any(v.get("status") == "fail" for v in inp["validation_results"]):
+                    has_fail = True
+                    break
+        branch = "fail" if has_fail else "pass"
+    elif ctype == "threshold":
+        col = params.get("column", "")
+        threshold = float(params.get("threshold", 0))
+        if data is not None and col in data.columns:
+            branch = "above" if data[col].mean() > threshold else "below"
+        else:
+            branch = "below"
+    elif ctype == "row_count":
+        min_rows = int(params.get("min_rows", 30))
+        branch = "sufficient" if (data is not None and len(data) >= min_rows) else "insufficient"
+    else:
+        branch = "pass"
+
+    return {"branch": branch, "data": data if data is not None else {}}
+
+
 _EXECUTORS = {
     "Data Source": _exec_data_source,
     "Transform": _exec_transform,
@@ -748,6 +898,7 @@ _EXECUTORS = {
     "AI Prompt": _exec_ai_prompt,
     "Validation": _exec_validation,
     "Output": _exec_output,
+    "Conditional": _exec_conditional,
 }
 
 
@@ -779,14 +930,41 @@ def _run_workflow(df):
         return
 
     configs = st.session_state.get("exp_node_configs", {})
+
+    # ── Connection validation ──
+    node_type_map = {n.id: configs.get(n.id, {}).get("type", "Output") for n in nodes}
+    conn_errors = []
+    for e in edges:
+        src = e.source if hasattr(e, "source") else e.get("source")
+        tgt = e.target if hasattr(e, "target") else e.get("target")
+        src_type = node_type_map.get(src, "Output")
+        tgt_type = node_type_map.get(tgt, "Output")
+        allowed = _VALID_CONNECTIONS.get(src_type, [])
+        if tgt_type not in allowed:
+            src_label = st.session_state.get("exp_node_labels", {}).get(src, src)
+            tgt_label = st.session_state.get("exp_node_labels", {}).get(tgt, tgt)
+            conn_errors.append(f"{src_type} ({src_label}) \u2192 {tgt_type} ({tgt_label})")
+    if conn_errors:
+        st.error("Invalid connections detected:\n" + "\n".join(f"- {e}" for e in conn_errors))
+        return
+
     outputs = {}
     statuses = {}
     stop_on_error = st.session_state.get("exp_stop_on_error", True)
+    st.session_state["exp_node_timing"] = {}
+    conditional_branches = {}  # node_id -> branch string
+    skipped_nodes = set()
 
     n_success, n_error = 0, 0
     progress = st.progress(0, text="Running workflow...")
 
     for i, node_id in enumerate(order):
+        # ── Conditional branching: skip nodes on inactive branch ──
+        if node_id in skipped_nodes:
+            statuses[node_id] = "pending"
+            progress.progress((i + 1) / len(order), text=f"Executed {i + 1}/{len(order)} nodes...")
+            continue
+
         statuses[node_id] = "running"
         config = configs.get(node_id, {})
         node_type = config.get("type", "Output")
@@ -794,10 +972,34 @@ def _run_workflow(df):
 
         try:
             executor = _EXECUTORS.get(node_type, _exec_output)
+            t0 = time.time()
             result = executor(config, upstream, df)
+            elapsed = time.time() - t0
+            st.session_state["exp_node_timing"][node_id] = elapsed
             outputs[node_id] = result
             statuses[node_id] = "success"
             n_success += 1
+
+            # ── Handle conditional branching ──
+            if node_type == "Conditional" and isinstance(result, dict) and "branch" in result:
+                branch = result["branch"]
+                conditional_branches[node_id] = branch
+                # Get outgoing edges from this conditional node
+                outgoing = [e for e in edges
+                            if (e.source if hasattr(e, "source") else e.get("source")) == node_id]
+                # First edge = pass/above/sufficient path, rest = fail/below/insufficient path
+                active_branch_values = {"pass", "above", "sufficient"}
+                if branch in active_branch_values:
+                    # Skip targets of edges after the first
+                    for edge in outgoing[1:]:
+                        tgt = edge.target if hasattr(edge, "target") else edge.get("target")
+                        skipped_nodes.add(tgt)
+                else:
+                    # Skip targets of the first edge
+                    if outgoing:
+                        tgt = outgoing[0].target if hasattr(outgoing[0], "target") else outgoing[0].get("target")
+                        skipped_nodes.add(tgt)
+
         except Exception as e:
             outputs[node_id] = f"Error: {e}"
             statuses[node_id] = "error"
@@ -918,19 +1120,36 @@ def _render_workflow_tab(df):
         )
         return
 
+    # ── Template Selector (shown when canvas is empty / few nodes) ──
+    flow_state = st.session_state.get("exp_flow_state")
+    canvas_empty = flow_state is None or not flow_state.nodes or len(flow_state.nodes) <= 1
+    if canvas_empty:
+        st.caption("Start from a template or add nodes manually.")
+        tmpl_cols = st.columns(len(WORKFLOW_TEMPLATES))
+        for i, (tmpl_name, tmpl_data) in enumerate(WORKFLOW_TEMPLATES.items()):
+            with tmpl_cols[i]:
+                st.markdown(
+                    f"**{tmpl_name}**  \n"
+                    f"<span style='font-size:0.78rem;color:#64748b'>{tmpl_data['description']}</span>",
+                    unsafe_allow_html=True,
+                )
+                if st.button(f"Use template", key=f"exp_tmpl_{i}", use_container_width=True):
+                    _load_template(tmpl_data)
+                    st.rerun()
+
     # ── Canvas FIRST (always visible) ──
     _render_canvas()
 
-    # ── Compact Node Palette + Controls ──
+    # ── Compact Node Palette + Controls (8 node types + action column) ──
     node_items = list(NODE_TYPES.items())
-    cols = st.columns([1, 1, 1, 1, 1, 1, 1, 2])
+    cols = st.columns([1, 1, 1, 1, 1, 1, 1, 1, 2])
     for i, (ntype, info) in enumerate(node_items):
         with cols[i]:
             if st.button(f"{info['icon']} {ntype}", key=f"exp_add_{ntype}", use_container_width=True):
                 _add_node(ntype)
                 st.rerun()
 
-    with cols[7]:
+    with cols[8]:
         bc1, bc2 = st.columns(2)
         if bc1.button("Run Workflow", type="primary", key="exp_run", use_container_width=True):
             _run_workflow(df)
@@ -941,25 +1160,32 @@ def _render_workflow_tab(df):
             st.session_state["exp_node_outputs"] = {}
             st.session_state["exp_node_status"] = {}
             st.session_state["exp_selected_node"] = None
+            st.session_state["exp_node_labels"] = {}
+            st.session_state["exp_node_timing"] = {}
             st.rerun()
 
     # ── Workflow Management (Save / Load / Export / Import) ──
     with st.expander("Workflow Management"):
         wm1, wm2 = st.columns(2)
         with wm1:
-            wf_name = st.text_input("Workflow name:", value=st.session_state.get("exp_workflow_name", ""),
+            wf_name = st.text_input("Workflow name:",
+                                    value=st.session_state.get("exp_workflow_name", ""),
                                     key="exp_wf_name_input")
+            st.session_state["exp_wf_save_name"] = wf_name
             sc1, sc2 = st.columns(2)
-            if sc1.button("Save", key="exp_save_wf", use_container_width=True):
+            if sc1.button("Save to file", key="exp_save_wf", use_container_width=True):
                 _save_workflow(wf_name)
-                st.success(f"Saved: {wf_name}")
 
-            saved = st.session_state.get("exp_saved_workflows", [])
-            if saved:
-                names = [w["name"] for w in saved]
-                sel = st.selectbox("Load workflow:", names, key="exp_load_sel")
-                if sc2.button("Load", key="exp_load_wf", use_container_width=True):
+            # List saved files from WORKFLOW_DIR
+            saved_files = _list_saved_workflows()
+            if saved_files:
+                sel = st.selectbox("Load workflow:", saved_files, key="exp_load_sel")
+                lc1, lc2 = st.columns(2)
+                if lc1.button("Load", key="exp_load_wf", use_container_width=True):
                     _load_workflow(sel)
+                    st.rerun()
+                if lc2.button("Delete", key="exp_del_wf", use_container_width=True):
+                    _delete_saved_workflow(sel)
                     st.rerun()
 
         with wm2:
@@ -988,7 +1214,8 @@ def _render_workflow_tab(df):
 4. **Run** the workflow to execute all nodes in order.
 
 **Node types:** Data Source (load data), Transform (reshape), Analysis (stats),
-Visualization (charts), AI Prompt (Claude), Output (display results).
+Visualization (charts), AI Prompt (Claude), Validation (checks),
+Output (display), Conditional (branching).
 """)
 
     # ── Config Panel (only if node selected) ──
@@ -1096,12 +1323,30 @@ def _render_config_panel(df):
 
     st.markdown(f'<div class="rdl-exp-config-panel">', unsafe_allow_html=True)
     c1, c2, c3 = st.columns([2, 1, 1])
-    c1.markdown(f"**{info.get('icon', '')} {ntype}** — `{selected}`")
+    c1.markdown(f"**{info.get('icon', '')} {ntype}** \u2014 `{selected}`")
     c2.markdown(f'<span class="rdl-exp-status rdl-exp-status--{status}">{status}</span>',
                 unsafe_allow_html=True)
     if c3.button("Deselect", key="exp_deselect"):
         st.session_state["exp_selected_node"] = None
         st.rerun()
+
+    # ── Node label (rename) ──
+    label = st.text_input(
+        "Node label:",
+        value=st.session_state.get("exp_node_labels", {}).get(selected, ""),
+        key=f"exp_lbl_{selected}",
+    )
+    if label:
+        st.session_state["exp_node_labels"][selected] = label
+    elif selected in st.session_state.get("exp_node_labels", {}):
+        del st.session_state["exp_node_labels"][selected]
+
+    # ── Duplicate button ──
+    if st.button("Duplicate node", key=f"exp_dup_{selected}"):
+        _duplicate_node(selected)
+        st.rerun()
+
+    st.divider()
 
     # Type-specific config
     if ntype == "Data Source":
@@ -1118,6 +1363,8 @@ def _render_config_panel(df):
         _config_validation(selected, config, df)
     elif ntype == "Output":
         _config_output(selected, config, df)
+    elif ntype == "Conditional":
+        _config_conditional(selected, config, df)
 
     st.session_state["exp_node_configs"][selected] = config
     st.markdown("</div>", unsafe_allow_html=True)
@@ -1390,11 +1637,98 @@ def _config_output(node_id, config, df):
                                     key=f"exp_out_fmt_{node_id}")
 
 
+def _config_conditional(node_id, config, df):
+    """Configure Conditional node."""
+    cond_types = ["validation_status", "threshold", "row_count"]
+    cond_labels = {
+        "validation_status": "Validation status (pass/fail)",
+        "threshold": "Column threshold (above/below)",
+        "row_count": "Row count (sufficient/insufficient)",
+    }
+    current = config.get("condition_type", "validation_status")
+    idx = cond_types.index(current) if current in cond_types else 0
+    ctype = st.radio(
+        "Condition type:",
+        cond_types,
+        index=idx,
+        format_func=lambda x: cond_labels.get(x, x),
+        key=f"exp_cond_type_{node_id}",
+    )
+    config["condition_type"] = ctype
+    params = config.get("params", {})
+
+    if ctype == "validation_status":
+        st.caption("Routes to first outgoing edge on **pass**, second on **fail**.")
+    elif ctype == "threshold":
+        num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+        if num_cols:
+            params["column"] = st.selectbox("Column:", num_cols, key=f"exp_cond_col_{node_id}")
+        params["threshold"] = st.number_input(
+            "Threshold:", value=float(params.get("threshold", 0)),
+            key=f"exp_cond_thresh_{node_id}",
+        )
+        st.caption("Routes to first outgoing edge if mean **above** threshold, second if **below**.")
+    elif ctype == "row_count":
+        params["min_rows"] = st.number_input(
+            "Minimum rows:", min_value=1, value=int(params.get("min_rows", 30)),
+            key=f"exp_cond_minrows_{node_id}",
+        )
+        st.caption("Routes to first outgoing edge if **sufficient** rows, second if **insufficient**.")
+
+    config["params"] = params
+
+
+def _duplicate_node(node_id):
+    """Create a copy of the given node with offset position."""
+    configs = st.session_state.get("exp_node_configs", {})
+    config = configs.get(node_id)
+    if not config:
+        return
+
+    ntype = config.get("type", "Output")
+    # Find current position
+    flow_state = st.session_state.get("exp_flow_state")
+    pos = (150, 150)
+    if flow_state:
+        for n in flow_state.nodes:
+            if n.id == node_id:
+                pos = n.pos if hasattr(n, "pos") else (150, 150)
+                break
+
+    counter = st.session_state.get("exp_node_counter", 0) + 1
+    st.session_state["exp_node_counter"] = counter
+    new_id = f"node_{counter}"
+    info = NODE_TYPES.get(ntype, {})
+
+    new_node = StreamlitFlowNode(
+        id=new_id,
+        pos=(pos[0] + 30, pos[1] + 30),
+        data={"content": f"{info.get('icon', '')} {ntype}"},
+        node_type="default",
+        source_position="right",
+        target_position="left",
+        style={"border": f"2px solid {info.get('color', '#6366f1')}", "borderRadius": "10px",
+               "padding": "8px 12px", "fontSize": "13px", "fontWeight": "600",
+               "background": "white", "minWidth": "120px"},
+    )
+
+    if flow_state is None:
+        flow_state = StreamlitFlowState(nodes=[], edges=[])
+    flow_state.nodes.append(new_node)
+    st.session_state["exp_flow_state"] = flow_state
+
+    new_config = copy.deepcopy(config)
+    st.session_state["exp_node_configs"][new_id] = new_config
+    st.session_state["exp_node_status"][new_id] = "pending"
+
+
 def _render_execution_results():
     """Display results from the last workflow run."""
     outputs = st.session_state.get("exp_node_outputs", {})
     statuses = st.session_state.get("exp_node_status", {})
     configs = st.session_state.get("exp_node_configs", {})
+    timing = st.session_state.get("exp_node_timing", {})
+    labels = st.session_state.get("exp_node_labels", {})
 
     if not outputs:
         return
@@ -1407,12 +1741,25 @@ def _render_execution_results():
         config = configs.get(node_id, {})
         ntype = config.get("type", "Unknown")
         info = NODE_TYPES.get(ntype, {})
+        label = labels.get(node_id, "")
+        display_name = f"{label} ({node_id})" if label else node_id
+
+        # Timing badge
+        timing_html = ""
+        elapsed = timing.get(node_id)
+        if elapsed is not None:
+            timing_html = (
+                f' <span style="font-size:0.68rem;color:#6b7280;'
+                f'background:rgba(107,114,128,0.08);padding:0.1rem 0.4rem;'
+                f'border-radius:99px;margin-left:0.3rem">{elapsed:.3f}s</span>'
+            )
 
         st.markdown(
             f'<div class="rdl-exp-result-card">'
             f'<div class="rdl-exp-result-header">'
-            f'{info.get("icon", "")} {ntype} ({node_id}) '
+            f'{info.get("icon", "")} {ntype} ({display_name}) '
             f'<span class="rdl-exp-status rdl-exp-status--{status}">{status}</span>'
+            f'{timing_html}'
             f'</div></div>',
             unsafe_allow_html=True,
         )
@@ -1420,11 +1767,12 @@ def _render_execution_results():
         if status == "error":
             st.error(str(output))
         elif isinstance(output, pd.DataFrame):
-            st.dataframe(output.head(500), use_container_width=True)
+            with st.expander(f"Data preview ({len(output)} rows)", expanded=True):
+                st.dataframe(output.head(20), use_container_width=True)
         elif isinstance(output, go.Figure):
             st.plotly_chart(output, use_container_width=True)
         elif isinstance(output, dict) and "validation_results" in output:
-            # Validation node — render with validation_panel
+            # Validation node -- render with validation_panel
             from modules.validation import ValidationCheck
             checks = [
                 ValidationCheck(
@@ -1434,7 +1782,7 @@ def _render_execution_results():
                 for r in output["validation_results"]
             ]
             if checks:
-                validation_panel(checks, title="Workflow Validation Results")
+                validation_panel(checks, title="Workflow Validation Results", show_readiness=True)
             summary = output.get("summary", {})
             sc1, sc2, sc3, sc4 = st.columns(4)
             sc1.metric("Total Checks", summary.get("total", 0))
@@ -1442,6 +1790,13 @@ def _render_execution_results():
             sc3.metric("Warnings", summary.get("warn", 0))
             sc4.metric("Failed", summary.get("fail", 0))
         elif isinstance(output, dict):
+            # Check for auto-validation from analysis nodes
+            if "validation" in output:
+                from modules.validation import ValidationCheck as VC
+                auto_checks = [VC(**v) for v in output["validation"]]
+                if auto_checks:
+                    validation_panel(auto_checks, title="Auto-Validation", show_readiness=True)
+
             fmt = output.get("format")
             data = output.get("data")
             if fmt and data is not None:
@@ -1452,16 +1807,21 @@ def _render_execution_results():
                             csv = item.to_csv(index=False)
                             st.download_button("Download CSV", csv, "output.csv", key=f"exp_dl_{node_id}")
                         else:
-                            st.dataframe(item.head(500), use_container_width=True)
+                            with st.expander(f"Data preview ({len(item)} rows)", expanded=True):
+                                st.dataframe(item.head(20), use_container_width=True)
                     elif isinstance(item, go.Figure):
                         st.plotly_chart(item, use_container_width=True)
                     elif isinstance(item, str):
                         st.markdown(item)
                     elif isinstance(item, dict):
                         st.json(item)
+            elif "branch" in output:
+                # Conditional node result
+                st.info(f"Branch taken: **{output['branch']}**")
             else:
-                # Analysis result
-                st.json(output)
+                # Analysis result (filter out validation key for display)
+                display_output = {k: v for k, v in output.items() if k != "validation"}
+                st.json(display_output)
         elif isinstance(output, str):
             st.markdown(output)
 
@@ -1533,27 +1893,112 @@ def _deserialize_workflow(data):
     st.session_state["exp_selected_node"] = None
 
 
-def _save_workflow(name):
-    """Save current workflow to session state list."""
+def _save_workflow(name=None):
+    """Save current workflow to a JSON file in WORKFLOW_DIR."""
     data = _serialize_workflow()
-    data["name"] = name
+    if not data["nodes"]:
+        st.warning("Nothing to save \u2014 add some nodes first.")
+        return
+    wf_name = name or st.session_state.get("exp_wf_save_name", "workflow")
+    wf_name = wf_name.strip().replace(" ", "_")
+    if not wf_name:
+        wf_name = "workflow"
+    data["name"] = wf_name
     data["saved_at"] = datetime.now().strftime("%Y-%m-%d %H:%M")
-    st.session_state["exp_workflow_name"] = name
+    st.session_state["exp_workflow_name"] = wf_name
 
+    os.makedirs(WORKFLOW_DIR, exist_ok=True)
+    path = os.path.join(WORKFLOW_DIR, f"{wf_name}.json")
+    with open(path, "w") as f:
+        json.dump(data, f, indent=2, default=str)
+    st.success(f"Saved to {wf_name}.json")
+
+    # Also keep in session state for backward compat
     saved = st.session_state.get("exp_saved_workflows", [])
-    # Replace if same name exists
-    saved = [w for w in saved if w.get("name") != name]
+    saved = [w for w in saved if w.get("name") != wf_name]
     saved.append(data)
     st.session_state["exp_saved_workflows"] = saved
 
 
 def _load_workflow(name):
-    """Load a saved workflow by name."""
+    """Load a saved workflow by name from WORKFLOW_DIR."""
+    path = os.path.join(WORKFLOW_DIR, f"{name}.json")
+    if os.path.exists(path):
+        with open(path) as f:
+            data = json.load(f)
+        _deserialize_workflow(data)
+        return
+    # Fallback to session state
     saved = st.session_state.get("exp_saved_workflows", [])
     for w in saved:
         if w.get("name") == name:
             _deserialize_workflow(w)
             return
+
+
+def _list_saved_workflows():
+    """Return list of workflow names saved in WORKFLOW_DIR."""
+    if not os.path.isdir(WORKFLOW_DIR):
+        return []
+    files = [f[:-5] for f in sorted(os.listdir(WORKFLOW_DIR)) if f.endswith(".json")]
+    return files
+
+
+def _delete_saved_workflow(name):
+    """Delete a saved workflow file."""
+    path = os.path.join(WORKFLOW_DIR, f"{name}.json")
+    if os.path.exists(path):
+        os.remove(path)
+        st.success(f"Deleted {name}.json")
+    # Also remove from session state
+    saved = st.session_state.get("exp_saved_workflows", [])
+    st.session_state["exp_saved_workflows"] = [w for w in saved if w.get("name") != name]
+
+
+def _load_template(tmpl_data):
+    """Load a workflow template into the canvas."""
+    # Build serialization-compatible format from template
+    nodes = []
+    configs = {}
+    counter = 0
+    for n in tmpl_data.get("nodes", []):
+        nid = n["id"]
+        ntype = n["type"]
+        info = NODE_TYPES.get(ntype, {})
+        nodes.append({
+            "id": nid,
+            "pos": list(n.get("pos", (0, 0))),
+            "data": {"content": f"{info.get('icon', '')} {ntype}"},
+            "style": {
+                "border": f"2px solid {info.get('color', '#6366f1')}",
+                "borderRadius": "10px",
+                "padding": "8px 12px",
+                "fontSize": "13px",
+                "fontWeight": "600",
+                "background": "white",
+                "minWidth": "120px",
+            },
+        })
+        configs[nid] = dict(n.get("config", info.get("default_config", {})))
+        configs[nid]["type"] = ntype
+        counter += 1
+
+    edges = []
+    for idx, e in enumerate(tmpl_data.get("edges", [])):
+        edges.append({
+            "id": f"tmpl_edge_{idx}",
+            "source": e["source"],
+            "target": e["target"],
+        })
+
+    data = {
+        "name": tmpl_data.get("name", "Template"),
+        "nodes": nodes,
+        "edges": edges,
+        "configs": configs,
+        "counter": counter,
+    }
+    _deserialize_workflow(data)
 
 
 # ─── AI Assistant Tab UI ──────────────────────────────────────────────────

@@ -462,6 +462,7 @@ _ALTERNATIVES: dict[str, dict[str, list[str]]] = {
     "one-way-anova": {
         "normality": ["Kruskal-Wallis test"],
         "equal-variance": ["Welch's ANOVA"],
+        "sample-size": ["Collect more data", "Kruskal-Wallis test", "Permutation test"],
     },
     "pearson-correlation": {
         "normality": ["Spearman rank correlation"],
@@ -472,6 +473,8 @@ _ALTERNATIVES: dict[str, dict[str, list[str]]] = {
     "linear-regression": {
         "homoscedasticity": ["Robust regression (HC3)", "Weighted least squares"],
         "residual-normality": ["Bootstrap confidence intervals", "GLM"],
+        "multicollinearity": ["Ridge regression", "Remove correlated predictors", "PCA dimensionality reduction"],
+        "independence": ["GLS", "Newey-West standard errors", "Add lagged variables"],
     },
     "arima": {
         "stationarity": ["Difference the series first"],
@@ -657,3 +660,464 @@ def compute_post_hoc_power(
         power = 1 - norm.cdf(z_alpha - ncp) + norm.cdf(-z_alpha - ncp)
 
     return float(np.clip(power, 0, 1))
+
+
+# ─── Phase 1: Data Readiness, Diagnostics, and Additional Checks ────────────
+
+@dataclass
+class DataReadiness:
+    """Overall data-readiness scorecard computed from a list of ValidationChecks."""
+    score: float        # 0-100
+    grade: str          # A-F
+    summary: str
+    checks: list
+
+
+def compute_data_readiness(checks: list) -> DataReadiness:
+    """Compute an aggregate readiness score from a list of ValidationCheck results.
+
+    Each check contributes equally: pass=1.0, warn=0.5, fail=0.0.
+    The weighted average is scaled to 0-100.
+    """
+    if not checks:
+        return DataReadiness(score=0.0, grade="F", summary="No checks performed", checks=[])
+
+    score_map = {"pass": 1.0, "warn": 0.5, "fail": 0.0}
+    values = [score_map.get(c.status, 0.0) for c in checks]
+    score = (sum(values) / len(values)) * 100
+
+    n_pass = sum(1 for c in checks if c.status == "pass")
+    n_warn = sum(1 for c in checks if c.status == "warn")
+    n_fail = sum(1 for c in checks if c.status == "fail")
+
+    if score >= 90:
+        grade = "A"
+    elif score >= 75:
+        grade = "B"
+    elif score >= 60:
+        grade = "C"
+    elif score >= 40:
+        grade = "D"
+    else:
+        grade = "F"
+
+    summary = f"{n_pass} passed, {n_warn} warning{'s' if n_warn != 1 else ''}, {n_fail} failed"
+    return DataReadiness(score=round(score, 1), grade=grade, summary=summary, checks=checks)
+
+
+def check_duplicates(
+    data: pd.DataFrame, subset: list[str] | None = None
+) -> ValidationCheck:
+    """Check for exact duplicate rows (or duplicates on a column subset)."""
+    n_total = len(data)
+    if n_total == 0:
+        return ValidationCheck(
+            name="Duplicate Rows",
+            status="pass",
+            detail="No data to check",
+        )
+    n_dups = int(data.duplicated(subset=subset).sum())
+    pct = n_dups / n_total
+    detail = f"{n_dups} duplicate row(s) ({pct:.1%} of {n_total})"
+    if subset:
+        detail += f" based on columns {subset}"
+    if pct > 0.15:
+        return ValidationCheck(
+            name="Duplicate Rows",
+            status="fail",
+            detail=detail,
+            suggestion="Review and deduplicate before analysis",
+        )
+    if pct > 0.05:
+        return ValidationCheck(
+            name="Duplicate Rows",
+            status="warn",
+            detail=detail,
+            suggestion="Consider whether duplicates are intentional",
+        )
+    return ValidationCheck(name="Duplicate Rows", status="pass", detail=detail)
+
+
+def check_range_validity(
+    data: pd.DataFrame, column: str, lower: float | None = None, upper: float | None = None
+) -> ValidationCheck:
+    """Check values outside [lower, upper] bounds for a given column."""
+    arr = pd.to_numeric(data[column], errors="coerce")
+    arr = arr.dropna()
+    n = len(arr)
+    if n == 0:
+        return ValidationCheck(
+            name=f"Range Validity ({column})",
+            status="warn",
+            detail="No valid numeric values to check",
+        )
+    out_of_range = pd.Series([False] * n, index=arr.index)
+    if lower is not None:
+        out_of_range = out_of_range | (arr < lower)
+    if upper is not None:
+        out_of_range = out_of_range | (arr > upper)
+    n_bad = int(out_of_range.sum())
+    pct = n_bad / n
+    bounds_str = f"[{lower}, {upper}]"
+    detail = f"{n_bad} value(s) ({pct:.1%}) outside {bounds_str} in '{column}'"
+    if pct > 0.10:
+        return ValidationCheck(
+            name=f"Range Validity ({column})",
+            status="fail",
+            detail=detail,
+            suggestion="Investigate values outside the expected range",
+        )
+    if n_bad > 0:
+        return ValidationCheck(
+            name=f"Range Validity ({column})",
+            status="warn",
+            detail=detail,
+            suggestion="Review out-of-range values for data entry errors",
+        )
+    return ValidationCheck(
+        name=f"Range Validity ({column})",
+        status="pass",
+        detail=f"All values within {bounds_str} in '{column}'",
+    )
+
+
+def generate_diagnostic_plots(
+    data: pd.DataFrame, columns: list[str]
+) -> "go.Figure":
+    """Generate a 2x2 diagnostic subplot: Q-Q, histogram+KDE, box, missing bar chart.
+
+    Uses the first column in *columns* for the single-variable plots.
+    The missing-value chart covers all specified columns.
+    """
+    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
+
+    col = columns[0]
+    arr = pd.to_numeric(data[col], errors="coerce").dropna().values
+
+    fig = make_subplots(
+        rows=2, cols=2,
+        subplot_titles=["Q-Q Plot", "Histogram + KDE", "Box Plot", "Missing Values"],
+    )
+
+    # --- Top-left: Q-Q plot ---
+    sorted_vals = np.sort(arr)
+    theoretical = stats.norm.ppf(
+        (np.arange(1, len(sorted_vals) + 1) - 0.5) / len(sorted_vals)
+    )
+    fig.add_trace(
+        go.Scatter(x=theoretical, y=sorted_vals, mode="markers", name="Q-Q",
+                   marker=dict(size=4)),
+        row=1, col=1,
+    )
+    # Reference line
+    mn, mx = theoretical.min(), theoretical.max()
+    fig.add_trace(
+        go.Scatter(x=[mn, mx], y=[arr.mean() + arr.std() * mn, arr.mean() + arr.std() * mx],
+                   mode="lines", name="Reference", line=dict(dash="dash")),
+        row=1, col=1,
+    )
+
+    # --- Top-right: Histogram + KDE ---
+    fig.add_trace(
+        go.Histogram(x=arr, nbinsx=30, name="Histogram", opacity=0.7,
+                     histnorm="probability density"),
+        row=1, col=2,
+    )
+    if len(arr) >= 2:
+        try:
+            kde = stats.gaussian_kde(arr)
+            x_grid = np.linspace(arr.min(), arr.max(), 200)
+            fig.add_trace(
+                go.Scatter(x=x_grid, y=kde(x_grid), mode="lines", name="KDE"),
+                row=1, col=2,
+            )
+        except Exception:
+            pass  # KDE can fail on degenerate data
+
+    # --- Bottom-left: Box plot ---
+    fig.add_trace(
+        go.Box(y=arr, name=col, boxmean="sd"),
+        row=2, col=1,
+    )
+
+    # --- Bottom-right: Missing value bar chart ---
+    missing_counts = data[columns].isna().sum()
+    fig.add_trace(
+        go.Bar(x=missing_counts.index.tolist(), y=missing_counts.values.tolist(),
+               name="Missing"),
+        row=2, col=2,
+    )
+
+    fig.update_layout(
+        template="plotly+rdl",
+        height=700,
+        showlegend=False,
+        title_text=f"Diagnostic Plots — {col}",
+    )
+    return fig
+
+
+def interpret_durbin_watson(dw: float) -> Interpretation:
+    """Plain-language interpretation of a Durbin-Watson statistic."""
+    if dw < 1.5:
+        body = (
+            f"A Durbin-Watson statistic of {dw:.3f} suggests positive autocorrelation "
+            f"among residuals. Successive residuals tend to be similar."
+        )
+    elif dw <= 2.5:
+        body = (
+            f"A Durbin-Watson statistic of {dw:.3f} falls within the acceptable range "
+            f"(1.5 - 2.5), suggesting no significant autocorrelation."
+        )
+    else:
+        body = (
+            f"A Durbin-Watson statistic of {dw:.3f} suggests negative autocorrelation "
+            f"among residuals. Successive residuals tend to alternate in sign."
+        )
+    return Interpretation(title="Durbin-Watson", body=body)
+
+
+# ─── Phase 3: Recommended Checks and Additional Validators ──────────────────
+
+_RECOMMENDED_CHECKS: dict[str, list[str]] = {
+    "t_test": ["normality", "equal_variance", "sample_size"],
+    "paired_t_test": ["normality", "sample_size"],
+    "anova": ["normality", "equal_variance", "sample_size"],
+    "linear_regression": [
+        "normality", "homoscedasticity", "independence",
+        "multicollinearity", "sample_size",
+    ],
+    "correlation": ["normality", "sample_size", "outliers"],
+    "chi_square": ["expected_frequencies", "sample_size"],
+    "mann_whitney": ["sample_size"],
+    "normality_test": ["sample_size"],
+    "descriptive": ["missing_data", "outliers"],
+}
+
+
+def get_recommended_checks(analysis_type: str) -> list[str]:
+    """Return the list of recommended validation checks for a given analysis type."""
+    return _RECOMMENDED_CHECKS.get(analysis_type, [])
+
+
+def run_recommended_checks(
+    analysis_type: str,
+    data: pd.DataFrame,
+    params: dict | None = None,
+) -> list[ValidationCheck]:
+    """Run all recommended checks for *analysis_type* against *data*.
+
+    *params* may supply:
+        - column: target numeric column name
+        - group_column: grouping column name
+        - predictors: list of predictor column names
+        - residuals: pre-computed residuals array
+        - X: pre-computed design matrix
+        - contingency: pre-computed contingency table (np.ndarray)
+    """
+    params = params or {}
+    recommended = get_recommended_checks(analysis_type)
+    results: list[ValidationCheck] = []
+
+    # Determine a default numeric column
+    numeric_cols = data.select_dtypes(include="number").columns.tolist()
+    default_col = params.get("column") or (numeric_cols[0] if numeric_cols else None)
+
+    # Map analysis_type -> test_type key used in _MIN_N
+    _type_map = {
+        "t_test": "t-test",
+        "paired_t_test": "paired-t",
+        "anova": "anova",
+        "linear_regression": "regression",
+        "correlation": "correlation",
+        "chi_square": "chi-square",
+        "mann_whitney": "t-test",
+        "normality_test": "t-test",
+        "descriptive": "t-test",
+    }
+
+    for check_name in recommended:
+        try:
+            if check_name == "normality":
+                col = default_col
+                if col is not None:
+                    arr = pd.to_numeric(data[col], errors="coerce").dropna().values
+                    results.append(check_normality(arr, label=col))
+
+            elif check_name == "equal_variance":
+                group_col = params.get("group_column")
+                if group_col and default_col:
+                    groups = [
+                        grp[default_col].dropna().values
+                        for _, grp in data.groupby(group_col)
+                    ]
+                    results.append(check_equal_variance(*groups))
+
+            elif check_name == "sample_size":
+                test_key = _type_map.get(analysis_type, "t-test")
+                results.append(check_sample_size(len(data), test_key))
+
+            elif check_name == "homoscedasticity":
+                residuals = params.get("residuals")
+                X = params.get("X")
+                if residuals is not None and X is not None:
+                    results.append(check_homoscedasticity(residuals, X))
+                elif default_col and len(numeric_cols) >= 2:
+                    # Attempt a quick OLS fit
+                    try:
+                        import statsmodels.api as sm
+                        y = data[default_col].dropna()
+                        preds = [c for c in numeric_cols if c != default_col]
+                        X_df = data[preds].loc[y.index].dropna()
+                        common = y.index.intersection(X_df.index)
+                        y = y.loc[common].values
+                        X_arr = sm.add_constant(X_df.loc[common].values)
+                        model = sm.OLS(y, X_arr).fit()
+                        results.append(check_homoscedasticity(model.resid, X_arr))
+                    except Exception:
+                        pass
+
+            elif check_name == "independence":
+                residuals = params.get("residuals")
+                if residuals is not None:
+                    results.append(check_independence(residuals))
+                elif default_col and len(numeric_cols) >= 2:
+                    try:
+                        import statsmodels.api as sm
+                        y = data[default_col].dropna()
+                        preds = [c for c in numeric_cols if c != default_col]
+                        X_df = data[preds].loc[y.index].dropna()
+                        common = y.index.intersection(X_df.index)
+                        y = y.loc[common].values
+                        X_arr = sm.add_constant(X_df.loc[common].values)
+                        model = sm.OLS(y, X_arr).fit()
+                        results.append(check_independence(model.resid))
+                    except Exception:
+                        pass
+
+            elif check_name == "multicollinearity":
+                predictors = params.get("predictors")
+                if predictors:
+                    X_df = data[predictors].dropna()
+                    results.append(check_multicollinearity(X_df, predictors))
+                elif len(numeric_cols) >= 2:
+                    cols = [c for c in numeric_cols if c != default_col]
+                    if cols:
+                        X_df = data[cols].dropna()
+                        results.append(check_multicollinearity(X_df, cols))
+
+            elif check_name == "outliers":
+                col = default_col
+                if col is not None:
+                    arr = pd.to_numeric(data[col], errors="coerce").dropna().values
+                    results.append(check_outlier_proportion(arr))
+
+            elif check_name == "missing_data":
+                results.append(check_missing_data(data))
+
+            elif check_name == "expected_frequencies":
+                contingency = params.get("contingency")
+                if contingency is not None:
+                    results.append(check_expected_frequencies(contingency))
+
+        except Exception:
+            # Skip checks that error out rather than crashing the whole run
+            pass
+
+    return results
+
+
+def check_linearity(X: np.ndarray, y: np.ndarray) -> ValidationCheck:
+    """Check whether residuals show a non-linear pattern vs. fitted values.
+
+    Fits OLS (X vs y), then regresses residuals-squared on fitted values.
+    A significant relationship suggests non-linearity.
+    """
+    import statsmodels.api as sm
+
+    X_arr = np.asarray(X, dtype=float)
+    y_arr = np.asarray(y, dtype=float)
+    if X_arr.ndim == 1:
+        X_arr = X_arr.reshape(-1, 1)
+
+    mask = np.all(np.isfinite(np.column_stack([X_arr, y_arr.reshape(-1, 1)])), axis=1)
+    X_arr, y_arr = X_arr[mask], y_arr[mask]
+
+    if len(y_arr) < X_arr.shape[1] + 3:
+        return ValidationCheck(
+            name="Linearity",
+            status="warn",
+            detail="Not enough observations to assess linearity",
+        )
+
+    try:
+        X_const = sm.add_constant(X_arr)
+        model = sm.OLS(y_arr, X_const).fit()
+        fitted = model.fittedvalues
+        resid_sq = model.resid ** 2
+
+        # Regress residuals² on fitted values
+        diag_X = sm.add_constant(fitted)
+        diag_model = sm.OLS(resid_sq, diag_X).fit()
+        r2 = diag_model.rsquared
+        p = diag_model.f_pvalue
+
+        if p >= 0.05:
+            return ValidationCheck(
+                name="Linearity",
+                status="pass",
+                detail=f"No significant non-linear pattern detected (p = {p:.4f}, R² = {r2:.4f})",
+            )
+        if r2 < 0.1:
+            return ValidationCheck(
+                name="Linearity",
+                status="warn",
+                detail=f"Mild non-linear pattern (p = {p:.4f}, R² = {r2:.4f})",
+                suggestion="Consider adding polynomial terms or a transformation",
+            )
+        return ValidationCheck(
+            name="Linearity",
+            status="fail",
+            detail=f"Non-linear pattern detected (p = {p:.4f}, R² = {r2:.4f})",
+            suggestion="A linear model may be inappropriate — consider polynomial or non-linear regression",
+        )
+    except Exception:
+        return ValidationCheck(
+            name="Linearity",
+            status="warn",
+            detail="Could not assess linearity",
+        )
+
+
+def check_group_balance(data: pd.DataFrame, group_col: str) -> ValidationCheck:
+    """Check balance of group sizes.  Ratio > 3:1 warns, > 5:1 fails."""
+    counts = data[group_col].value_counts()
+    if len(counts) < 2:
+        return ValidationCheck(
+            name="Group Balance",
+            status="warn",
+            detail=f"Only {len(counts)} group(s) found in '{group_col}'",
+        )
+    largest = counts.iloc[0]
+    smallest = counts.iloc[-1]
+    ratio = largest / smallest if smallest > 0 else float("inf")
+    detail = (
+        f"Group sizes in '{group_col}': largest = {largest}, smallest = {smallest} "
+        f"(ratio {ratio:.1f}:1)"
+    )
+    if ratio > 5:
+        return ValidationCheck(
+            name="Group Balance",
+            status="fail",
+            detail=detail,
+            suggestion="Severe imbalance — consider resampling or weighted analysis",
+        )
+    if ratio > 3:
+        return ValidationCheck(
+            name="Group Balance",
+            status="warn",
+            detail=detail,
+            suggestion="Moderate imbalance — results may be affected; consider balanced designs",
+        )
+    return ValidationCheck(name="Group Balance", status="pass", detail=detail)

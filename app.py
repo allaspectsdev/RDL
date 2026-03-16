@@ -714,6 +714,61 @@ html {
     margin-top: 0.25rem;
 }
 
+/* ── Data Readiness Gauge ── */
+.rdl-readiness-gauge {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 1rem 0;
+    margin-bottom: 0.75rem;
+}
+.rdl-rg-circle {
+    width: 100px;
+    height: 100px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+}
+.rdl-rg-inner {
+    width: 76px;
+    height: 76px;
+    border-radius: 50%;
+    background: var(--rdl-bg, #0e1117);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}
+.rdl-rg-grade {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--rdl-text, #fafafa);
+    line-height: 1;
+}
+.rdl-rg-score {
+    font-size: 0.7rem;
+    color: var(--rdl-text-muted, #a1a1aa);
+    margin-top: 2px;
+}
+.rdl-rg-label {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--rdl-text, #fafafa);
+    margin-top: 0.5rem;
+}
+.rdl-rg-breakdown {
+    display: flex;
+    gap: 0.75rem;
+    margin-top: 0.35rem;
+    font-size: 0.72rem;
+}
+.rdl-rg-stat { color: var(--rdl-text-muted, #a1a1aa); }
+.rdl-rg-stat--pass { color: var(--rdl-success, #22c55e); }
+.rdl-rg-stat--warn { color: var(--rdl-warning, #f59e0b); }
+.rdl-rg-stat--fail { color: var(--rdl-error, #ef4444); }
+
 /* ── Alternative Suggestion Card ── */
 .rdl-alt-card {
     background: rgba(245,158,11,0.04);
