@@ -327,9 +327,12 @@ def _inject_css():
     }
     /* Compact node palette buttons */
     .rdl-exp-palette-btn button {
-        font-size: 0.75rem !important;
-        padding: 0.3rem 0.5rem !important;
+        font-size: 0.7rem !important;
+        padding: 0.3rem 0.4rem !important;
         text-align: center !important;
+        white-space: nowrap !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -1141,6 +1144,7 @@ def _render_workflow_tab(df):
     _render_canvas()
 
     # ── Compact Node Palette + Controls (8 node types + action column) ──
+    st.markdown('<div class="rdl-exp-palette-btn">', unsafe_allow_html=True)
     node_items = list(NODE_TYPES.items())
     cols = st.columns([1, 1, 1, 1, 1, 1, 1, 1, 2])
     for i, (ntype, info) in enumerate(node_items):
@@ -1163,6 +1167,7 @@ def _render_workflow_tab(df):
             st.session_state["exp_node_labels"] = {}
             st.session_state["exp_node_timing"] = {}
             st.rerun()
+    st.markdown('</div>', unsafe_allow_html=True)
 
     # ── Workflow Management (Save / Load / Export / Import) ──
     with st.expander("Workflow Management"):
