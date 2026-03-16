@@ -134,6 +134,7 @@ def render_quality(df: pd.DataFrame):
         "Variables Charts", "Attributes Charts", "Process Capability",
         "Multivariate Charts", "Gage R&R / MSA", "Acceptance Sampling",
         "Multi-Vari Analysis", "Fishbone Diagram",
+        "Non-Normal Capability", "Environmental Monitoring",
     ])
 
     with tabs[0]:
@@ -152,6 +153,10 @@ def render_quality(df: pd.DataFrame):
         _render_multi_vari(df)
     with tabs[7]:
         _render_fishbone(df)
+    with tabs[8]:
+        _render_non_normal_capability(df)
+    with tabs[9]:
+        _render_environmental_monitoring(df)
 
 
 # ===================================================================
@@ -2033,3 +2038,286 @@ def _build_fishbone_figure(effect: str, categories: list,
     )
 
     return fig
+
+
+# ===================================================================
+# Tab 9 -- Non-Normal Process Capability
+# ===================================================================
+
+def _render_non_normal_capability(df: pd.DataFrame):
+    """Process capability for non-normal data: Box-Cox transform or Clements' percentile method."""
+    num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    if not num_cols:
+        empty_state("No numeric columns found.")
+        return
+
+    section_header("Non-Normal Process Capability",
+                   "For data that fails normality tests, use Box-Cox transformation or "
+                   "Clements' percentile method to compute capability indices.")
+
+    col_name = st.selectbox("Measurement column:", num_cols, key="nn_cap_col")
+    data = df[col_name].dropna().values
+
+    c1, c2 = st.columns(2)
+    lsl = c1.number_input("Lower Spec Limit (LSL):", value=float(np.mean(data) - 3 * np.std(data)),
+                          key="nn_cap_lsl")
+    usl = c2.number_input("Upper Spec Limit (USL):", value=float(np.mean(data) + 3 * np.std(data)),
+                          key="nn_cap_usl")
+
+    method = st.radio("Method:", ["Box-Cox Transformation", "Clements' Percentile Method"],
+                      horizontal=True, key="nn_method")
+
+    if st.button("Analyse Non-Normal Capability", key="nn_cap_run"):
+        if len(data) < 10:
+            empty_state("Need at least 10 observations.")
+            return
+        if usl <= lsl:
+            st.error("USL must be greater than LSL.")
+            return
+
+        # Normality check on original data
+        normality_check = check_normality(data, label=f"{col_name} (original)")
+        validation_panel([normality_check], title="Original Data Normality")
+
+        if method == "Box-Cox Transformation":
+            if np.any(data <= 0):
+                st.warning("Box-Cox requires all positive values. Shifting data by adding a constant.")
+                shift = abs(data.min()) + 1.0
+                data_shifted = data + shift
+                lsl_t = lsl + shift
+                usl_t = usl + shift
+            else:
+                data_shifted = data
+                lsl_t = lsl
+                usl_t = usl
+                shift = 0.0
+
+            from scipy.stats import boxcox
+            try:
+                transformed, lam = boxcox(data_shifted)
+            except Exception as e:
+                st.error(f"Box-Cox transformation failed: {e}")
+                return
+
+            st.info(f"Optimal Box-Cox lambda: {lam:.4f}")
+
+            # Transform spec limits
+            if abs(lam) < 1e-10:
+                lsl_bc = np.log(lsl_t) if lsl_t > 0 else -np.inf
+                usl_bc = np.log(usl_t) if usl_t > 0 else np.inf
+            else:
+                lsl_bc = (lsl_t ** lam - 1) / lam if lsl_t > 0 else -np.inf
+                usl_bc = (usl_t ** lam - 1) / lam if usl_t > 0 else np.inf
+
+            # Check normality of transformed data
+            norm_check_t = check_normality(transformed, label="Box-Cox transformed")
+            validation_panel([norm_check_t], title="Transformed Data Normality")
+
+            mean_t = np.mean(transformed)
+            std_t = np.std(transformed, ddof=1)
+
+            cp = (usl_bc - lsl_bc) / (6 * std_t) if std_t > 0 else np.inf
+            cpu = (usl_bc - mean_t) / (3 * std_t) if std_t > 0 else np.inf
+            cpl = (mean_t - lsl_bc) / (3 * std_t) if std_t > 0 else np.inf
+            cpk = min(cpu, cpl)
+
+            section_header("Capability Indices (Box-Cox Transformed)")
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Lambda", f"{lam:.4f}")
+            m2.metric("Cp", f"{cp:.3f}")
+            m3.metric("Cpk", f"{cpk:.3f}")
+            m4.metric("Shift applied", f"{shift:.2f}")
+
+            interpretation_card(interpret_capability(cpk))
+
+        else:  # Clements' percentile method
+            p0135 = np.percentile(data, 0.135)
+            p50 = np.percentile(data, 50)
+            p99865 = np.percentile(data, 99.865)
+
+            # Clements' indices use percentile-based spread instead of 6*sigma
+            spread = p99865 - p0135
+            cp = (usl - lsl) / spread if spread > 0 else np.inf
+            cpu = (usl - p50) / (p99865 - p50) if (p99865 - p50) > 0 else np.inf
+            cpl = (p50 - lsl) / (p50 - p0135) if (p50 - p0135) > 0 else np.inf
+            cpk = min(cpu, cpl)
+
+            section_header("Capability Indices (Clements' Percentile Method)")
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Cp (Clements)", f"{cp:.3f}")
+            m2.metric("Cpk (Clements)", f"{cpk:.3f}")
+            m3.metric("Percentile Spread", f"{spread:.4f}")
+
+            with st.expander("Percentile Details"):
+                st.dataframe(pd.DataFrame([{
+                    "P0.135": round(p0135, 4),
+                    "P50 (Median)": round(p50, 4),
+                    "P99.865": round(p99865, 4),
+                    "Spread (P99.865 - P0.135)": round(spread, 4),
+                }]), use_container_width=True, hide_index=True)
+
+            interpretation_card(interpret_capability(cpk))
+
+        # Histogram with spec limits
+        fig = go.Figure()
+        hist_vals, bin_edges = np.histogram(data, bins=40)
+        bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+        fig.add_trace(go.Bar(x=bin_centers, y=hist_vals, opacity=0.7, name="Data"))
+        fig.add_vline(x=lsl, line_dash="dash", line_color="red",
+                      annotation_text=f"LSL={lsl:.2f}")
+        fig.add_vline(x=usl, line_dash="dash", line_color="red",
+                      annotation_text=f"USL={usl:.2f}")
+        fig.add_vline(x=np.median(data), line_dash="dot", line_color="green",
+                      annotation_text="Median")
+        fig.update_layout(title=f"Non-Normal Capability: {col_name}",
+                          xaxis_title="Value", yaxis_title="Frequency", height=450)
+        st.plotly_chart(fig, use_container_width=True)
+
+
+# ===================================================================
+# Tab 10 -- Environmental Monitoring Chart
+# ===================================================================
+
+def _render_environmental_monitoring(df: pd.DataFrame):
+    """Environmental monitoring control chart with alert and action limits for CFU data."""
+    num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    if not num_cols:
+        empty_state("No numeric columns found.")
+        return
+
+    section_header("Environmental Monitoring Chart",
+                   "Specialized control chart for cleanroom/environmental monitoring data "
+                   "with separate alert (yellow) and action (red) limits.")
+
+    help_tip("Environmental Monitoring", """
+**Environmental monitoring** in pharma/biotech tracks microbial contamination (CFU counts)
+in cleanroom environments. Unlike standard SPC charts, EM charts use:
+- **Alert limits** (yellow): early warning, triggers investigation
+- **Action limits** (red): requires corrective action
+- Limits are typically set by regulatory guidance (EU GMP Annex 1, FDA)
+- Common grades: Grade A (< 1 CFU), Grade B (5 CFU), Grade C (25 CFU), Grade D (50 CFU)
+""")
+
+    col_name = st.selectbox("CFU / measurement column:", num_cols, key="em_col")
+    cat_cols = df.select_dtypes(include=["object", "category"]).columns.tolist()
+    time_col = st.selectbox("Time / sequence column:", ["(row index)"] + num_cols + cat_cols,
+                            key="em_time")
+
+    c1, c2 = st.columns(2)
+    alert_limit = c1.number_input("Alert limit:", value=5.0, min_value=0.0, key="em_alert")
+    action_limit = c2.number_input("Action limit:", value=10.0, min_value=0.0, key="em_action")
+
+    grade = st.selectbox("Cleanroom grade (presets):", [
+        "Custom", "Grade A (ISO 5)", "Grade B (ISO 7)", "Grade C (ISO 8)", "Grade D",
+    ], key="em_grade")
+
+    if grade == "Grade A (ISO 5)":
+        alert_limit, action_limit = 1.0, 1.0
+    elif grade == "Grade B (ISO 7)":
+        alert_limit, action_limit = 3.0, 5.0
+    elif grade == "Grade C (ISO 8)":
+        alert_limit, action_limit = 15.0, 25.0
+    elif grade == "Grade D":
+        alert_limit, action_limit = 30.0, 50.0
+
+    if grade != "Custom":
+        st.info(f"Alert limit: {alert_limit}, Action limit: {action_limit}")
+
+    if st.button("Generate EM Chart", key="em_run"):
+        data = df[col_name].dropna().values
+        if len(data) < 2:
+            empty_state("Need at least 2 observations.")
+            return
+
+        if time_col == "(row index)":
+            x_vals = np.arange(1, len(data) + 1)
+            x_label = "Sample Number"
+        else:
+            x_vals = df[time_col].dropna().values[:len(data)]
+            x_label = time_col
+
+        # Classify points
+        normal_mask = data <= alert_limit
+        alert_mask = (data > alert_limit) & (data <= action_limit)
+        action_mask = data > action_limit
+
+        fig = go.Figure()
+
+        # Normal points
+        if normal_mask.any():
+            fig.add_trace(go.Scatter(
+                x=x_vals[normal_mask], y=data[normal_mask],
+                mode="markers", marker=dict(color="#22c55e", size=8),
+                name="Within limits",
+            ))
+
+        # Alert points
+        if alert_mask.any():
+            fig.add_trace(go.Scatter(
+                x=x_vals[alert_mask], y=data[alert_mask],
+                mode="markers", marker=dict(color="#f59e0b", size=10, symbol="diamond"),
+                name="Alert",
+            ))
+
+        # Action points
+        if action_mask.any():
+            fig.add_trace(go.Scatter(
+                x=x_vals[action_mask], y=data[action_mask],
+                mode="markers", marker=dict(color="#ef4444", size=12, symbol="x"),
+                name="Action",
+            ))
+
+        # Connect all points with line
+        fig.add_trace(go.Scatter(
+            x=x_vals, y=data, mode="lines",
+            line=dict(color="rgba(100,100,100,0.3)", width=1),
+            showlegend=False,
+        ))
+
+        # Limit lines
+        fig.add_hline(y=alert_limit, line_dash="dash", line_color="#f59e0b",
+                      annotation_text=f"Alert = {alert_limit}")
+        fig.add_hline(y=action_limit, line_dash="dash", line_color="#ef4444",
+                      annotation_text=f"Action = {action_limit}")
+
+        # Color zones
+        fig.add_hrect(y0=alert_limit, y1=action_limit,
+                      fillcolor="rgba(245,158,11,0.08)", line_width=0)
+        fig.add_hrect(y0=action_limit, y1=max(data.max() * 1.1, action_limit * 1.5),
+                      fillcolor="rgba(239,68,68,0.08)", line_width=0)
+
+        fig.update_layout(
+            title=f"Environmental Monitoring: {col_name}",
+            xaxis_title=x_label,
+            yaxis_title=col_name,
+            height=500,
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Summary statistics
+        section_header("EM Summary")
+        n_alert = int(alert_mask.sum())
+        n_action = int(action_mask.sum())
+        n_total = len(data)
+
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Total Samples", str(n_total))
+        m2.metric("Alert Excursions", str(n_alert),
+                  delta=f"{n_alert / n_total * 100:.1f}%" if n_total > 0 else "0%")
+        m3.metric("Action Excursions", str(n_action),
+                  delta=f"{n_action / n_total * 100:.1f}%" if n_total > 0 else "0%")
+        m4.metric("Mean CFU", f"{np.mean(data):.2f}")
+
+        # Excursion log
+        if n_alert > 0 or n_action > 0:
+            section_header("Excursion Log")
+            exc_records = []
+            for i in range(len(data)):
+                if data[i] > alert_limit:
+                    exc_records.append({
+                        "Sample": x_vals[i] if time_col != "(row index)" else i + 1,
+                        "Value": round(data[i], 2),
+                        "Level": "ACTION" if data[i] > action_limit else "ALERT",
+                        "Exceeded By": round(data[i] - (action_limit if data[i] > action_limit else alert_limit), 2),
+                    })
+            st.dataframe(pd.DataFrame(exc_records), use_container_width=True, hide_index=True)

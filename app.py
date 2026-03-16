@@ -1055,6 +1055,9 @@ from modules.monte_carlo import render_monte_carlo
 from modules.report import render_report_builder
 from modules.templates import render_templates
 from modules.experimental import render_experimental
+from modules.stability import render_stability
+from modules.method_validation import render_method_validation
+from modules.bioassay import render_bioassay
 
 
 @st.cache_data
@@ -1213,6 +1216,108 @@ def load_sample_dataset(name: str) -> pd.DataFrame:
             "Batch": pd.Categorical([f"B{i//10+1:02d}" for i in range(n_samples)]),
             "Operator": pd.Categorical(rng.choice(["Op_A", "Op_B", "Op_C"], n_samples)),
         })
+        return df
+    elif name == "Stability (ICH)":
+        rng = np.random.default_rng(55)
+        rows = []
+        batches = [("B001", "25C/60%RH"), ("B002", "25C/60%RH"),
+                    ("B003", "25C/60%RH"), ("B004", "40C/75%RH")]
+        time_points = [0, 3, 6, 9, 12, 18, 24, 36]
+        for batch, condition in batches:
+            batch_offset = rng.normal(0, 0.3)
+            is_accelerated = "40C" in condition
+            for t in time_points:
+                # Potency declines ~0.5%/year, accelerated ~1.5%/year
+                rate = -1.5 / 12 if is_accelerated else -0.5 / 12
+                potency = 100.0 + batch_offset + rate * t + rng.normal(0, 0.2)
+                # Purity declines slightly
+                purity = 99.5 + batch_offset * 0.3 + (rate * 0.4) * t + rng.normal(0, 0.1)
+                # Degradation increases
+                deg = 0.1 + abs(rate * 0.3) * t + rng.normal(0, 0.05)
+                deg = max(0, deg)
+                # Moisture
+                moisture = 2.0 + 0.02 * t + rng.normal(0, 0.1)
+                if is_accelerated:
+                    moisture += 0.03 * t
+                rows.append({
+                    "batch": batch,
+                    "time_months": t,
+                    "condition": condition,
+                    "potency_pct": round(potency, 2),
+                    "purity_pct": round(purity, 2),
+                    "degradation_A_pct": round(deg, 3),
+                    "moisture_pct": round(moisture, 2),
+                })
+        df = pd.DataFrame(rows)
+        df["batch"] = pd.Categorical(df["batch"])
+        df["condition"] = pd.Categorical(df["condition"])
+        return df
+    elif name == "Method Validation":
+        rng = np.random.default_rng(56)
+        rows = []
+        # Calibration: 5 levels x 3 reps
+        true_slope = 2.5
+        true_intercept = 15.0
+        levels = [10, 50, 100, 200, 500]
+        for level in levels:
+            for rep in range(1, 4):
+                response = true_slope * level + true_intercept + rng.normal(0, level * 0.01 + 2)
+                rows.append({
+                    "sample_type": "Calibration",
+                    "level": level,
+                    "concentration_known": level,
+                    "response": round(response, 2),
+                    "analyst": "Analyst_1",
+                    "day": "Day_1",
+                    "replicate": rep,
+                })
+        # Accuracy: 3 levels x 3 reps x 2 analysts x 2 days
+        accuracy_levels = [80, 100, 120]
+        for level in accuracy_levels:
+            conc = level  # as % of 100 target
+            for analyst in ["Analyst_1", "Analyst_2"]:
+                analyst_bias = rng.normal(0, 0.3)
+                for day in ["Day_1", "Day_2"]:
+                    day_bias = rng.normal(0, 0.2)
+                    for rep in range(1, 4):
+                        response = true_slope * conc + true_intercept + analyst_bias + day_bias + rng.normal(0, 1.5)
+                        rows.append({
+                            "sample_type": "Accuracy",
+                            "level": level,
+                            "concentration_known": conc,
+                            "response": round(response, 2),
+                            "analyst": analyst,
+                            "day": day,
+                            "replicate": rep,
+                        })
+        df = pd.DataFrame(rows)
+        df["sample_type"] = pd.Categorical(df["sample_type"])
+        df["analyst"] = pd.Categorical(df["analyst"])
+        df["day"] = pd.Categorical(df["day"])
+        return df
+    elif name == "Bioassay (Potency)":
+        rng = np.random.default_rng(57)
+        rows = []
+        # 4PL parameters for reference
+        a_ref, b_ref, c_ref, d_ref = 10.0, 1.2, 100.0, 95.0
+        # Test sample: ~110% potency (EC50 shifted left)
+        c_test = c_ref / 1.10
+        doses = [1000, 500, 250, 125, 62.5, 31.25, 15.625, 7.8125]
+        for sample, c_param in [("Reference", c_ref), ("Test", c_test)]:
+            for dose in doses:
+                for rep in range(1, 4):
+                    # 4PL: y = d + (a - d) / (1 + (x/c)^b)
+                    y = d_ref + (a_ref - d_ref) / (1 + (dose / c_param) ** b_ref)
+                    y += rng.normal(0, 1.5)
+                    rows.append({
+                        "sample": sample,
+                        "dose_ng_mL": dose,
+                        "log_dose": round(np.log10(dose), 4),
+                        "response": round(y, 2),
+                        "replicate": rep,
+                    })
+        df = pd.DataFrame(rows)
+        df["sample"] = pd.Categorical(df["sample"])
         return df
     return None
 
@@ -1374,7 +1479,8 @@ def main():
                 "Select dataset:",
                 ["Iris", "Wine", "Boston-style Housing", "Diabetes",
                  "Tips", "Gapminder", "Stocks", "Bioprocess",
-                 "Lung Cancer (Survival)", "DOE Reactor", "SPC Manufacturing"],
+                 "Lung Cancer (Survival)", "DOE Reactor", "SPC Manufacturing",
+                 "Stability (ICH)", "Method Validation", "Bioassay (Potency)"],
             )
             if st.button("Load Dataset", use_container_width=True):
                 st.session_state["df"] = load_sample_dataset(sample)
@@ -1400,6 +1506,9 @@ def main():
                 "Machine Learning",
                 "Survival Analysis",
                 "Quality & SPC",
+                "Stability Analysis (ICH)",
+                "Method Validation (ICH)",
+                "Bioassay & Potency",
                 "Design of Experiments",
                 "Text Analytics",
                 "Monte Carlo Simulation",
@@ -1424,7 +1533,10 @@ def main():
             "Time Series Analysis": "Decomposition, ARIMA/SARIMA, change point detection, forecasting.",
             "Machine Learning": "XGBoost, LightGBM, SHAP, GMM, precision-recall, model comparison.",
             "Survival Analysis": "Kaplan-Meier, log-rank test, Cox PH, parametric AFT models.",
-            "Quality & SPC": "Control charts, multi-vari analysis, fishbone diagrams, capability.",
+            "Quality & SPC": "Control charts, multi-vari analysis, fishbone diagrams, capability, EM monitoring.",
+            "Stability Analysis (ICH)": "ICH Q1E stability trending, poolability, shelf-life estimation.",
+            "Method Validation (ICH)": "ICH Q2 linearity, accuracy, precision, LOD/LOQ, system suitability.",
+            "Bioassay & Potency": "4PL/5PL dose-response, parallel line assay, relative potency (Fieller's CI).",
             "Design of Experiments": "Factorial, CCD, Taguchi, Latin hypercube, response surface.",
             "Text Analytics": "Text exploration, TF-IDF, word clouds, sentiment analysis.",
             "Monte Carlo Simulation": "Distribution simulation, process propagation, risk analysis.",
@@ -1489,7 +1601,7 @@ def main():
                     <span class="rdl-stat-label">Chart Types</span>
                 </div>
                 <div class="rdl-stat">
-                    <span class="rdl-stat-value">18</span>
+                    <span class="rdl-stat-value">21</span>
                     <span class="rdl-stat-label">Modules</span>
                 </div>
                 <div class="rdl-stat">
@@ -1579,6 +1691,18 @@ def main():
                 <div class="rdl-module-item" style="--cat-color: #10b981">
                     <h4>Design of Experiments</h4>
                     <p>Factorial, CCD, Box-Behnken, response surface, effect analysis.</p>
+                </div>
+                <div class="rdl-module-item" style="--cat-color: #06b6d4">
+                    <h4>Stability Analysis (ICH)</h4>
+                    <p>ICH Q1E trending, poolability testing, shelf-life estimation.</p>
+                </div>
+                <div class="rdl-module-item" style="--cat-color: #06b6d4">
+                    <h4>Method Validation (ICH)</h4>
+                    <p>Linearity, accuracy, precision, LOD/LOQ, system suitability.</p>
+                </div>
+                <div class="rdl-module-item" style="--cat-color: #06b6d4">
+                    <h4>Bioassay & Potency</h4>
+                    <p>4PL/5PL dose-response, parallel line assay, relative potency.</p>
                 </div>
             </div>
 
@@ -1682,6 +1806,24 @@ def main():
             render_quality(df)
         except Exception as e:
             st.error(f"An error occurred in Quality & SPC: {e}")
+    elif module == "Stability Analysis (ICH)":
+        st.markdown("## Stability Analysis (ICH Q1E)")
+        try:
+            render_stability(df)
+        except Exception as e:
+            st.error(f"An error occurred in Stability Analysis: {e}")
+    elif module == "Method Validation (ICH)":
+        st.markdown("## Method Validation (ICH Q2)")
+        try:
+            render_method_validation(df)
+        except Exception as e:
+            st.error(f"An error occurred in Method Validation: {e}")
+    elif module == "Bioassay & Potency":
+        st.markdown("## Bioassay & Relative Potency")
+        try:
+            render_bioassay(df)
+        except Exception as e:
+            st.error(f"An error occurred in Bioassay & Potency: {e}")
     elif module == "Design of Experiments":
         st.markdown("## Design of Experiments")
         try:

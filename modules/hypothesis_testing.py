@@ -1551,6 +1551,7 @@ def _render_equivalence(df: pd.DataFrame):
         "TOST Equivalence (Two-Sample)",
         "TOST Equivalence (Paired)",
         "Non-Inferiority",
+        "Bioequivalence (2x2 Crossover)",
     ], key="equiv_test")
 
     alpha = st.slider("Significance level (α):", 0.001, 0.10, 0.05, 0.001, key="equiv_alpha")
@@ -1710,6 +1711,159 @@ def _render_equivalence(df: pd.DataFrame):
             c3m.metric("p-value", f"{p_val:.6f}")
 
             significance_result(p_val, alpha, "Non-Inferiority Test")
+
+    elif test_type == "Bioequivalence (2x2 Crossover)":
+        help_tip("Bioequivalence (2x2 Crossover)", """
+**2x2 crossover design** is the standard FDA/EMA design for bioequivalence studies:
+- Subjects randomized to Sequence 1 (Treatment→Reference) or Sequence 2 (Reference→Treatment)
+- Each subject receives both formulations in different periods
+- Log-transformed PK parameters (AUC, Cmax) are analyzed
+- **90% CI** for the ratio of geometric means must fall within **80-125%** (FDA criterion)
+- Mixed model accounts for sequence, period, and treatment effects with subject as random effect
+""")
+
+        if len(num_cols) < 1:
+            empty_state("Need a numeric response column (e.g. AUC or Cmax).")
+            return
+
+        value_col = st.selectbox("Response column (PK parameter):", num_cols, key="be_val")
+        subject_col = st.selectbox("Subject column:", cat_cols if cat_cols else ["(none)"], key="be_subj")
+        treatment_col = st.selectbox("Treatment column (Test/Reference):", cat_cols if cat_cols else ["(none)"], key="be_trt")
+        period_col = st.selectbox("Period column:", cat_cols if cat_cols else ["(none)"], key="be_period")
+        sequence_col = st.selectbox("Sequence column:", cat_cols if cat_cols else ["(none)"], key="be_seq")
+
+        if "(none)" in [subject_col, treatment_col, period_col, sequence_col]:
+            empty_state("Need categorical columns for subject, treatment, period, and sequence.",
+                        "Ensure your dataset has the required crossover design columns.")
+            return
+
+        c1, c2 = st.columns(2)
+        lower_limit = c1.number_input("Lower BE limit (%):", value=80.0, key="be_lower")
+        upper_limit = c2.number_input("Upper BE limit (%):", value=125.0, key="be_upper")
+        log_transform = st.checkbox("Log-transform response (recommended for PK data)", value=True, key="be_log")
+
+        if st.button("Run Bioequivalence Analysis", key="run_be"):
+            be_data = df[[value_col, subject_col, treatment_col, period_col, sequence_col]].dropna()
+            if len(be_data) < 4:
+                empty_state("Not enough data for analysis.")
+                return
+
+            treatments = be_data[treatment_col].unique()
+            if len(treatments) != 2:
+                st.error(f"Expected exactly 2 treatments, found {len(treatments)}.")
+                return
+
+            with st.spinner("Running bioequivalence analysis..."):
+                response = be_data[value_col].values.astype(float)
+                if log_transform:
+                    if np.any(response <= 0):
+                        st.error("Log-transform requires all positive values.")
+                        return
+                    response = np.log(response)
+                    be_data = be_data.copy()
+                    be_data["_log_response"] = response
+                    resp_col = "_log_response"
+                else:
+                    resp_col = value_col
+
+                # Mixed model: response ~ treatment + period + sequence + (1|subject)
+                try:
+                    import statsmodels.formula.api as smf
+                    formula = f"`{resp_col}` ~ C(`{treatment_col}`) + C(`{period_col}`) + C(`{sequence_col}`)"
+                    model = smf.mixedlm(
+                        formula, be_data, groups=be_data[subject_col],
+                    )
+                    result = model.fit(reml=True)
+
+                    # Extract treatment effect
+                    trt_params = [p for p in result.params.index if treatment_col in str(p)]
+                    if trt_params:
+                        trt_effect = result.params[trt_params[0]]
+                        trt_se = result.bse[trt_params[0]]
+                        trt_pval = result.pvalues[trt_params[0]]
+                    else:
+                        st.error("Could not extract treatment effect from model.")
+                        return
+
+                    df_denom = result.df_resid
+
+                    # 90% CI for the treatment difference (on log scale if log-transformed)
+                    t_crit = stats.t.ppf(0.95, df=df_denom)
+                    ci_lower_diff = trt_effect - t_crit * trt_se
+                    ci_upper_diff = trt_effect + t_crit * trt_se
+
+                    if log_transform:
+                        # Back-transform to ratio of geometric means (%)
+                        ratio_pct = np.exp(trt_effect) * 100
+                        ci_lower_pct = np.exp(ci_lower_diff) * 100
+                        ci_upper_pct = np.exp(ci_upper_diff) * 100
+                    else:
+                        ratio_pct = trt_effect
+                        ci_lower_pct = ci_lower_diff
+                        ci_upper_pct = ci_upper_diff
+
+                    # Display results
+                    section_header("Bioequivalence Results")
+                    m1, m2, m3, m4 = st.columns(4)
+                    m1.metric("Ratio of Geo. Means",
+                              f"{ratio_pct:.2f}%" if log_transform else f"{trt_effect:.4f}")
+                    m2.metric("90% CI Lower", f"{ci_lower_pct:.2f}%" if log_transform else f"{ci_lower_diff:.4f}")
+                    m3.metric("90% CI Upper", f"{ci_upper_pct:.2f}%" if log_transform else f"{ci_upper_diff:.4f}")
+                    m4.metric("Treatment p-value", f"{trt_pval:.6f}")
+
+                    # BE conclusion
+                    if log_transform:
+                        be_pass = ci_lower_pct >= lower_limit and ci_upper_pct <= upper_limit
+                    else:
+                        be_pass = True  # non-log needs custom limits
+
+                    if be_pass:
+                        interpretation_card({
+                            "title": "Bioequivalence Conclusion",
+                            "body": f"The 90% CI [{ci_lower_pct:.2f}%, {ci_upper_pct:.2f}%] falls entirely within the acceptance region [{lower_limit}%, {upper_limit}%]. Bioequivalence is established.",
+                            "detail": "The test and reference formulations can be considered bioequivalent.",
+                        })
+                    else:
+                        interpretation_card({
+                            "title": "Bioequivalence Conclusion",
+                            "body": f"The 90% CI [{ci_lower_pct:.2f}%, {ci_upper_pct:.2f}%] does NOT fall entirely within [{lower_limit}%, {upper_limit}%]. Bioequivalence is NOT established.",
+                            "detail": "The formulations cannot be considered bioequivalent based on this analysis.",
+                        })
+
+                    # Forest plot
+                    fig = go.Figure()
+                    fig.add_vrect(x0=lower_limit, x1=upper_limit,
+                                  fillcolor="green", opacity=0.1,
+                                  annotation_text="Acceptance Region")
+                    fig.add_trace(go.Scatter(
+                        x=[ratio_pct], y=[0.5], mode="markers",
+                        marker=dict(size=14, color="#6366f1", symbol="diamond"),
+                        name=f"Ratio = {ratio_pct:.2f}%",
+                    ))
+                    fig.add_trace(go.Scatter(
+                        x=[ci_lower_pct, ci_upper_pct], y=[0.5, 0.5],
+                        mode="lines", line=dict(color="#6366f1", width=4),
+                        name="90% CI",
+                    ))
+                    fig.add_vline(x=100, line_dash="dot", line_color="gray")
+                    fig.add_vline(x=lower_limit, line_dash="dash", line_color="red")
+                    fig.add_vline(x=upper_limit, line_dash="dash", line_color="red")
+                    fig.update_layout(
+                        title="Bioequivalence: 90% CI vs Acceptance Region",
+                        xaxis_title="Ratio of Geometric Means (%)",
+                        yaxis_visible=False, height=300,
+                        xaxis=dict(range=[max(50, lower_limit - 20),
+                                          min(160, upper_limit + 20)]),
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+
+                    # ANOVA table
+                    with st.expander("Model Details"):
+                        st.text(str(result.summary()))
+
+                except Exception as e:
+                    st.error(f"Model fitting failed: {e}")
+                    st.info("Ensure your data has the correct crossover design structure with subject, treatment, period, and sequence columns.")
 
 
 # ===================================================================

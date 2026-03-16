@@ -22,7 +22,7 @@ def render_descriptive_stats(df: pd.DataFrame):
     tabs = st.tabs([
         "Summary Statistics", "Distribution Analysis",
         "Frequency Analysis", "Grouped Statistics", "Outlier Detection",
-        "Distribution Fitting",
+        "Distribution Fitting", "Distribution Platform",
     ])
 
     with tabs[0]:
@@ -37,6 +37,8 @@ def render_descriptive_stats(df: pd.DataFrame):
         _render_outliers(df)
     with tabs[5]:
         _render_distribution_fitting(df)
+    with tabs[6]:
+        _render_distribution_platform(df)
 
 
 def _render_summary_stats(df: pd.DataFrame):
@@ -837,3 +839,159 @@ def _render_distribution_fitting(df: pd.DataFrame):
                     })
                 st.dataframe(pd.DataFrame(ci_records), use_container_width=True, hide_index=True)
                 st.caption(f"Based on {len(boot_params)} successful bootstrap fits out of {int(n_boot)} attempts.")
+
+
+# ─── Distribution Platform (JMP-style unified view) ──────────────────────
+
+def _render_distribution_platform(df: pd.DataFrame):
+    """JMP-style unified distribution view: histogram+KDE, box+violin, QQ, plus stats."""
+    num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    if not num_cols:
+        empty_state("No numeric columns found.")
+        return
+
+    col_name = st.selectbox("Select column:", num_cols, key="dp_col")
+    cat_cols = df.select_dtypes(include=["object", "category"]).columns.tolist()
+    group_col = st.selectbox("Group By (optional):", ["None"] + cat_cols, key="dp_group")
+    group_col = None if group_col == "None" else group_col
+
+    groups = {}
+    if group_col:
+        for g_val in df[group_col].dropna().unique():
+            g_data = df.loc[df[group_col] == g_val, col_name].dropna().values
+            if len(g_data) >= 3:
+                groups[str(g_val)] = g_data
+        if not groups:
+            empty_state("No groups with enough data (need >= 3 per group).")
+            return
+    else:
+        col_data = df[col_name].dropna().values
+        if len(col_data) < 3:
+            empty_state("Need at least 3 data points.", "The selected column needs more non-null values.")
+            return
+        groups["All Data"] = col_data
+
+    for g_label, g_data in groups.items():
+        if group_col:
+            st.markdown(f"---")
+            section_header(f"{group_col} = {g_label}")
+
+        # 2x2 subplot: Histogram+KDE, Box+Violin, QQ Plot, ECDF
+        fig = make_subplots(
+            rows=2, cols=2,
+            subplot_titles=("Histogram + KDE", "Box + Violin", "Normal QQ Plot", "ECDF"),
+            vertical_spacing=0.14, horizontal_spacing=0.1,
+        )
+
+        # 1. Histogram + KDE
+        n_bins = max(10, min(50, int(np.sqrt(len(g_data)))))
+        hist_vals, bin_edges = np.histogram(g_data, bins=n_bins)
+        bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+        fig.add_trace(go.Bar(x=bin_centers, y=hist_vals, name="Histogram",
+                             opacity=0.7, showlegend=False), row=1, col=1)
+        try:
+            kde = stats.gaussian_kde(g_data)
+            kde_x = np.linspace(g_data.min(), g_data.max(), 200)
+            kde_y = kde(kde_x) * len(g_data) * (bin_edges[1] - bin_edges[0])
+            fig.add_trace(go.Scatter(x=kde_x, y=kde_y, name="KDE",
+                                     line=dict(color="#ef4444", width=2),
+                                     showlegend=False), row=1, col=1)
+        except Exception:
+            pass
+
+        # 2. Box + Violin
+        fig.add_trace(go.Violin(y=g_data, name="Violin", side="positive",
+                                line_color="#6366f1", fillcolor="rgba(99,102,241,0.15)",
+                                showlegend=False), row=1, col=2)
+        fig.add_trace(go.Box(y=g_data, name="Box", boxpoints="outliers",
+                             marker=dict(size=3), showlegend=False), row=1, col=2)
+
+        # 3. QQ Plot
+        sorted_d = np.sort(g_data)
+        n_d = len(sorted_d)
+        theoretical_q = stats.norm.ppf((np.arange(1, n_d + 1) - 0.5) / n_d)
+        fig.add_trace(go.Scatter(x=theoretical_q, y=sorted_d, mode="markers",
+                                 marker=dict(size=3), name="QQ",
+                                 showlegend=False), row=2, col=1)
+        slope_qq, intercept_qq = np.polyfit(theoretical_q, sorted_d, 1)
+        fig.add_trace(go.Scatter(x=theoretical_q,
+                                 y=slope_qq * theoretical_q + intercept_qq,
+                                 mode="lines", line=dict(color="red", dash="dash"),
+                                 name="Ref", showlegend=False), row=2, col=1)
+
+        # 4. ECDF
+        ecdf_y = np.arange(1, n_d + 1) / n_d
+        fig.add_trace(go.Scatter(x=sorted_d, y=ecdf_y, mode="lines",
+                                 name="ECDF", line=dict(width=2),
+                                 showlegend=False), row=2, col=2)
+        norm_cdf_y = stats.norm.cdf(sorted_d, np.mean(g_data), np.std(g_data, ddof=1))
+        fig.add_trace(go.Scatter(x=sorted_d, y=norm_cdf_y, mode="lines",
+                                 name="Normal CDF",
+                                 line=dict(color="red", dash="dash"),
+                                 showlegend=False), row=2, col=2)
+
+        fig.update_layout(height=650,
+                          title_text=f"Distribution Platform: {col_name}" + (f" ({g_label})" if group_col else ""))
+        fig.update_xaxes(title_text="Value", row=1, col=1)
+        fig.update_yaxes(title_text="Frequency", row=1, col=1)
+        fig.update_xaxes(title_text="Theoretical Quantiles", row=2, col=1)
+        fig.update_yaxes(title_text="Sample Quantiles", row=2, col=1)
+        fig.update_xaxes(title_text="Value", row=2, col=2)
+        fig.update_yaxes(title_text="Cumulative Probability", row=2, col=2)
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Percentile table + Normality tests + Top-3 distribution fits
+        c_left, c_right = st.columns(2)
+
+        with c_left:
+            section_header("Percentiles")
+            pctiles = [1, 5, 10, 25, 50, 75, 90, 95, 99]
+            pct_vals = {f"P{p}": round(float(np.percentile(g_data, p)), 4) for p in pctiles}
+            st.dataframe(pd.DataFrame([pct_vals]), use_container_width=True, hide_index=True)
+
+        with c_right:
+            section_header("Normality Tests")
+            norm_records = []
+            try:
+                sw_s, sw_p = stats.shapiro(g_data[:5000] if len(g_data) > 5000 else g_data)
+                norm_records.append({"Test": "Shapiro-Wilk", "Statistic": round(sw_s, 4),
+                                     "p-value": round(sw_p, 4),
+                                     "Normal?": "Yes" if sw_p > 0.05 else "No"})
+            except Exception:
+                pass
+            try:
+                ad_res = stats.anderson(g_data, dist="norm")
+                ad_pass = "Yes" if ad_res.statistic < ad_res.critical_values[2] else "No"
+                norm_records.append({"Test": "Anderson-Darling", "Statistic": round(ad_res.statistic, 4),
+                                     "p-value": round(ad_res.critical_values[2], 4),
+                                     "Normal?": ad_pass})
+            except Exception:
+                pass
+            try:
+                jb_s, jb_p = stats.jarque_bera(g_data)
+                norm_records.append({"Test": "Jarque-Bera", "Statistic": round(jb_s, 4),
+                                     "p-value": round(jb_p, 4),
+                                     "Normal?": "Yes" if jb_p > 0.05 else "No"})
+            except Exception:
+                pass
+            if norm_records:
+                st.dataframe(pd.DataFrame(norm_records), use_container_width=True, hide_index=True)
+
+        # Top-3 distribution fits
+        section_header("Top Distribution Fits")
+        try:
+            fit_results = _fit_distributions(tuple(g_data))
+            if fit_results:
+                top3 = fit_results[:3]
+                fit_table = []
+                for r in top3:
+                    param_str = ", ".join(f"{p:.4f}" for p in r["Parameters"])
+                    fit_table.append({
+                        "Distribution": r["Distribution"],
+                        "AIC": round(r["AIC"], 2),
+                        "BIC": round(r["BIC"], 2),
+                        "Parameters": param_str,
+                    })
+                st.dataframe(pd.DataFrame(fit_table), use_container_width=True, hide_index=True)
+        except Exception:
+            st.caption("Could not fit distributions to this data.")
