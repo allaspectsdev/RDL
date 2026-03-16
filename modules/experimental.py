@@ -334,6 +334,29 @@ def _inject_css():
         overflow: hidden !important;
         text-overflow: ellipsis !important;
     }
+
+    /* ─── Workflow palette mobile ─── */
+    @media (max-width: 768px) {
+        .rdl-exp-palette-btn [data-testid="stHorizontalBlock"] {
+            flex-wrap: wrap !important;
+            gap: 0.25rem !important;
+        }
+        .rdl-exp-palette-btn [data-testid="stColumn"] {
+            flex: 1 1 30% !important;
+            min-width: 30% !important;
+        }
+        .rdl-exp-palette-btn button {
+            font-size: 0.65rem !important;
+            min-height: 40px !important;
+            padding: 0.4rem 0.3rem !important;
+        }
+    }
+    @media (max-width: 480px) {
+        .rdl-exp-palette-btn [data-testid="stColumn"] {
+            flex: 1 1 45% !important;
+            min-width: 45% !important;
+        }
+    }
     </style>
     """, unsafe_allow_html=True)
 

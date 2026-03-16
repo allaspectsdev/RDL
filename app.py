@@ -1089,6 +1089,82 @@ st.markdown("""<style>
         gap: 0.75rem;
     }
 }
+
+/* ─── MOBILE RESPONSIVENESS ─────────────────────────────────────────────── */
+
+/* Stack columns vertically on tablets / small screens */
+@media (max-width: 768px) {
+    [data-testid="stHorizontalBlock"] {
+        flex-wrap: wrap !important;
+    }
+    [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
+        flex: 1 1 100% !important;
+        min-width: 100% !important;
+    }
+    /* Allow 2-col layouts to survive on tablets */
+    [data-testid="stHorizontalBlock"]:has([data-testid="stColumn"]:nth-child(2):last-child)
+    > [data-testid="stColumn"] {
+        flex: 1 1 48% !important;
+        min-width: 48% !important;
+    }
+
+    /* Touch targets — WCAG 44px minimum */
+    .stButton > button {
+        min-height: 44px !important;
+        padding: 0.6rem 1rem !important;
+        font-size: 0.9rem !important;
+    }
+    .stDownloadButton > button {
+        min-height: 44px !important;
+    }
+    [data-testid="stRadio"] label,
+    [data-testid="stCheckbox"] label {
+        min-height: 44px !important;
+        display: flex !important;
+        align-items: center !important;
+    }
+    .stTabs [data-baseweb="tab"] {
+        min-height: 44px !important;
+        padding: 0.5rem 0.75rem !important;
+    }
+
+    /* Scale metric fonts */
+    [data-testid="stMetric"] [data-testid="stMetricValue"] {
+        font-size: 1.2rem !important;
+    }
+    [data-testid="stMetric"] [data-testid="stMetricLabel"] {
+        font-size: 0.72rem !important;
+    }
+
+    /* Sidebar */
+    [data-testid="stSidebar"] {
+        min-width: 260px !important;
+        max-width: 85vw !important;
+    }
+    .rdl-dataset-info .rdl-info-row {
+        padding: 0.25rem 0 !important;
+        font-size: 0.8rem !important;
+    }
+
+    /* Overflow handling for wide content */
+    [data-testid="stDataFrame"] {
+        overflow-x: auto !important;
+        -webkit-overflow-scrolling: touch !important;
+    }
+    .js-plotly-plot {
+        max-width: 100vw !important;
+        overflow-x: auto !important;
+    }
+}
+
+/* Phone-specific overrides */
+@media (max-width: 480px) {
+    [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
+        flex: 1 1 100% !important;
+        min-width: 100% !important;
+    }
+    html { font-size: 14px !important; }
+}
 </style>""", unsafe_allow_html=True)
 
 
