@@ -70,6 +70,12 @@ NODE_TYPES = {
         "desc": "Claude AI analysis",
         "default_config": {"prompt": "", "include_data_summary": True, "temperature": 0.3, "max_tokens": 1024},
     },
+    "Validation": {
+        "color": "#14b8a6",
+        "icon": "\u2714",
+        "desc": "Assumption & data quality checks",
+        "default_config": {"checks": ["normality", "missing_data", "outliers"], "columns": [], "alpha": 0.05},
+    },
     "Output": {
         "color": "#ec4899",
         "icon": "\u270e",
@@ -618,6 +624,117 @@ def _exec_ai_prompt(config, inputs, df):
         return f"[AI Error: {e}]"
 
 
+def _exec_validation(config, inputs, df):
+    """Run validation engine checks on the data and return structured results."""
+    from modules.validation import (
+        check_normality, check_equal_variance, check_sample_size,
+        check_missing_data, check_outlier_proportion, check_independence,
+        check_homoscedasticity, check_multicollinearity, check_residual_normality,
+    )
+
+    data = _get_input_df(inputs, df)
+    checks_to_run = config.get("checks", [])
+    columns = config.get("columns", [])
+    alpha = config.get("alpha", 0.05)
+
+    # If no columns specified, use all numeric
+    if not columns:
+        columns = data.select_dtypes(include=[np.number]).columns.tolist()
+
+    results = []
+
+    for check_name in checks_to_run:
+        if check_name == "normality":
+            for col in columns:
+                if col in data.columns:
+                    vals = data[col].dropna().values
+                    if len(vals) >= 3:
+                        c = check_normality(vals, label=col)
+                        results.append({"check": c.name, "status": c.status,
+                                        "detail": c.detail, "suggestion": c.suggestion})
+
+        elif check_name == "missing_data":
+            subset = data[columns] if columns else data
+            c = check_missing_data(subset)
+            results.append({"check": c.name, "status": c.status,
+                            "detail": c.detail, "suggestion": c.suggestion})
+
+        elif check_name == "outliers":
+            for col in columns:
+                if col in data.columns:
+                    vals = data[col].dropna().values
+                    if len(vals) >= 4:
+                        c = check_outlier_proportion(vals)
+                        results.append({"check": f"Outliers ({col})", "status": c.status,
+                                        "detail": c.detail, "suggestion": c.suggestion})
+
+        elif check_name == "sample_size":
+            test_type = config.get("params", {}).get("test_type", "t-test")
+            for col in columns:
+                if col in data.columns:
+                    n = data[col].dropna().shape[0]
+                    c = check_sample_size(n, test_type)
+                    results.append({"check": f"Sample Size ({col})", "status": c.status,
+                                    "detail": c.detail, "suggestion": c.suggestion})
+
+        elif check_name == "equal_variance":
+            group_col = config.get("params", {}).get("group_column")
+            if group_col and group_col in data.columns and columns:
+                col = columns[0]
+                if col in data.columns:
+                    groups = [g[col].dropna().values for _, g in data.groupby(group_col)]
+                    groups = [g for g in groups if len(g) >= 2]
+                    if len(groups) >= 2:
+                        c = check_equal_variance(*groups)
+                        results.append({"check": c.name, "status": c.status,
+                                        "detail": c.detail, "suggestion": c.suggestion})
+
+        elif check_name == "multicollinearity":
+            valid = [c for c in columns if c in data.columns]
+            if len(valid) >= 2:
+                subset = data[valid].dropna()
+                if len(subset) > len(valid) + 1:
+                    c = check_multicollinearity(subset, valid)
+                    results.append({"check": c.name, "status": c.status,
+                                    "detail": c.detail, "suggestion": c.suggestion})
+
+        elif check_name == "independence":
+            # Run on residuals from linear fit of first two columns
+            if len(columns) >= 2:
+                col_y, col_x = columns[0], columns[1]
+                if col_y in data.columns and col_x in data.columns:
+                    clean = data[[col_y, col_x]].dropna()
+                    if len(clean) >= 3:
+                        coeffs = np.polyfit(clean[col_x], clean[col_y], 1)
+                        residuals = clean[col_y].values - np.polyval(coeffs, clean[col_x].values)
+                        c = check_independence(residuals)
+                        results.append({"check": c.name, "status": c.status,
+                                        "detail": c.detail, "suggestion": c.suggestion})
+
+        elif check_name == "homoscedasticity":
+            if len(columns) >= 2:
+                col_y, col_x = columns[0], columns[1]
+                if col_y in data.columns and col_x in data.columns:
+                    clean = data[[col_y, col_x]].dropna()
+                    if len(clean) > 3:
+                        coeffs = np.polyfit(clean[col_x], clean[col_y], 1)
+                        residuals = clean[col_y].values - np.polyval(coeffs, clean[col_x].values)
+                        c = check_homoscedasticity(residuals, clean[col_x].values)
+                        results.append({"check": c.name, "status": c.status,
+                                        "detail": c.detail, "suggestion": c.suggestion})
+
+    # Summary
+    n_pass = sum(1 for r in results if r["status"] == "pass")
+    n_warn = sum(1 for r in results if r["status"] == "warn")
+    n_fail = sum(1 for r in results if r["status"] == "fail")
+
+    return {
+        "validation_results": results,
+        "summary": {"total": len(results), "pass": n_pass, "warn": n_warn, "fail": n_fail},
+        "columns_checked": columns,
+    }
+
+
 def _exec_output(config, inputs, df):
     """Collect upstream inputs for display."""
     return {"format": config.get("format", "table"), "data": inputs}
@@ -629,6 +746,7 @@ _EXECUTORS = {
     "Analysis": _exec_analysis,
     "Visualization": _exec_visualization,
     "AI Prompt": _exec_ai_prompt,
+    "Validation": _exec_validation,
     "Output": _exec_output,
 }
 
@@ -805,14 +923,14 @@ def _render_workflow_tab(df):
 
     # ── Compact Node Palette + Controls ──
     node_items = list(NODE_TYPES.items())
-    cols = st.columns([1, 1, 1, 1, 1, 1, 2])
+    cols = st.columns([1, 1, 1, 1, 1, 1, 1, 2])
     for i, (ntype, info) in enumerate(node_items):
         with cols[i]:
             if st.button(f"{info['icon']} {ntype}", key=f"exp_add_{ntype}", use_container_width=True):
                 _add_node(ntype)
                 st.rerun()
 
-    with cols[6]:
+    with cols[7]:
         bc1, bc2 = st.columns(2)
         if bc1.button("Run Workflow", type="primary", key="exp_run", use_container_width=True):
             _run_workflow(df)
@@ -996,6 +1114,8 @@ def _render_config_panel(df):
         _config_visualization(selected, config, df)
     elif ntype == "AI Prompt":
         _config_ai_prompt(selected, config, df)
+    elif ntype == "Validation":
+        _config_validation(selected, config, df)
     elif ntype == "Output":
         _config_output(selected, config, df)
 
@@ -1193,6 +1313,76 @@ def _config_ai_prompt(node_id, config, df):
         st.caption("Set your API key in the Settings tab to enable AI nodes.")
 
 
+def _config_validation(node_id, config, df):
+    """Configure Validation node."""
+    _ALL_CHECKS = [
+        "normality", "missing_data", "outliers", "sample_size",
+        "equal_variance", "multicollinearity", "independence", "homoscedasticity",
+    ]
+    _CHECK_LABELS = {
+        "normality": "Normality (Shapiro-Wilk)",
+        "missing_data": "Missing Data",
+        "outliers": "Outliers (IQR)",
+        "sample_size": "Sample Size",
+        "equal_variance": "Equal Variance (Levene's)",
+        "multicollinearity": "Multicollinearity (VIF)",
+        "independence": "Independence (Durbin-Watson)",
+        "homoscedasticity": "Homoscedasticity (Breusch-Pagan)",
+    }
+
+    num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    all_cols = df.columns.tolist()
+
+    config["columns"] = st.multiselect(
+        "Columns to validate (empty = all numeric):",
+        num_cols, default=config.get("columns", []),
+        key=f"exp_val_cols_{node_id}",
+    )
+
+    current_checks = config.get("checks", ["normality", "missing_data", "outliers"])
+    config["checks"] = st.multiselect(
+        "Checks to run:",
+        _ALL_CHECKS,
+        default=[c for c in current_checks if c in _ALL_CHECKS],
+        format_func=lambda x: _CHECK_LABELS.get(x, x),
+        key=f"exp_val_checks_{node_id}",
+    )
+
+    config["alpha"] = st.slider("Significance level (alpha):", 0.01, 0.10, config.get("alpha", 0.05),
+                                0.01, key=f"exp_val_alpha_{node_id}")
+
+    # Extra params for checks that need them
+    if not config.get("params"):
+        config["params"] = {}
+
+    if "equal_variance" in config["checks"]:
+        cat_cols = df.select_dtypes(include=["object", "category"]).columns.tolist()
+        if cat_cols:
+            config["params"]["group_column"] = st.selectbox(
+                "Group column (for equal variance):", cat_cols,
+                key=f"exp_val_grp_{node_id}",
+            )
+
+    if "sample_size" in config["checks"]:
+        config["params"]["test_type"] = st.selectbox(
+            "Test type (for sample size check):",
+            ["t-test", "paired-t", "anova", "chi-square", "correlation",
+             "regression", "pca", "ml-classification", "survival"],
+            key=f"exp_val_test_type_{node_id}",
+        )
+
+    help_tip("Validation Checks", """
+- **Normality**: Shapiro-Wilk test per column
+- **Missing Data**: Proportion of NaN values
+- **Outliers**: IQR-based outlier detection per column
+- **Sample Size**: Checks against recommended minimums for test type
+- **Equal Variance**: Levene's test across groups (requires group column)
+- **Multicollinearity**: VIF across selected numeric columns
+- **Independence**: Durbin-Watson on residuals (first two columns)
+- **Homoscedasticity**: Breusch-Pagan on residuals (first two columns)
+""")
+
+
 def _config_output(node_id, config, df):
     """Configure Output node."""
     config["format"] = st.selectbox("Output format:", ["table", "text", "download"],
@@ -1233,6 +1423,24 @@ def _render_execution_results():
             st.dataframe(output.head(500), use_container_width=True)
         elif isinstance(output, go.Figure):
             st.plotly_chart(output, use_container_width=True)
+        elif isinstance(output, dict) and "validation_results" in output:
+            # Validation node — render with validation_panel
+            from modules.validation import ValidationCheck
+            checks = [
+                ValidationCheck(
+                    name=r["check"], status=r["status"],
+                    detail=r["detail"], suggestion=r.get("suggestion", ""),
+                )
+                for r in output["validation_results"]
+            ]
+            if checks:
+                validation_panel(checks, title="Workflow Validation Results")
+            summary = output.get("summary", {})
+            sc1, sc2, sc3, sc4 = st.columns(4)
+            sc1.metric("Total Checks", summary.get("total", 0))
+            sc2.metric("Passed", summary.get("pass", 0))
+            sc3.metric("Warnings", summary.get("warn", 0))
+            sc4.metric("Failed", summary.get("fail", 0))
         elif isinstance(output, dict):
             fmt = output.get("format")
             data = output.get("data")
