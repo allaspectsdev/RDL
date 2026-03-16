@@ -1246,8 +1246,9 @@ Visualization (charts), AI Prompt (Claude), Validation (checks),
 Output (display), Conditional (branching).
 """)
 
-    # ── Config Panel (only if node selected) ──
-    _render_config_panel(df)
+    # ── Node Config Dialog (opens when a node is clicked) ──
+    if st.session_state.get("exp_selected_node"):
+        _node_config_dialog()
 
     # ── Execution Results ──
     _render_execution_results()
@@ -1310,7 +1311,7 @@ def _render_canvas():
         show_controls=True,
         get_node_on_click=True,
         get_edge_on_click=False,
-        enable_node_menu=True,
+        enable_node_menu=False,
         enable_edge_menu=True,
         enable_pane_menu=True,
         allow_new_edges=True,
@@ -1334,49 +1335,47 @@ def _render_canvas():
         st.session_state["exp_node_configs"] = {k: v for k, v in configs.items() if k in current_ids}
 
 
-def _render_config_panel(df):
-    """Render configuration panel for the selected node."""
+@st.dialog("Configure Node", width="large")
+def _node_config_dialog():
+    """Modal dialog for configuring the selected node with type-specific fields."""
+    df = st.session_state.get("df")
     selected = st.session_state.get("exp_selected_node")
-    if not selected:
+    if not selected or df is None:
+        st.session_state["exp_selected_node"] = None
+        st.rerun()
         return
 
     configs = st.session_state.get("exp_node_configs", {})
     config = configs.get(selected)
     if not config:
+        st.session_state["exp_selected_node"] = None
+        st.rerun()
         return
 
     ntype = config.get("type", "Unknown")
     status = st.session_state.get("exp_node_status", {}).get(selected, "pending")
     info = NODE_TYPES.get(ntype, {})
 
-    st.markdown(f'<div class="rdl-exp-config-panel">', unsafe_allow_html=True)
-    c1, c2, c3 = st.columns([2, 1, 1])
+    # ── Header ──
+    c1, c2 = st.columns([3, 1])
     c1.markdown(f"**{info.get('icon', '')} {ntype}** \u2014 `{selected}`")
     c2.markdown(f'<span class="rdl-exp-status rdl-exp-status--{status}">{status}</span>',
                 unsafe_allow_html=True)
-    if c3.button("Deselect", key="exp_deselect"):
-        st.session_state["exp_selected_node"] = None
-        st.rerun()
 
     # ── Node label (rename) ──
     label = st.text_input(
         "Node label:",
         value=st.session_state.get("exp_node_labels", {}).get(selected, ""),
-        key=f"exp_lbl_{selected}",
+        key=f"exp_dlg_lbl_{selected}",
     )
     if label:
-        st.session_state["exp_node_labels"][selected] = label
+        st.session_state.setdefault("exp_node_labels", {})[selected] = label
     elif selected in st.session_state.get("exp_node_labels", {}):
         del st.session_state["exp_node_labels"][selected]
 
-    # ── Duplicate button ──
-    if st.button("Duplicate node", key=f"exp_dup_{selected}"):
-        _duplicate_node(selected)
-        st.rerun()
-
     st.divider()
 
-    # Type-specific config
+    # ── Type-specific configuration ──
     if ntype == "Data Source":
         _config_data_source(selected, config, df)
     elif ntype == "Transform":
@@ -1395,7 +1394,18 @@ def _render_config_panel(df):
         _config_conditional(selected, config, df)
 
     st.session_state["exp_node_configs"][selected] = config
-    st.markdown("</div>", unsafe_allow_html=True)
+
+    st.divider()
+
+    # ── Action buttons ──
+    c1, c2 = st.columns(2)
+    if c1.button("Close", type="primary", use_container_width=True, key="exp_dlg_close"):
+        st.session_state["exp_selected_node"] = None
+        st.rerun()
+    if c2.button("Duplicate Node", use_container_width=True, key="exp_dlg_dup"):
+        _duplicate_node(selected)
+        st.session_state["exp_selected_node"] = None
+        st.rerun()
 
 
 def _config_data_source(node_id, config, df):
