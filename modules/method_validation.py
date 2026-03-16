@@ -11,7 +11,7 @@ import statsmodels.api as sm
 import plotly.graph_objects as go
 from modules.ui_helpers import (
     section_header, empty_state, help_tip, validation_panel,
-    interpretation_card, significance_result,
+    interpretation_card, significance_result, rdl_plotly_chart,
 )
 from modules.validation import check_normality, ValidationCheck, Interpretation
 
@@ -199,7 +199,7 @@ def _render_linearity(df: pd.DataFrame, num_cols: list[str]):
         xaxis_title=conc_col, yaxis_title=resp_col,
         title="Calibration Curve",
     )
-    st.plotly_chart(fig_cal, use_container_width=True)
+    rdl_plotly_chart(fig_cal)
 
     # --- Residual plot ---
     section_header("Residual Analysis")
@@ -215,7 +215,7 @@ def _render_linearity(df: pd.DataFrame, num_cols: list[str]):
         xaxis_title="Predicted", yaxis_title="Residual",
         title="Residuals vs. Predicted",
     )
-    st.plotly_chart(fig_res, use_container_width=True)
+    rdl_plotly_chart(fig_res)
 
     # --- Validation panel for residual checks ---
     checks = []
@@ -390,7 +390,7 @@ def _render_accuracy(df: pd.DataFrame, num_cols: list[str], all_cols: list[str])
         yaxis_title="Mean % Recovery",
         title="Accuracy: Mean Recovery by Level",
     )
-    st.plotly_chart(fig_acc, use_container_width=True)
+    rdl_plotly_chart(fig_acc)
 
 
 # ---------------------------------------------------------------------------
@@ -744,7 +744,7 @@ def _render_lod_calibration(df: pd.DataFrame, num_cols: list[str]):
         xaxis_title=conc_col, yaxis_title=resp_col,
         title="Calibration Curve with LOD / LOQ",
     )
-    st.plotly_chart(fig, use_container_width=True)
+    rdl_plotly_chart(fig)
 
 
 # ---------------------------------------------------------------------------
@@ -944,4 +944,4 @@ def _render_system_suitability(
             title=f"{pname} Trending",
             height=350,
         )
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)

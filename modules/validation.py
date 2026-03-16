@@ -1121,3 +1121,89 @@ def check_group_balance(data: pd.DataFrame, group_col: str) -> ValidationCheck:
             suggestion="Moderate imbalance — results may be affected; consider balanced designs",
         )
     return ValidationCheck(name="Group Balance", status="pass", detail=detail)
+
+
+# ─── Column Profiling ────────────────────────────────────────────────────────
+
+def check_constant_column(series: pd.Series) -> ValidationCheck:
+    """Flag a column with only 1 unique value."""
+    n_unique = series.nunique(dropna=True)
+    if n_unique <= 1:
+        return ValidationCheck(
+            name=f"Constant Column ({series.name})",
+            status="fail",
+            detail=f"Column '{series.name}' has {n_unique} unique value(s)",
+            suggestion="Consider dropping this column — it provides no information",
+        )
+    return ValidationCheck(
+        name=f"Constant Column ({series.name})",
+        status="pass",
+        detail=f"Column '{series.name}' has {n_unique} unique values",
+    )
+
+
+def check_high_cardinality(series: pd.Series, threshold: float = 0.95) -> ValidationCheck:
+    """Flag columns where almost every value is unique (likely an ID column)."""
+    n_valid = series.dropna().shape[0]
+    if n_valid == 0:
+        return ValidationCheck(
+            name=f"High Cardinality ({series.name})",
+            status="warn",
+            detail="No non-null values to check",
+        )
+    ratio = series.nunique(dropna=True) / n_valid
+    if ratio >= threshold:
+        return ValidationCheck(
+            name=f"High Cardinality ({series.name})",
+            status="warn",
+            detail=f"Column '{series.name}' has {ratio:.1%} unique values — likely an ID column",
+            suggestion="Consider excluding from analysis",
+        )
+    return ValidationCheck(
+        name=f"High Cardinality ({series.name})",
+        status="pass",
+        detail=f"Column '{series.name}' has {ratio:.1%} unique values",
+    )
+
+
+def profile_column(series: pd.Series) -> dict:
+    """Return a profiling summary dict for a single column."""
+    n_total = len(series)
+    n_missing = int(series.isna().sum())
+    n_valid = n_total - n_missing
+    completeness = (n_valid / n_total * 100) if n_total > 0 else 0
+    n_unique = int(series.nunique(dropna=True))
+
+    profile = {
+        "name": series.name,
+        "dtype": str(series.dtype),
+        "n_total": n_total,
+        "n_missing": n_missing,
+        "pct_missing": round(n_missing / n_total * 100, 1) if n_total > 0 else 0,
+        "completeness": round(completeness, 1),
+        "n_unique": n_unique,
+    }
+
+    if pd.api.types.is_numeric_dtype(series):
+        valid = series.dropna()
+        profile["distribution_type"] = "numeric"
+        if len(valid) > 0:
+            profile["min"] = float(valid.min())
+            profile["max"] = float(valid.max())
+            profile["mean"] = float(valid.mean())
+            profile["std"] = float(valid.std())
+            profile["median"] = float(valid.median())
+            # Outlier count via IQR
+            q1, q3 = float(np.percentile(valid, 25)), float(np.percentile(valid, 75))
+            iqr = q3 - q1
+            n_outliers = int(((valid < q1 - 1.5 * iqr) | (valid > q3 + 1.5 * iqr)).sum())
+            profile["n_outliers"] = n_outliers
+    else:
+        profile["distribution_type"] = "categorical"
+        if n_valid > 0:
+            top = series.value_counts().iloc[0]
+            top_val = series.value_counts().index[0]
+            profile["top_value"] = str(top_val)
+            profile["top_count"] = int(top)
+
+    return profile

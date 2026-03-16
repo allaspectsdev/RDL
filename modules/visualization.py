@@ -9,7 +9,7 @@ from scipy import stats
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from modules.ui_helpers import grouped_chart_selector, empty_state, section_header, _RDL_COLORWAY
+from modules.ui_helpers import grouped_chart_selector, empty_state, section_header, _RDL_COLORWAY, rdl_plotly_chart
 
 
 def render_visualization(df: pd.DataFrame):
@@ -53,7 +53,7 @@ def render_visualization(df: pd.DataFrame):
                          title=title, opacity=opacity,
                          color_continuous_scale=color_scale if color and color in num_cols else None)
         fig.update_layout(height=height)
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
     # ── Line Chart ──
     elif chart_type == "Line Chart":
@@ -73,7 +73,7 @@ def render_visualization(df: pd.DataFrame):
                                              mode="lines+markers" if markers else "lines"))
                 fig.update_layout(title=title, xaxis_title=x)
             fig.update_layout(height=height)
-            st.plotly_chart(fig, use_container_width=True)
+            rdl_plotly_chart(fig)
 
     # ── Bar Chart ──
     elif chart_type == "Bar Chart":
@@ -96,7 +96,7 @@ def render_visualization(df: pd.DataFrame):
                          y="count" if orient == "v" else x,
                          title=title, orientation=orient, opacity=opacity)
         fig.update_layout(height=height)
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
     # ── Histogram ──
     elif chart_type == "Histogram":
@@ -123,7 +123,7 @@ def render_visualization(df: pd.DataFrame):
             except Exception:
                 pass
         fig.update_layout(height=height)
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
     # ── Box Plot ──
     elif chart_type == "Box Plot":
@@ -137,7 +137,7 @@ def render_visualization(df: pd.DataFrame):
         fig = px.box(df, x=x, y=y, color=color, points=points, notched=notched,
                      title=title)
         fig.update_layout(height=height)
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
     # ── Violin Plot ──
     elif chart_type == "Violin Plot":
@@ -150,7 +150,7 @@ def render_visualization(df: pd.DataFrame):
         fig = px.violin(df, x=x, y=y, color=color, box=box, points=points,
                         title=title)
         fig.update_layout(height=height)
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
     # ── Strip Plot ──
     elif chart_type == "Strip Plot":
@@ -160,7 +160,7 @@ def render_visualization(df: pd.DataFrame):
 
         fig = px.strip(df, x=x, y=y, color=color, title=title)
         fig.update_layout(height=height)
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
     # ── Heatmap ──
     elif chart_type == "Heatmap":
@@ -180,7 +180,7 @@ def render_visualization(df: pd.DataFrame):
             fig = px.imshow(matrix, text_auto=".2f", color_continuous_scale=color_scale,
                             title=title, aspect="auto")
             fig.update_layout(height=height)
-            st.plotly_chart(fig, use_container_width=True)
+            rdl_plotly_chart(fig)
 
     # ── Bubble Chart ──
     elif chart_type == "Bubble Chart":
@@ -193,7 +193,7 @@ def render_visualization(df: pd.DataFrame):
         fig = px.scatter(df, x=x, y=y, size=size, color=color,
                          title=title, opacity=opacity, size_max=60)
         fig.update_layout(height=height)
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
     # ── Area Chart ──
     elif chart_type == "Area Chart":
@@ -205,7 +205,7 @@ def render_visualization(df: pd.DataFrame):
             fig = px.area(df, x=x, y=y_cols, title=title,
                           groupnorm="percent" if stacked else None)
             fig.update_layout(height=height)
-            st.plotly_chart(fig, use_container_width=True)
+            rdl_plotly_chart(fig)
 
     # ── Pie / Donut ──
     elif chart_type == "Pie / Donut":
@@ -230,7 +230,7 @@ def render_visualization(df: pd.DataFrame):
             fig = px.pie(values=counts.values, names=counts.index.astype(str),
                          title=title, hole=hole)
         fig.update_layout(height=height)
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
     # ── Treemap ──
     elif chart_type == "Treemap":
@@ -240,7 +240,7 @@ def render_visualization(df: pd.DataFrame):
         if path_cols:
             fig = px.treemap(df, path=path_cols, values=values, title=title)
             fig.update_layout(height=height)
-            st.plotly_chart(fig, use_container_width=True)
+            rdl_plotly_chart(fig)
 
     # ── Sunburst ──
     elif chart_type == "Sunburst":
@@ -250,7 +250,7 @@ def render_visualization(df: pd.DataFrame):
         if path_cols:
             fig = px.sunburst(df, path=path_cols, values=values, title=title)
             fig.update_layout(height=height)
-            st.plotly_chart(fig, use_container_width=True)
+            rdl_plotly_chart(fig)
 
     # ── Radar Chart ──
     elif chart_type == "Radar Chart":
@@ -287,7 +287,7 @@ def render_visualization(df: pd.DataFrame):
                 ))
             fig.update_layout(title=title, height=height,
                               polar=dict(radialaxis=dict(visible=True, range=[0, 1])))
-            st.plotly_chart(fig, use_container_width=True)
+            rdl_plotly_chart(fig)
 
     # ── Parallel Coordinates ──
     elif chart_type == "Parallel Coordinates":
@@ -304,7 +304,7 @@ def render_visualization(df: pd.DataFrame):
                 fig = px.parallel_coordinates(df, dimensions=selected, color=color_col,
                                               title=title, color_continuous_scale=color_scale)
             fig.update_layout(height=height)
-            st.plotly_chart(fig, use_container_width=True)
+            rdl_plotly_chart(fig)
 
     # ── 3D Scatter ──
     elif chart_type == "3D Scatter":
@@ -319,7 +319,7 @@ def render_visualization(df: pd.DataFrame):
 
         fig = px.scatter_3d(df, x=x, y=y, z=z, color=color, title=title, opacity=opacity)
         fig.update_layout(height=height)
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
     # ── 3D Surface ──
     elif chart_type == "3D Surface":
@@ -343,7 +343,7 @@ def render_visualization(df: pd.DataFrame):
             fig = go.Figure(go.Surface(x=xi, y=yi, z=zi, colorscale=color_scale))
             fig.update_layout(title=title, height=height,
                               scene=dict(xaxis_title=x, yaxis_title=y, zaxis_title=z))
-            st.plotly_chart(fig, use_container_width=True)
+            rdl_plotly_chart(fig)
         except Exception as e:
             st.error(f"Surface plot error: {e}")
 
@@ -359,7 +359,7 @@ def render_visualization(df: pd.DataFrame):
         fig = px.density_contour(df, x=x, y=y, title=title)
         fig.update_traces(contours_coloring="fill")
         fig.update_layout(height=height)
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
     # ── Funnel Chart ──
     elif chart_type == "Funnel Chart":
@@ -369,7 +369,7 @@ def render_visualization(df: pd.DataFrame):
         agg_data = df.groupby(stage)[value].sum().sort_values(ascending=False).reset_index()
         fig = px.funnel(agg_data, x=value, y=stage, title=title)
         fig.update_layout(height=height)
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
     # ── Waterfall Chart ──
     elif chart_type == "Waterfall Chart":
@@ -382,7 +382,7 @@ def render_visualization(df: pd.DataFrame):
             connector=dict(line=dict(color="rgb(63,63,63)")),
         ))
         fig.update_layout(title=title, height=height)
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
     # ── Candlestick ──
     elif chart_type == "Candlestick (OHLC)":
@@ -396,7 +396,7 @@ def render_visualization(df: pd.DataFrame):
         fig = go.Figure(go.Candlestick(x=df[date], open=df[o], high=df[h],
                                         low=df[l], close=df[c]))
         fig.update_layout(title=title, height=height, xaxis_rangeslider_visible=False)
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
     # ── Joint Plot ──
     elif chart_type == "Joint Plot":
@@ -411,7 +411,7 @@ def render_visualization(df: pd.DataFrame):
         fig = px.scatter(df, x=x, y=y, color=color, marginal_x="histogram",
                          marginal_y="histogram", title=title, opacity=opacity)
         fig.update_layout(height=height)
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
     # ── Mosaic Plot ──
     elif chart_type == "Mosaic Plot":
@@ -488,7 +488,7 @@ def render_visualization(df: pd.DataFrame):
                                      title=var1),
                           yaxis=dict(range=[-0.1, 1.05], showgrid=False, zeroline=False,
                                      title=var2))
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
         st.caption("Colors: Blue = more than expected (positive residual), Red = less than expected (negative residual). Numbers show count and Pearson residual.")
 
@@ -562,7 +562,7 @@ def render_visualization(df: pd.DataFrame):
 
         fig.update_layout(title=title, height=height,
                           xaxis_title=group1, yaxis_title=value)
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
     # ── Error Bar Chart ──
     elif chart_type == "Error Bar Chart":
@@ -603,7 +603,7 @@ def render_visualization(df: pd.DataFrame):
             fig.update_layout(yaxis_title=grp_col, xaxis_title=f"Mean {val_col}")
 
         fig.update_layout(title=title, height=height)
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
     # ── Sankey Diagram ──
     elif chart_type == "Sankey Diagram":
@@ -666,7 +666,7 @@ def render_visualization(df: pd.DataFrame):
                 link=dict(source=links_source, target=links_target, value=links_value),
             ))
             fig.update_layout(title=title, height=height)
-            st.plotly_chart(fig, use_container_width=True)
+            rdl_plotly_chart(fig)
 
     # ── Ridgeline Plot ──
     elif chart_type == "Ridgeline Plot":
@@ -734,7 +734,7 @@ def render_visualization(df: pd.DataFrame):
                 ),
                 xaxis_title=val_col,
             )
-            st.plotly_chart(fig, use_container_width=True)
+            rdl_plotly_chart(fig)
 
     # ── Hexbin Plot ──
     elif chart_type == "Hexbin Plot":
@@ -758,7 +758,7 @@ def render_visualization(df: pd.DataFrame):
             marginal_y="histogram" if marginals else None,
         )
         fig.update_layout(height=height)
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
     # ── Lollipop Chart ──
     elif chart_type == "Lollipop Chart":
@@ -806,7 +806,7 @@ def render_visualization(df: pd.DataFrame):
             fig.update_layout(xaxis_title=cat_col, yaxis_title=val_col or "Count")
 
         fig.update_layout(title=title, height=height)
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
     # ── Bump Chart ──
     elif chart_type == "Bump Chart":
@@ -839,7 +839,7 @@ def render_visualization(df: pd.DataFrame):
             yaxis=dict(autorange="reversed", title="Rank (1 = top)", dtick=1),
             xaxis_title=x_col,
         )
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
     # ── Slope Chart ──
     elif chart_type == "Slope Chart":
@@ -879,7 +879,7 @@ def render_visualization(df: pd.DataFrame):
             xaxis=dict(tickvals=[col_before, col_after], range=[-0.3, 1.3]),
             yaxis_title="Value",
         )
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
     # ── Diverging Bar Chart ──
     elif chart_type == "Diverging Bar Chart":
@@ -902,7 +902,7 @@ def render_visualization(df: pd.DataFrame):
         fig.add_vline(x=0, line_dash="dash", line_color="gray")
         fig.update_layout(title=title, height=max(height, len(agg) * 25),
                           xaxis_title=val_col, yaxis_title=cat_col)
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
     # ── Bullet Chart ──
     elif chart_type == "Bullet Chart":
@@ -962,7 +962,7 @@ def render_visualization(df: pd.DataFrame):
             title=title, height=max(height, len(categories) * 60),
             barmode="overlay", xaxis_title="Value", yaxis_title=cat_col,
         )
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
     # ── Calendar Heatmap ──
     elif chart_type == "Calendar Heatmap":
@@ -1013,7 +1013,7 @@ def render_visualization(df: pd.DataFrame):
                        autorange="reversed"),
             xaxis_title="Week of Year",
         )
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
     # ── Bland-Altman Plot ──
     elif chart_type == "Bland-Altman Plot":
@@ -1051,7 +1051,7 @@ def render_visualization(df: pd.DataFrame):
             xaxis_title=f"Mean of {method_a} & {method_b}",
             yaxis_title=f"Difference ({method_a} - {method_b})",
         )
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
         # Display metrics
         section_header("Agreement Metrics")

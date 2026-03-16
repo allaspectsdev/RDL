@@ -9,7 +9,7 @@ from scipy import stats
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from modules.ui_helpers import section_header, empty_state, help_tip, validation_panel, interpretation_card, alternative_suggestion
+from modules.ui_helpers import section_header, empty_state, help_tip, validation_panel, interpretation_card, alternative_suggestion, rdl_plotly_chart
 from modules.validation import (
     check_sample_size, check_stationarity, interpret_stationarity,
     interpret_p_value,
@@ -69,6 +69,7 @@ def render_time_series(df: pd.DataFrame):
         "Exploration", "Decomposition", "Stationarity",
         "ACF/PACF", "Smoothing", "ARIMA/SARIMA", "Forecast Comparison",
         "Multiple Series", "Spectral Analysis", "Change Point Detection",
+        "VAR",
     ])
 
     with tabs[0]:
@@ -91,6 +92,8 @@ def render_time_series(df: pd.DataFrame):
         _render_spectral(df)
     with tabs[9]:
         _render_change_point(df)
+    with tabs[10]:
+        _render_var(df)
 
 
 def _get_ts_data(df, date_col, value_col):
@@ -142,7 +145,7 @@ def _render_exploration(df: pd.DataFrame):
     fig.update_layout(title=f"Time Series: {value_col}",
                       xaxis=dict(rangeslider=dict(visible=True)),
                       height=500)
-    st.plotly_chart(fig, use_container_width=True)
+    rdl_plotly_chart(fig)
 
     # Rolling statistics
     section_header("Rolling Statistics")
@@ -160,7 +163,7 @@ def _render_exploration(df: pd.DataFrame):
     fig.add_trace(go.Scatter(x=ts.index, y=rolling_std.values, name=f"Rolling Std ({window})",
                              line=dict(color="green", width=2)))
     fig.update_layout(title="Rolling Statistics", height=400)
-    st.plotly_chart(fig, use_container_width=True)
+    rdl_plotly_chart(fig)
 
     # Lag plot
     with st.expander("Lag Plot"):
@@ -168,7 +171,7 @@ def _render_exploration(df: pd.DataFrame):
         lag_data = pd.DataFrame({"y(t)": ts.values[lag:], "y(t-{})".format(lag): ts.values[:-lag]})
         fig = px.scatter(lag_data, x=f"y(t-{lag})", y="y(t)", title=f"Lag Plot (lag={lag})")
         fig.update_layout(height=400)
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
     # Summary stats
     with st.expander("Summary"):
@@ -215,7 +218,7 @@ def _render_decomposition(df: pd.DataFrame):
             fig.add_trace(go.Scatter(x=ts_clean.index, y=result.resid, name="Residual",
                                      line=dict(color="purple")), row=4, col=1)
             fig.update_layout(height=800, title=f"Decomposition ({model_type}, period={period})")
-            st.plotly_chart(fig, use_container_width=True)
+            rdl_plotly_chart(fig)
 
         except Exception as e:
             st.error(f"Decomposition error: {e}")
@@ -276,7 +279,7 @@ def _render_stationarity(df: pd.DataFrame):
         fig.add_trace(go.Scatter(x=ts_clean.index, y=ts_clean.values, name="Original"), row=1, col=1)
         fig.add_trace(go.Scatter(x=ts_diff.index, y=ts_diff.values, name="Differenced"), row=2, col=1)
         fig.update_layout(height=500)
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
         # Test differenced series
         adf_diff = adfuller(ts_diff, autolag="AIC")
@@ -329,7 +332,7 @@ def _render_acf_pacf(df: pd.DataFrame):
 
         fig.update_layout(height=600)
         fig.update_xaxes(title_text="Lag", row=2, col=1)
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
         # Interpretation guide
         with st.expander("Interpretation Guide"):
@@ -429,7 +432,7 @@ def _render_smoothing(df: pd.DataFrame):
     fig.add_trace(go.Scatter(x=ts_clean.index, y=smoothed.values, name=label,
                              line=dict(color="red", width=2)))
     fig.update_layout(title=f"Smoothing: {label}", height=500)
-    st.plotly_chart(fig, use_container_width=True)
+    rdl_plotly_chart(fig)
 
 
 def _render_arima(df: pd.DataFrame):
@@ -531,7 +534,7 @@ def _render_arima(df: pd.DataFrame):
                                              line=dict(color="#6366f1"), showlegend=False), row=2, col=2)
 
                 fig.update_layout(height=600)
-                st.plotly_chart(fig, use_container_width=True)
+                rdl_plotly_chart(fig)
 
             # Forecast
             if len(test) > 0:
@@ -566,7 +569,7 @@ def _render_arima(df: pd.DataFrame):
                                      fill="toself", fillcolor="rgba(255,0,0,0.1)",
                                      line=dict(color="rgba(255,0,0,0)"), name="95% CI"))
             fig.update_layout(title="Forecast", height=500)
-            st.plotly_chart(fig, use_container_width=True)
+            rdl_plotly_chart(fig)
 
         except Exception as e:
             st.error(f"Model fitting error: {e}")
@@ -663,7 +666,7 @@ def _render_forecast_comparison(df: pd.DataFrame):
             fig.add_trace(go.Scatter(x=fc.index, y=fc.values, name=name,
                                      line=dict(color=colors[i % len(colors)], dash="dash")))
         fig.update_layout(title="Forecast Comparison", height=500)
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
         # Interpretation: does the best model beat naive?
         try:
@@ -753,7 +756,7 @@ def _render_multiple_series(df: pd.DataFrame):
         fig.add_trace(go.Scatter(x=data.index, y=data[col], name=col,
                                  mode="lines"), row=i + 1, col=1)
     fig.update_layout(height=300 * len(value_cols))
-    st.plotly_chart(fig, use_container_width=True)
+    rdl_plotly_chart(fig)
 
     # Cross-correlation
     section_header("Cross-Correlation")
@@ -785,13 +788,13 @@ def _render_multiple_series(df: pd.DataFrame):
         fig_ccf.add_hline(y=0, line_color="black")
         fig_ccf.update_layout(title=f"Cross-Correlation: {c1_col} vs {c2_col}",
                               xaxis_title="Lag", yaxis_title="CCF", height=400)
-        st.plotly_chart(fig_ccf, use_container_width=True)
+        rdl_plotly_chart(fig_ccf)
     else:
         # Correlation matrix of all series
         corr = data[value_cols].corr()
         fig_corr = px.imshow(corr, text_auto=".2f", color_continuous_scale="RdBu_r",
                               zmin=-1, zmax=1, title="Series Correlation Matrix")
-        st.plotly_chart(fig_corr, use_container_width=True)
+        rdl_plotly_chart(fig_corr)
 
     # VAR model
     section_header("VAR Model")
@@ -950,7 +953,7 @@ Analyzes the frequency content of a time series:
             yaxis_title="Power/Frequency",
             height=500,
         )
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
         # Log-scale PSD
         with st.expander("Log-scale PSD"):
@@ -959,7 +962,7 @@ Analyzes the frequency content of a time series:
                                           mode="lines", name="PSD (dB)"))
             fig_log.update_layout(title="PSD (Log Scale)", xaxis_title="Frequency",
                                   yaxis_title="Power (dB)", height=400)
-            st.plotly_chart(fig_log, use_container_width=True)
+            rdl_plotly_chart(fig_log)
 
         # Dominant frequencies table
         if len(freqs) > 1:
@@ -1119,7 +1122,7 @@ data-generating process shifts (e.g., a change in mean, variance, or trend).
             fig_cusum.add_vline(x=index[cp], line_dash="dot", line_color="orange", line_width=1)
         fig_cusum.update_layout(title="CUSUM", height=400,
                                 xaxis_title="Date", yaxis_title="Cumulative Sum")
-        st.plotly_chart(fig_cusum, use_container_width=True)
+        rdl_plotly_chart(fig_cusum)
 
     # ==========================
     # Binary Segmentation
@@ -1189,7 +1192,7 @@ def _display_change_point_results(index, values, change_points, value_col):
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=index, y=values, mode="lines", name=value_col))
         fig.update_layout(title="Time Series (no change points)", height=450)
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
         return
 
     # ---- Original series with change points and coloured segments ----
@@ -1218,7 +1221,7 @@ def _display_change_point_results(index, values, change_points, value_col):
         yaxis_title=value_col,
         height=500,
     )
-    st.plotly_chart(fig, use_container_width=True)
+    rdl_plotly_chart(fig)
 
     # ---- Segment statistics table ----
     section_header("Segment Statistics")
@@ -1245,3 +1248,338 @@ def _display_change_point_results(index, values, change_points, value_col):
             "Index": change_points,
         })
         st.dataframe(cp_df, use_container_width=True, hide_index=True)
+
+
+# ---------------------------------------------------------------------------
+# Tab 11: VAR (Vector Autoregression)
+# ---------------------------------------------------------------------------
+
+def _render_var(df: pd.DataFrame):
+    """Vector Autoregression for multivariate time series."""
+    section_header("Vector Autoregression (VAR)",
+                   "Model interdependencies among multiple time series variables.")
+
+    if not HAS_SM:
+        empty_state("statsmodels is required for VAR analysis.", "Install with: pip install statsmodels")
+        return
+
+    help_tip("VAR Models", """
+**Vector Autoregression (VAR)** models the joint dynamics of multiple time series.
+Each variable is modeled as a linear function of its own past values and the past values of all other variables.
+
+Key outputs:
+- **Lag order selection:** Choose the number of lags using information criteria (AIC, BIC, HQIC).
+- **Granger causality:** Tests whether past values of one variable help predict another.
+- **Impulse Response Functions (IRF):** Show how a shock to one variable propagates to others over time.
+- **Forecast:** n-step ahead predictions with confidence bands.
+
+Requirements:
+- All series should be **stationary** (difference or transform if needed).
+- Select 2-10 numeric columns that represent related time series.
+""")
+
+    num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    if len(num_cols) < 2:
+        empty_state("Need at least 2 numeric columns for VAR.", "VAR models the joint dynamics of multiple time series.")
+        return
+
+    # Detect datetime columns
+    dt_cols = [c for c in df.columns if pd.api.types.is_datetime64_any_dtype(df[c])]
+    all_potential_date_cols = dt_cols.copy()
+    # Also check for parseable date columns
+    for c in df.select_dtypes(include=["object"]).columns:
+        try:
+            pd.to_datetime(df[c].head(5))
+            all_potential_date_cols.append(c)
+        except Exception:
+            pass
+
+    date_col = st.selectbox(
+        "Date/time column (for index):",
+        ["Auto-detect"] + all_potential_date_cols + ["Use row index"],
+        key="var_date_col",
+    )
+
+    var_cols = st.multiselect(
+        "Variables for VAR model (2-10 numeric columns):",
+        num_cols,
+        default=num_cols[:min(3, len(num_cols))],
+        key="var_cols",
+    )
+
+    if len(var_cols) < 2:
+        st.info("Select at least 2 numeric columns.")
+        return
+    if len(var_cols) > 10:
+        st.warning("VAR with >10 variables can be slow and overparameterized. Consider reducing.")
+        var_cols = var_cols[:10]
+
+    c1, c2 = st.columns(2)
+    lag_method = c1.radio("Lag order selection:", ["Auto (AIC)", "Manual"], horizontal=True, key="var_lag_method")
+    if lag_method == "Manual":
+        max_lag = c2.slider("Number of lags:", 1, 20, 2, key="var_max_lag")
+    else:
+        max_lag = c2.slider("Maximum lags to search:", 1, 20, 10, key="var_max_lag_search")
+
+    forecast_steps = st.slider("Forecast steps ahead:", 1, 50, 10, key="var_forecast_steps")
+
+    if st.button("Fit VAR Model", key="var_fit"):
+        try:
+            # Prepare data
+            data = df[var_cols].copy()
+
+            # Set datetime index
+            if date_col == "Use row index":
+                data.index = pd.RangeIndex(len(data))
+            elif date_col != "Auto-detect":
+                dt_series = df[date_col]
+                if not pd.api.types.is_datetime64_any_dtype(dt_series):
+                    dt_series = pd.to_datetime(dt_series, errors="coerce")
+                data.index = dt_series.values
+            else:
+                # Auto-detect: use first datetime column if available
+                if dt_cols:
+                    data.index = df[dt_cols[0]].values
+                elif all_potential_date_cols:
+                    dt_series = pd.to_datetime(df[all_potential_date_cols[0]], errors="coerce")
+                    data.index = dt_series.values
+
+            # Drop NaN rows
+            data = data.dropna()
+
+            if len(data) < 20:
+                st.error("Need at least 20 observations for VAR modeling.")
+                return
+
+            with st.spinner("Fitting VAR model..."):
+                from statsmodels.tsa.vector_ar.var_model import VAR as VARModel
+
+                model = VARModel(data)
+
+                if lag_method == "Auto (AIC)":
+                    # Lag order selection
+                    lag_order_results = model.select_order(maxlags=min(max_lag, len(data) // 3))
+                    selected_lag = lag_order_results.aic
+                    if selected_lag == 0:
+                        selected_lag = 1
+
+                    # Display lag selection table
+                    section_header("Lag Order Selection")
+                    lag_table_rows = []
+                    for lag_val in range(1, min(max_lag, len(data) // 3) + 1):
+                        row = {"Lag": lag_val}
+                        try:
+                            row["AIC"] = round(lag_order_results.ics["aic"][lag_val], 4)
+                        except (KeyError, IndexError):
+                            row["AIC"] = np.nan
+                        try:
+                            row["BIC"] = round(lag_order_results.ics["bic"][lag_val], 4)
+                        except (KeyError, IndexError):
+                            row["BIC"] = np.nan
+                        try:
+                            row["HQIC"] = round(lag_order_results.ics["hqic"][lag_val], 4)
+                        except (KeyError, IndexError):
+                            row["HQIC"] = np.nan
+                        lag_table_rows.append(row)
+
+                    if lag_table_rows:
+                        lag_df = pd.DataFrame(lag_table_rows)
+                        st.dataframe(lag_df, use_container_width=True, hide_index=True)
+
+                    st.success(f"Selected lag order (AIC): **{selected_lag}**")
+                else:
+                    selected_lag = max_lag
+
+                # Fit the model
+                var_result = model.fit(selected_lag)
+
+                # Model summary
+                section_header("Model Summary")
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric("Lag Order", str(selected_lag))
+                c2.metric("Observations", str(var_result.nobs))
+                c3.metric("Variables", str(len(var_cols)))
+                c4.metric("AIC", f"{var_result.aic:.2f}")
+
+                with st.expander("Full Model Summary"):
+                    st.text(str(var_result.summary()))
+
+                # ── Granger Causality Tests ──
+                section_header("Granger Causality Tests")
+                help_tip("Granger Causality", """
+Granger causality tests whether past values of variable X help predict variable Y
+beyond what Y's own past values provide. A low p-value suggests X "Granger-causes" Y.
+
+Note: This is a statistical concept of predictive causality, not true causal inference.
+""")
+
+                n_vars = len(var_cols)
+                gc_matrix = np.ones((n_vars, n_vars))  # p-values, default to 1
+
+                for i, target in enumerate(var_cols):
+                    for j, cause in enumerate(var_cols):
+                        if i == j:
+                            gc_matrix[i, j] = np.nan
+                            continue
+                        try:
+                            gc_result = var_result.test_causality(target, cause, kind="f")
+                            gc_matrix[i, j] = gc_result.pvalue
+                        except Exception:
+                            gc_matrix[i, j] = np.nan
+
+                # Heatmap of p-values
+                fig_gc = go.Figure(data=go.Heatmap(
+                    z=gc_matrix,
+                    x=var_cols,
+                    y=var_cols,
+                    colorscale="RdYlGn_r",
+                    zmin=0, zmax=0.1,
+                    text=[[f"{v:.4f}" if not np.isnan(v) else "-" for v in row] for row in gc_matrix],
+                    texttemplate="%{text}",
+                    hovertemplate="Cause: %{x}<br>Target: %{y}<br>p-value: %{text}<extra></extra>",
+                    colorbar=dict(title="p-value"),
+                ))
+                fig_gc.update_layout(
+                    title="Granger Causality p-values (rows=target, cols=cause)",
+                    xaxis_title="Cause",
+                    yaxis_title="Target",
+                    height=max(400, 60 * n_vars),
+                )
+                rdl_plotly_chart(fig_gc)
+
+                st.caption("Values < 0.05 suggest the column variable Granger-causes the row variable.")
+
+                # ── Impulse Response Functions ──
+                section_header("Impulse Response Functions")
+                irf_periods = st.slider("IRF periods:", 5, 30, 15, key="var_irf_periods")
+
+                try:
+                    irf = var_result.irf(irf_periods)
+
+                    fig_irf = make_subplots(
+                        rows=n_vars, cols=n_vars,
+                        subplot_titles=[f"{cause} -> {target}"
+                                        for target in var_cols for cause in var_cols],
+                        vertical_spacing=0.05,
+                        horizontal_spacing=0.05,
+                    )
+
+                    for i, target in enumerate(var_cols):
+                        for j, cause in enumerate(var_cols):
+                            irf_vals = irf.irfs[:, i, j]
+                            periods = list(range(len(irf_vals)))
+
+                            fig_irf.add_trace(go.Scatter(
+                                x=periods, y=irf_vals,
+                                mode="lines",
+                                line=dict(color="#6366f1", width=1.5),
+                                showlegend=False,
+                            ), row=i + 1, col=j + 1)
+
+                            # Add confidence bands if available
+                            try:
+                                lower = irf.ci[:, i, j, 0]
+                                upper = irf.ci[:, i, j, 1]
+                                fig_irf.add_trace(go.Scatter(
+                                    x=periods, y=upper,
+                                    mode="lines", line=dict(width=0),
+                                    showlegend=False, hoverinfo="skip",
+                                ), row=i + 1, col=j + 1)
+                                fig_irf.add_trace(go.Scatter(
+                                    x=periods, y=lower,
+                                    mode="lines", line=dict(width=0),
+                                    fill="tonexty", fillcolor="rgba(99,102,241,0.15)",
+                                    showlegend=False, hoverinfo="skip",
+                                ), row=i + 1, col=j + 1)
+                            except Exception:
+                                pass
+
+                            # Zero reference line
+                            fig_irf.add_hline(y=0, line_dash="dot", line_color="gray",
+                                              line_width=0.5, row=i + 1, col=j + 1)
+
+                    fig_irf.update_layout(
+                        title="Impulse Response Functions",
+                        height=max(400, 200 * n_vars),
+                    )
+                    rdl_plotly_chart(fig_irf)
+                except Exception as e:
+                    st.warning(f"Could not compute IRFs: {e}")
+
+                # ── Forecast ──
+                section_header("VAR Forecast")
+
+                try:
+                    forecast_input = data.values[-selected_lag:]
+                    fc = var_result.forecast(forecast_input, steps=forecast_steps)
+
+                    # Forecast with confidence intervals
+                    try:
+                        fc_interval = var_result.forecast_interval(forecast_input, steps=forecast_steps, alpha=0.05)
+                        fc_mean = fc_interval[0]
+                        fc_lower = fc_interval[1]
+                        fc_upper = fc_interval[2]
+                    except Exception:
+                        fc_mean = fc
+                        fc_lower = None
+                        fc_upper = None
+
+                    colors_fc = px.colors.qualitative.Set1
+
+                    for idx, col_name in enumerate(var_cols):
+                        fig_fc = go.Figure()
+                        color = colors_fc[idx % len(colors_fc)]
+
+                        # Historical data (last 50 points)
+                        hist_data = data[col_name].values[-50:]
+                        hist_idx = list(range(len(hist_data)))
+                        fig_fc.add_trace(go.Scatter(
+                            x=hist_idx, y=hist_data,
+                            mode="lines", name="Historical",
+                            line=dict(color=color, width=2),
+                        ))
+
+                        # Forecast
+                        fc_idx = list(range(len(hist_data), len(hist_data) + forecast_steps))
+                        fig_fc.add_trace(go.Scatter(
+                            x=fc_idx, y=fc_mean[:, idx],
+                            mode="lines", name="Forecast",
+                            line=dict(color=color, width=2, dash="dash"),
+                        ))
+
+                        # Confidence bands
+                        if fc_lower is not None and fc_upper is not None:
+                            fig_fc.add_trace(go.Scatter(
+                                x=fc_idx, y=fc_upper[:, idx],
+                                mode="lines", line=dict(width=0),
+                                showlegend=False, hoverinfo="skip",
+                            ))
+                            fig_fc.add_trace(go.Scatter(
+                                x=fc_idx, y=fc_lower[:, idx],
+                                mode="lines", line=dict(width=0),
+                                fill="tonexty",
+                                fillcolor=f"rgba(99,102,241,0.15)",
+                                showlegend=False, hoverinfo="skip",
+                                name="95% CI",
+                            ))
+
+                        fig_fc.update_layout(
+                            title=f"Forecast: {col_name}",
+                            xaxis_title="Time Index",
+                            yaxis_title=col_name,
+                            height=350,
+                        )
+                        rdl_plotly_chart(fig_fc)
+
+                    # Forecast table
+                    with st.expander("Forecast Values"):
+                        fc_df = pd.DataFrame(fc_mean, columns=var_cols)
+                        fc_df.index = range(1, forecast_steps + 1)
+                        fc_df.index.name = "Step"
+                        st.dataframe(fc_df.round(4), use_container_width=True)
+
+                except Exception as e:
+                    st.warning(f"Could not generate forecast: {e}")
+
+        except Exception as e:
+            st.error(f"VAR model error: {e}")

@@ -8,7 +8,7 @@ import numpy as np
 from collections import Counter
 import re
 
-from modules.ui_helpers import section_header, empty_state, help_tip
+from modules.ui_helpers import section_header, empty_state, help_tip, rdl_plotly_chart
 
 
 def render_text_analytics(df: pd.DataFrame):
@@ -91,7 +91,7 @@ def _render_text_explorer(df, text_cols):
     import plotly.express as px
     fig = px.histogram(x=word_counts, nbins=30, title="Document Length Distribution (Words)")
     fig.update_layout(xaxis_title="Word Count", yaxis_title="Frequency", height=350)
-    st.plotly_chart(fig, use_container_width=True)
+    rdl_plotly_chart(fig)
 
     # TF-IDF table
     section_header("TF-IDF")
@@ -187,21 +187,21 @@ def _render_sentiment(df, text_cols):
                        title="Sentiment Polarity Distribution",
                        color_discrete_sequence=["#6366f1"])
     fig.update_layout(height=350)
-    st.plotly_chart(fig, use_container_width=True)
+    rdl_plotly_chart(fig)
 
     # Subjectivity histogram
     fig2 = px.histogram(sent_df, x="subjectivity", nbins=30,
                         title="Subjectivity Distribution",
                         color_discrete_sequence=["#22c55e"])
     fig2.update_layout(height=350)
-    st.plotly_chart(fig2, use_container_width=True)
+    rdl_plotly_chart(fig2)
 
     # Polarity vs Subjectivity scatter
     fig3 = px.scatter(sent_df, x="polarity", y="subjectivity",
                       title="Polarity vs Subjectivity",
                       opacity=0.6)
     fig3.update_layout(height=400)
-    st.plotly_chart(fig3, use_container_width=True)
+    rdl_plotly_chart(fig3)
 
     # Top positive/negative
     combined = df[[col]].loc[texts.index].copy()
@@ -229,7 +229,7 @@ def _render_sentiment(df, text_cols):
                           title=f"Sentiment by {group_col}",
                           color=group_col)
             fig4.update_layout(height=400)
-            st.plotly_chart(fig4, use_container_width=True)
+            rdl_plotly_chart(fig4)
 
 
 # ─── Term Frequency ──────────────────────────────────────────────────────────
@@ -263,7 +263,7 @@ def _render_term_frequency(df, text_cols):
                      title=f"Top {top_n} Unigrams",
                      color_discrete_sequence=["#6366f1"])
         fig.update_layout(height=max(350, top_n * 22), yaxis=dict(autorange="reversed"))
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
     # Bigrams
     section_header("Top Bigrams")
@@ -278,7 +278,7 @@ def _render_term_frequency(df, text_cols):
                       title=f"Top {top_n} Bigrams",
                       color_discrete_sequence=["#818cf8"])
         fig2.update_layout(height=max(350, top_n * 22), yaxis=dict(autorange="reversed"))
-        st.plotly_chart(fig2, use_container_width=True)
+        rdl_plotly_chart(fig2)
 
     # Trigrams
     section_header("Top Trigrams")
@@ -293,4 +293,4 @@ def _render_term_frequency(df, text_cols):
                       title=f"Top {top_n} Trigrams",
                       color_discrete_sequence=["#a78bfa"])
         fig3.update_layout(height=max(350, top_n * 22), yaxis=dict(autorange="reversed"))
-        st.plotly_chart(fig3, use_container_width=True)
+        rdl_plotly_chart(fig3)

@@ -9,7 +9,7 @@ from scipy import stats
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from modules.ui_helpers import section_header, empty_state, help_tip, validation_panel, interpretation_card
+from modules.ui_helpers import section_header, empty_state, help_tip, validation_panel, interpretation_card, rdl_plotly_chart
 from modules.validation import check_normality, interpret_capability
 
 
@@ -268,7 +268,7 @@ def _imr_chart(data, col_name):
     fig.update_xaxes(title_text="Observation", row=2, col=1)
     fig.update_yaxes(title_text="Individual Value", row=1, col=1)
     fig.update_yaxes(title_text="Moving Range", row=2, col=1)
-    st.plotly_chart(fig, use_container_width=True)
+    rdl_plotly_chart(fig)
 
     _show_ooc_summary(data, x_idx, i_violations, "Individuals")
     _show_ooc_summary(mr, mr_idx, mr_violations, "Moving Range")
@@ -320,7 +320,7 @@ def _xbar_r_chart(data, col_name, subgroup_col, subgroup_size, df):
     fig.update_xaxes(title_text="Subgroup", row=2, col=1)
     fig.update_yaxes(title_text="Subgroup Mean", row=1, col=1)
     fig.update_yaxes(title_text="Range", row=2, col=1)
-    st.plotly_chart(fig, use_container_width=True)
+    rdl_plotly_chart(fig)
 
     _show_ooc_summary(means, sg_idx, xbar_v, "X-bar")
     _show_ooc_summary(ranges, sg_idx, r_v, "R")
@@ -372,7 +372,7 @@ def _xbar_s_chart(data, col_name, subgroup_col, subgroup_size, df):
     fig.update_xaxes(title_text="Subgroup", row=2, col=1)
     fig.update_yaxes(title_text="Subgroup Mean", row=1, col=1)
     fig.update_yaxes(title_text="Std Dev", row=2, col=1)
-    st.plotly_chart(fig, use_container_width=True)
+    rdl_plotly_chart(fig)
 
     _show_ooc_summary(means, sg_idx, xbar_v, "X-bar")
     _show_ooc_summary(stds, sg_idx, s_v, "S")
@@ -437,7 +437,7 @@ def _ewma_chart(data, col_name):
 
     fig.update_layout(title=f"EWMA Chart: {col_name} (\u03bb={lam}, L={L})", height=500,
                       xaxis_title="Observation", yaxis_title="EWMA")
-    st.plotly_chart(fig, use_container_width=True)
+    rdl_plotly_chart(fig)
 
     _show_ooc_summary(z, idx, violations, "EWMA")
 
@@ -518,7 +518,7 @@ def _cusum_chart(data, col_name):
     fig.update_xaxes(title_text="Observation", row=2, col=1)
     fig.update_yaxes(title_text="C\u207a", row=1, col=1)
     fig.update_yaxes(title_text="C\u207b", row=2, col=1)
-    st.plotly_chart(fig, use_container_width=True)
+    rdl_plotly_chart(fig)
 
     total_signals = int(upper_signal.sum() + lower_signal.sum())
     st.write(f"**Signals detected:** {total_signals} ({int(upper_signal.sum())} upper, {int(lower_signal.sum())} lower)")
@@ -629,7 +629,7 @@ def _p_chart(defectives, sample_n):
 
     fig.update_layout(title="p-Chart (Proportion Defective)", height=500,
                       xaxis_title="Sample", yaxis_title="Proportion")
-    st.plotly_chart(fig, use_container_width=True)
+    rdl_plotly_chart(fig)
 
     _show_ooc_summary(p, idx, violations, "p-chart")
 
@@ -663,7 +663,7 @@ def _np_chart(defectives, sample_n):
 
     fig.update_layout(title="np-Chart (Number Defective)", height=500,
                       xaxis_title="Sample", yaxis_title="Defectives")
-    st.plotly_chart(fig, use_container_width=True)
+    rdl_plotly_chart(fig)
 
     _show_ooc_summary(defectives, idx, violations, "np-chart")
 
@@ -694,7 +694,7 @@ def _c_chart(defects):
 
     fig.update_layout(title="c-Chart (Defects per Unit)", height=500,
                       xaxis_title="Sample", yaxis_title="Defects")
-    st.plotly_chart(fig, use_container_width=True)
+    rdl_plotly_chart(fig)
 
     _show_ooc_summary(defects, idx, violations, "c-chart")
 
@@ -727,7 +727,7 @@ def _u_chart(defects, units):
 
     fig.update_layout(title="u-Chart (Defects per Unit)", height=500,
                       xaxis_title="Sample", yaxis_title="Defects / Unit")
-    st.plotly_chart(fig, use_container_width=True)
+    rdl_plotly_chart(fig)
 
     _show_ooc_summary(u, idx, violations, "u-chart")
 
@@ -758,7 +758,7 @@ def _g_chart(counts):
                   annotation_text=f"LCL={lcl:.4f}")
     fig.update_layout(title="g-Chart (Count Between Events)", height=500,
                       xaxis_title="Sample", yaxis_title="Count Between Events")
-    st.plotly_chart(fig, use_container_width=True)
+    rdl_plotly_chart(fig)
 
     _show_ooc_summary(counts, idx, violations, "g-chart")
 
@@ -794,7 +794,7 @@ def _h_chart(times):
                       annotation_text=f"LCL={lcl:.4f}")
     fig.update_layout(title="h-Chart (Time Between Events)", height=500,
                       xaxis_title="Sample", yaxis_title="Time Between Events")
-    st.plotly_chart(fig, use_container_width=True)
+    rdl_plotly_chart(fig)
 
     _show_ooc_summary(times, idx, violations, "h-chart")
 
@@ -1010,7 +1010,7 @@ def _render_process_capability(df: pd.DataFrame):
         fig.update_yaxes(title_text="Frequency", row=1, col=3)
         fig.update_yaxes(title_text="Sample Quantiles", row=2, col=1)
         fig.update_yaxes(title_text="Index Value", row=2, col=2)
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
 
 # ===================================================================
@@ -1076,7 +1076,7 @@ def _render_multivariate_charts(df: pd.DataFrame):
                       annotation_text=f"UCL={ucl:.4f}")
         fig.update_layout(title=f"Hotelling T\u00b2 Chart (p={p}, \u03b1={alpha})", height=500,
                           xaxis_title="Observation", yaxis_title="T\u00b2")
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
         ooc_count = int(violations.sum())
         st.write(f"**Out-of-control points:** {ooc_count} / {n}")
@@ -1105,7 +1105,7 @@ def _render_multivariate_charts(df: pd.DataFrame):
                                                      for c in contributions]))
             fig_c.update_layout(title=f"Variable Contributions (Obs #{worst + 1}, T\u00b2={t_sq[worst]:.4f})",
                                 xaxis_title="Variable", yaxis_title="Contribution", height=350)
-            st.plotly_chart(fig_c, use_container_width=True)
+            rdl_plotly_chart(fig_c)
 
 
 # ===================================================================
@@ -1290,26 +1290,26 @@ A Gage R&R study assesses measurement system variability:
         fig_comp.add_hline(y=30, line_dash="dot", line_color="red", annotation_text="30%")
         fig_comp.update_layout(title="Components of Variation (% Study Var)", height=400,
                                yaxis_title="% of Study Variation")
-        st.plotly_chart(fig_comp, use_container_width=True)
+        rdl_plotly_chart(fig_comp)
 
         # Measurement by Operator
         fig_op = px.box(data, x=operator_col, y=meas_col, color=operator_col,
                         title="Measurement by Operator")
         fig_op.update_layout(height=400)
-        st.plotly_chart(fig_op, use_container_width=True)
+        rdl_plotly_chart(fig_op)
 
         # Measurement by Part
         fig_pt = px.box(data, x=part_col, y=meas_col, color=part_col,
                         title="Measurement by Part")
         fig_pt.update_layout(height=400)
-        st.plotly_chart(fig_pt, use_container_width=True)
+        rdl_plotly_chart(fig_pt)
 
         # Interaction plot (Operator x Part)
         interaction = data.groupby([operator_col, part_col])[meas_col].mean().reset_index()
         fig_int = px.line(interaction, x=part_col, y=meas_col, color=operator_col,
                           markers=True, title="Operator \u00d7 Part Interaction")
         fig_int.update_layout(height=400)
-        st.plotly_chart(fig_int, use_container_width=True)
+        rdl_plotly_chart(fig_int)
 
         # X-bar chart by operator
         op_means = data.groupby([operator_col, part_col])[meas_col].mean().reset_index()
@@ -1318,7 +1318,7 @@ A Gage R&R study assesses measurement system variability:
         fig_xbar.add_hline(y=grand_mean, line_dash="solid", line_color="green",
                            annotation_text=f"Grand Mean={grand_mean:.4f}")
         fig_xbar.update_layout(height=400)
-        st.plotly_chart(fig_xbar, use_container_width=True)
+        rdl_plotly_chart(fig_xbar)
 
 
 # ===================================================================
@@ -1418,7 +1418,7 @@ Design sampling plans for lot-by-lot inspection:
                 fig.update_layout(title=f"OC Curve (n={best_n}, c={best_c})",
                                   xaxis_title="Lot Defective (%)",
                                   yaxis_title="P(Accept)", height=500)
-                st.plotly_chart(fig, use_container_width=True)
+                rdl_plotly_chart(fig)
 
                 # ASN and AOQ curves
                 section_header("AOQ and ATI Curves")
@@ -1440,7 +1440,7 @@ Design sampling plans for lot-by-lot inspection:
                 fig2.update_yaxes(title_text="AOQ", row=1, col=1)
                 fig2.update_yaxes(title_text="ATI", row=1, col=2)
                 fig2.update_layout(height=400)
-                st.plotly_chart(fig2, use_container_width=True)
+                rdl_plotly_chart(fig2)
 
                 # AOQL
                 aoql = max(aoq)
@@ -1491,7 +1491,7 @@ Design sampling plans for lot-by-lot inspection:
             fig.update_yaxes(title_text="P(Accept)", row=1, col=1)
             fig.update_yaxes(title_text="Avg Sample Number", row=1, col=2)
             fig.update_layout(height=450)
-            st.plotly_chart(fig, use_container_width=True)
+            rdl_plotly_chart(fig)
 
 
 # ===================================================================
@@ -1599,7 +1599,7 @@ group means so you can visually identify the dominant source of variation.
                 xaxis_title=factor1, yaxis_title=response_col,
             )
 
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
         # --- Variation decomposition ---
         section_header("Variation Decomposition")
@@ -1777,7 +1777,7 @@ def _multi_vari_decomposition(data, response_col, factor1, factor2, factor3):
         yaxis_title="% of Total Variation",
         height=350,
     )
-    st.plotly_chart(fig_bar, use_container_width=True)
+    rdl_plotly_chart(fig_bar)
 
 
 # ===================================================================
@@ -1877,7 +1877,7 @@ The diagram is rendered as a Plotly figure that you can download.
             parsed_causes[cat] = causes
 
         fig = _build_fishbone_figure(effect, categories, parsed_causes)
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
         st.caption("Use the Plotly toolbar (top-right of chart) to download as PNG.")
 
@@ -2171,7 +2171,7 @@ def _render_non_normal_capability(df: pd.DataFrame):
                       annotation_text="Median")
         fig.update_layout(title=f"Non-Normal Capability: {col_name}",
                           xaxis_title="Value", yaxis_title="Frequency", height=450)
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
 
 # ===================================================================
@@ -2292,7 +2292,7 @@ in cleanroom environments. Unlike standard SPC charts, EM charts use:
             yaxis_title=col_name,
             height=500,
         )
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
         # Summary statistics
         section_header("EM Summary")

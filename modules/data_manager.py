@@ -7,7 +7,13 @@ import pandas as pd
 import numpy as np
 import io
 
-from modules.ui_helpers import section_header, empty_state, help_tip
+from modules.ui_helpers import section_header, empty_state, help_tip, rdl_plotly_chart, data_readiness_gauge, log_analysis
+from modules.validation import (
+    check_missing_data, check_duplicates, check_outlier_proportion,
+    check_constant_column, check_high_cardinality, profile_column,
+    compute_data_readiness, ValidationCheck,
+)
+import plotly.graph_objects as go
 
 
 def render_upload():
@@ -40,50 +46,261 @@ def render_data_manager(df: pd.DataFrame) -> pd.DataFrame:
         return df
 
     tabs = st.tabs([
+        "Data Quality",
         "Preview", "Column Info", "Missing Values",
         "Transform", "Filter & Sort", "Column Operations", "Export",
         "Reshape", "Merge & Join", "Sampling",
     ])
 
-    # ── Tab 1: Preview ──
+    # ── Tab 0: Data Quality ──
     with tabs[0]:
+        df = _render_data_quality(df)
+
+    # ── Tab 1: Preview ──
+    with tabs[1]:
         _render_preview(df)
 
     # ── Tab 2: Column Info ──
-    with tabs[1]:
+    with tabs[2]:
         _render_column_info(df)
 
     # ── Tab 3: Missing Values ──
-    with tabs[2]:
+    with tabs[3]:
         df = _render_missing_values(df)
 
     # ── Tab 4: Transform ──
-    with tabs[3]:
+    with tabs[4]:
         df = _render_transform(df)
 
     # ── Tab 5: Filter & Sort ──
-    with tabs[4]:
+    with tabs[5]:
         df = _render_filter_sort(df)
 
     # ── Tab 6: Column Operations ──
-    with tabs[5]:
+    with tabs[6]:
         df = _render_column_operations(df)
 
     # ── Tab 7: Export ──
-    with tabs[6]:
+    with tabs[7]:
         _render_export(df)
 
     # ── Tab 8: Reshape ──
-    with tabs[7]:
+    with tabs[8]:
         df = _render_reshape(df)
 
     # ── Tab 9: Merge & Join ──
-    with tabs[8]:
+    with tabs[9]:
         df = _render_merge_join(df)
 
     # ── Tab 10: Sampling ──
-    with tabs[9]:
+    with tabs[10]:
         df = _render_sampling(df)
+
+    return df
+
+
+def _render_data_quality(df: pd.DataFrame) -> pd.DataFrame:
+    """Data Quality tab -- summary metrics, readiness gauge, column profiles, quick fixes, and insights."""
+    from scipy import stats as sp_stats
+
+    log_analysis("Data Manager", "Data Quality Profile", summary=f"{df.shape[0]} rows, {df.shape[1]} cols")
+
+    # ── Summary Card Grid ────────────────────────────────────────────────
+    section_header("Dataset Summary", "High-level metrics for the loaded dataset.")
+    total_cells = df.shape[0] * df.shape[1]
+    completeness = ((total_cells - int(df.isna().sum().sum())) / total_cells * 100) if total_cells else 0
+    mem_kb = df.memory_usage(deep=True).sum() / 1024
+    n_dup = int(df.duplicated().sum())
+    numeric_cols = df.select_dtypes(include="number").columns.tolist()
+    cat_cols = df.select_dtypes(exclude="number").columns.tolist()
+
+    m1, m2, m3, m4, m5, m6 = st.columns(6)
+    m1.metric("Rows", f"{df.shape[0]:,}")
+    m2.metric("Columns", f"{df.shape[1]}")
+    m3.metric("Completeness", f"{completeness:.1f}%")
+    m4.metric("Memory", f"{mem_kb:.1f} KB")
+    m5.metric("Duplicate Rows", f"{n_dup:,}")
+    m6.metric("Numeric / Categorical", f"{len(numeric_cols)} / {len(cat_cols)}")
+
+    # ── Data Readiness Gauge ─────────────────────────────────────────────
+    section_header("Data Readiness")
+    checks: list[ValidationCheck] = []
+    checks.append(check_missing_data(df))
+    checks.append(check_duplicates(df))
+    # Outlier proportion for first 5 numeric columns
+    for col in numeric_cols[:5]:
+        c = check_outlier_proportion(df[col].dropna().values)
+        # Rename to include column name
+        checks.append(ValidationCheck(
+            name=f"Outliers ({col})", status=c.status,
+            detail=c.detail, suggestion=c.suggestion,
+        ))
+    readiness = compute_data_readiness(checks)
+    data_readiness_gauge(readiness)
+
+    # ── Per-Column Profile Table ─────────────────────────────────────────
+    section_header("Column Profiles", "Per-column type, completeness, and summary statistics.")
+    profiles = []
+    for col in df.columns:
+        p = profile_column(df[col])
+        row: dict = {
+            "Column": p["name"],
+            "Type": p["dtype"],
+            "Unique": p["n_unique"],
+            "Missing": p["n_missing"],
+            "% Missing": p["pct_missing"],
+        }
+        if p.get("distribution_type") == "numeric":
+            row["Min"] = p.get("min")
+            row["Max"] = p.get("max")
+            row["Mean"] = round(p.get("mean", 0), 4) if p.get("mean") is not None else None
+            row["Top Value"] = None
+        else:
+            row["Min"] = None
+            row["Max"] = None
+            row["Mean"] = None
+            row["Top Value"] = p.get("top_value")
+        profiles.append(row)
+    profile_df = pd.DataFrame(profiles)
+
+    st.dataframe(
+        profile_df,
+        use_container_width=True,
+        column_config={
+            "% Missing": st.column_config.ProgressColumn(
+                "% Missing",
+                help="Percentage of missing values",
+                min_value=0,
+                max_value=100,
+                format="%.1f%%",
+            ),
+        },
+        hide_index=True,
+    )
+
+    # ── Quick Fix Buttons ────────────────────────────────────────────────
+    section_header("Quick Fixes", "One-click data cleaning actions.")
+    qf1, qf2, qf3 = st.columns(3)
+
+    with qf1:
+        if st.button("Drop Constant Columns", key="dq_drop_const"):
+            const_cols = [c for c in df.columns if df[c].nunique(dropna=True) <= 1]
+            if const_cols:
+                df = df.drop(columns=const_cols)
+                st.session_state["df"] = df
+                st.success(f"Dropped {len(const_cols)} constant column(s): {', '.join(const_cols)}")
+                st.rerun()
+            else:
+                st.info("No constant columns found.")
+
+    with qf2:
+        if st.button("Drop Duplicate Rows", key="dq_drop_dups"):
+            before = len(df)
+            df = df.drop_duplicates()
+            removed = before - len(df)
+            if removed > 0:
+                st.session_state["df"] = df
+                st.success(f"Removed {removed} duplicate row(s).")
+                st.rerun()
+            else:
+                st.info("No duplicate rows found.")
+
+    with qf3:
+        if st.button("Convert Date Strings", key="dq_convert_dates"):
+            converted = []
+            for col in df.select_dtypes(include="object").columns:
+                sample = df[col].dropna().head(20)
+                if len(sample) == 0:
+                    continue
+                try:
+                    parsed = pd.to_datetime(sample, infer_datetime_format=True)
+                    # If at least 80% parsed successfully, convert the whole column
+                    if parsed.notna().sum() >= len(sample) * 0.8:
+                        df[col] = pd.to_datetime(df[col], errors="coerce")
+                        converted.append(col)
+                except (ValueError, TypeError):
+                    continue
+            if converted:
+                st.session_state["df"] = df
+                st.success(f"Converted {len(converted)} column(s) to datetime: {', '.join(converted)}")
+                st.rerun()
+            else:
+                st.info("No date-like string columns detected.")
+
+    # ── Automated Insights ───────────────────────────────────────────────
+    section_header("Automated Insights")
+
+    insights_found = False
+
+    # -- Top 3 strongest correlations --
+    if len(numeric_cols) >= 2:
+        try:
+            corr_matrix = df[numeric_cols].corr()
+            # Get upper triangle pairs
+            pairs = []
+            for i in range(len(numeric_cols)):
+                for j in range(i + 1, len(numeric_cols)):
+                    r_val = corr_matrix.iloc[i, j]
+                    if pd.notna(r_val):
+                        # Compute p-value
+                        valid = df[[numeric_cols[i], numeric_cols[j]]].dropna()
+                        if len(valid) >= 3:
+                            _, p_val = sp_stats.pearsonr(valid.iloc[:, 0], valid.iloc[:, 1])
+                        else:
+                            p_val = 1.0
+                        pairs.append((numeric_cols[i], numeric_cols[j], r_val, p_val))
+            if pairs:
+                pairs.sort(key=lambda x: abs(x[2]), reverse=True)
+                top_3 = pairs[:3]
+                lines = []
+                for c1, c2, r, p in top_3:
+                    lines.append(f"**{c1}** & **{c2}**: r = {r:.3f}, p = {p:.4f}")
+                st.info("**Top Correlations**\n\n" + "\n\n".join(lines))
+                insights_found = True
+        except Exception:
+            pass
+
+    # -- Obvious outlier columns (>5% outliers via IQR) --
+    outlier_cols = []
+    for col in numeric_cols:
+        valid = df[col].dropna()
+        if len(valid) < 4:
+            continue
+        q1, q3 = np.percentile(valid, [25, 75])
+        iqr = q3 - q1
+        n_out = int(((valid < q1 - 1.5 * iqr) | (valid > q3 + 1.5 * iqr)).sum())
+        pct = n_out / len(valid)
+        if pct > 0.05:
+            outlier_cols.append((col, n_out, pct))
+    if outlier_cols:
+        lines = [f"**{c}**: {n} outliers ({p:.1%})" for c, n, p in outlier_cols]
+        st.warning("**Columns With High Outlier Rates (>5%)**\n\n" + "\n\n".join(lines))
+        insights_found = True
+
+    # -- Potential group differences --
+    if numeric_cols:
+        first_num = numeric_cols[0]
+        sig_groups = []
+        for col in cat_cols:
+            n_groups = df[col].nunique(dropna=True)
+            if 2 <= n_groups <= 10:
+                groups = [g.dropna().values for _, g in df.groupby(col, observed=True)[first_num] if len(g.dropna()) >= 2]
+                if len(groups) >= 2:
+                    try:
+                        stat, p = sp_stats.kruskal(*groups)
+                        if p < 0.05:
+                            sig_groups.append((col, n_groups, p))
+                    except Exception:
+                        pass
+        if sig_groups:
+            lines = [f"**{c}** ({ng} groups): Kruskal-Wallis p = {p:.4f}" for c, ng, p in sig_groups]
+            st.success(
+                f"**Potential Group Differences** (target: *{first_num}*)\n\n" + "\n\n".join(lines)
+            )
+            insights_found = True
+
+    if not insights_found:
+        st.info("No automated insights detected. Try loading a dataset with more columns or rows.")
 
     return df
 

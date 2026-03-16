@@ -21,6 +21,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from modules.ui_helpers import (
     section_header, empty_state, help_tip, validation_panel, interpretation_card,
+    rdl_plotly_chart,
 )
 from modules.validation import (
     check_normality, check_sample_size, ValidationCheck, Interpretation,
@@ -251,7 +252,7 @@ def _trending_analysis(
             yaxis_title=resp_col,
             legend=dict(orientation="h", yanchor="bottom", y=1.02),
         )
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
         # Results table
         if results_rows:
@@ -733,7 +734,7 @@ def _estimate_single_shelf_life(
         yaxis_title=resp_col,
         legend=dict(orientation="h", yanchor="bottom", y=1.02),
     )
-    st.plotly_chart(fig, use_container_width=True)
+    rdl_plotly_chart(fig)
 
     if shelf_life is not None:
         return {"Batch": batch_label, "Shelf Life": round(shelf_life, 2)}
@@ -975,7 +976,7 @@ def _multi_attribute_analysis(
     for c in range(1, n_cols + 1):
         fig.update_xaxes(title_text=time_col, row=n_rows, col=c)
 
-    st.plotly_chart(fig, use_container_width=True)
+    rdl_plotly_chart(fig)
 
     # Summary table with color coding
     if summary_rows:

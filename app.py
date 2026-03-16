@@ -11,6 +11,8 @@ import streamlit.components.v1 as _components
 import pandas as pd
 import numpy as np
 import html as _html
+from datetime import datetime
+import io
 
 st.set_page_config(
     page_title="Ryan's Data Lab",
@@ -1500,6 +1502,66 @@ def main():
         })();
         </script>
         """, height=0)
+
+        dark_mode = st.toggle("Dark Mode", key="dark_mode")
+
+        if dark_mode:
+            st.markdown("""<style>
+            :root {
+                --rdl-bg: #0f172a !important;
+                --rdl-bg-card: rgba(30,41,59,0.72) !important;
+                --rdl-text: #e2e8f0 !important;
+                --rdl-text-secondary: #94a3b8 !important;
+                --rdl-text-muted: #64748b !important;
+                --rdl-glass-bg: rgba(30,41,59,0.72) !important;
+                --rdl-border: rgba(255,255,255,0.08) !important;
+                --rdl-shadow-xs: 0 1px 3px rgba(0,0,0,0.2) !important;
+                --rdl-shadow-sm: 0 2px 8px rgba(0,0,0,0.25) !important;
+                --rdl-shadow-md: 0 4px 16px rgba(0,0,0,0.3) !important;
+            }
+            .stApp {
+                background: #0f172a !important;
+                color: #e2e8f0 !important;
+            }
+            [data-testid="stSidebar"] {
+                background: #0a0f1a !important;
+            }
+            .stApp h1, .stApp h2, .stApp h3, .stApp h4, .stApp p,
+            .stApp label, .stApp span, .stMarkdown {
+                color: #e2e8f0 !important;
+            }
+            .rdl-hero h1, .rdl-hero p {
+                color: #e2e8f0 !important;
+            }
+            .rdl-feature-card, .rdl-stat {
+                background: rgba(30,41,59,0.72) !important;
+                border-color: rgba(255,255,255,0.08) !important;
+            }
+            .rdl-feature-card h3, .rdl-feature-card p,
+            .rdl-stat .rdl-stat-label {
+                color: #e2e8f0 !important;
+            }
+            .rdl-dataset-info {
+                background: rgba(30,41,59,0.72) !important;
+            }
+            .rdl-info-row span {
+                color: #94a3b8 !important;
+            }
+            .rdl-info-row span:last-child {
+                color: #e2e8f0 !important;
+            }
+            [data-testid="stExpander"] {
+                background: rgba(30,41,59,0.5) !important;
+                border-color: rgba(255,255,255,0.08) !important;
+            }
+            .js-plotly-plot .plotly .main-svg {
+                background: #0f172a !important;
+            }
+            .js-plotly-plot .plotly .bg {
+                fill: #1e293b !important;
+            }
+            </style>""", unsafe_allow_html=True)
+
         st.divider()
 
         st.subheader("Data Source")
@@ -1545,35 +1607,6 @@ def main():
         st.divider()
 
         st.subheader("Analysis Module")
-        module = st.radio(
-            "Select module:",
-            [
-                "Home",
-                "Data Manager",
-                "Dataset Editor",
-                "Descriptive Statistics",
-                "Visualization Builder",
-                "Hypothesis Testing",
-                "Correlation & Multivariate",
-                "Regression Analysis",
-                "ANOVA",
-                "Time Series Analysis",
-                "Machine Learning",
-                "Survival Analysis",
-                "Quality & SPC",
-                "Stability Analysis (ICH)",
-                "Method Validation (ICH)",
-                "Bioassay & Potency",
-                "Design of Experiments",
-                "Text Analytics",
-                "Monte Carlo Simulation",
-                "Report Builder",
-                "Templates",
-                "Experimental",
-            ],
-            key="module_radio",
-            label_visibility="collapsed",
-        )
 
         _MODULE_DESCRIPTIONS = {
             "Home": "Overview of Ryan's Data Lab and available modules.",
@@ -1599,6 +1632,67 @@ def main():
             "Templates": "Save and load analysis configurations as JSON templates.",
             "Experimental": "Visual workflow builder and AI-powered data analysis assistant.",
         }
+
+        _ALL_MODULES = [
+            "Home", "Data Manager", "Dataset Editor", "Descriptive Statistics",
+            "Visualization Builder", "Hypothesis Testing",
+            "Correlation & Multivariate", "Regression Analysis", "ANOVA",
+            "Time Series Analysis", "Machine Learning", "Survival Analysis",
+            "Quality & SPC", "Stability Analysis (ICH)",
+            "Method Validation (ICH)", "Bioassay & Potency",
+            "Design of Experiments", "Text Analytics",
+            "Monte Carlo Simulation", "Report Builder", "Templates",
+            "Experimental",
+        ]
+
+        module_search = st.text_input("", placeholder="Search modules...", key="module_search")
+
+        st.session_state.setdefault("_recent_modules", [])
+
+        if module_search:
+            _search_lower = module_search.lower()
+            _filtered_modules = [
+                m for m in _ALL_MODULES
+                if _search_lower in m.lower()
+                or _search_lower in _MODULE_DESCRIPTIONS.get(m, "").lower()
+            ]
+            if _filtered_modules:
+                module = st.radio(
+                    "Select module:",
+                    _filtered_modules,
+                    key="module_radio",
+                    label_visibility="collapsed",
+                )
+            else:
+                st.info("No matching modules")
+                module = "Home"
+        else:
+            # Show recent modules section
+            _recent = st.session_state["_recent_modules"]
+            if _recent:
+                st.caption("Recent")
+                _rcols = st.columns(min(len(_recent), 3))
+                for _ri, _rm in enumerate(_recent):
+                    with _rcols[_ri % min(len(_recent), 3)]:
+                        if st.button(_rm, key=f"_recent_{_ri}", use_container_width=True):
+                            st.session_state["module_radio"] = _rm
+                            st.rerun()
+
+            module = st.radio(
+                "Select module:",
+                _ALL_MODULES,
+                key="module_radio",
+                label_visibility="collapsed",
+            )
+
+        # Track recently used modules
+        if module and module != "Home":
+            _recent = st.session_state["_recent_modules"]
+            if module in _recent:
+                _recent.remove(module)
+            _recent.insert(0, module)
+            st.session_state["_recent_modules"] = _recent[:5]
+
         desc = _MODULE_DESCRIPTIONS.get(module, "")
         if desc:
             st.caption(desc)
@@ -1637,6 +1731,61 @@ def main():
                     </div>
                 </div>
             """, unsafe_allow_html=True)
+
+            # ── Column Roles ──
+            st.session_state.setdefault("column_roles", {})
+            with st.expander("Column Roles"):
+                _role_options = [None, "Y (Response)", "X (Predictor)", "Group", "ID"]
+                _cr_cols_list = list(df.columns)
+                for _ci in range(0, len(_cr_cols_list), 2):
+                    _cr_pair = st.columns(2)
+                    for _cj, _cr_col in enumerate(_cr_cols_list[_ci:_ci + 2]):
+                        with _cr_pair[_cj]:
+                            _current_role = st.session_state["column_roles"].get(
+                                _cr_col, {}
+                            ).get("role", None)
+                            _role_idx = (
+                                _role_options.index(_current_role)
+                                if _current_role in _role_options
+                                else 0
+                            )
+                            _selected = st.selectbox(
+                                _cr_col,
+                                _role_options,
+                                index=_role_idx,
+                                key=f"_colrole_{_cr_col}",
+                                format_func=lambda x: "—" if x is None else x,
+                            )
+                            st.session_state["column_roles"][_cr_col] = {
+                                "role": _selected
+                            }
+
+            # ── Analysis History ──
+            st.divider()
+            with st.expander("History"):
+                _log = st.session_state.get("analysis_log", [])
+                if _log:
+                    _display_log = _log[-10:][::-1]
+                    for _entry in _display_log:
+                        st.markdown(
+                            f"**{_entry['timestamp']}** | "
+                            f"*{_entry['module']}* — {_entry['action']}"
+                        )
+                        if _entry.get("summary"):
+                            st.caption(_entry["summary"])
+                    # Export Log button
+                    _log_df = pd.DataFrame(_log)
+                    _csv_buf = io.StringIO()
+                    _log_df.to_csv(_csv_buf, index=False)
+                    st.download_button(
+                        "Export Log",
+                        data=_csv_buf.getvalue(),
+                        file_name="analysis_log.csv",
+                        mime="text/csv",
+                        use_container_width=True,
+                    )
+                else:
+                    st.caption("No analysis history yet.")
 
     # Main content
     if module == "Home" or "df" not in st.session_state or st.session_state["df"] is None:

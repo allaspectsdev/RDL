@@ -11,14 +11,16 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from modules.ui_helpers import (
     section_header, empty_state, validation_panel, interpretation_card,
-    alternative_suggestion,
+    alternative_suggestion, rdl_plotly_chart, help_tip, log_analysis,
 )
 from modules.validation import (
     check_sample_size, check_class_balance, check_outlier_proportion,
     interpret_effect_size, interpret_silhouette,
 )
 
-from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.model_selection import (
+    train_test_split, cross_val_score, GridSearchCV, RandomizedSearchCV,
+)
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.pipeline import Pipeline
 from sklearn.metrics import (
@@ -140,6 +142,7 @@ def render_machine_learning(df: pd.DataFrame):
     tabs = st.tabs([
         "Clustering", "Classification", "Regression (ML)",
         "Dimensionality Reduction", "Model Comparison",
+        "AutoTune", "SHAP Explorer", "Profiler",
     ])
 
     with tabs[0]:
@@ -152,6 +155,12 @@ def render_machine_learning(df: pd.DataFrame):
         _render_dim_reduction(df)
     with tabs[4]:
         _render_model_comparison(df)
+    with tabs[5]:
+        _render_auto_tune(df)
+    with tabs[6]:
+        _render_shap_explorer(df)
+    with tabs[7]:
+        _render_ml_profiler(df)
 
 
 def _render_clustering(df: pd.DataFrame):
@@ -200,7 +209,7 @@ def _render_clustering(df: pd.DataFrame):
             fig.update_xaxes(title_text="k", row=1, col=1)
             fig.update_xaxes(title_text="k", row=1, col=2)
             fig.update_layout(height=350)
-            st.plotly_chart(fig, use_container_width=True)
+            rdl_plotly_chart(fig)
 
         if st.button("Run K-Means", key="run_kmeans"):
             model = KMeans(n_clusters=k, random_state=42, n_init=10)
@@ -260,7 +269,7 @@ def _render_clustering(df: pd.DataFrame):
             fig.update_xaxes(title_text="k", row=1, col=1)
             fig.update_xaxes(title_text="k", row=1, col=2)
             fig.update_layout(height=350)
-            st.plotly_chart(fig, use_container_width=True)
+            rdl_plotly_chart(fig)
 
         if st.button("Run Gaussian Mixture", key="run_gmm"):
             model = GaussianMixture(n_components=n_components, covariance_type=cov_type, random_state=42)
@@ -320,7 +329,7 @@ def _render_clustering(df: pd.DataFrame):
                         continue
 
                 fig_ell.update_layout(height=500)
-                st.plotly_chart(fig_ell, use_container_width=True)
+                rdl_plotly_chart(fig_ell)
             elif X.shape[1] > 2:
                 # Use PCA to project to 2D and draw ellipses
                 section_header("Cluster Ellipses (PCA Projection)")
@@ -366,7 +375,7 @@ def _render_clustering(df: pd.DataFrame):
                         continue
 
                 fig_ell.update_layout(height=500)
-                st.plotly_chart(fig_ell, use_container_width=True)
+                rdl_plotly_chart(fig_ell)
 
 
 def _show_cluster_results(data, X, labels, features, cat_cols, df):
@@ -400,7 +409,7 @@ def _show_cluster_results(data, X, labels, features, cat_cols, df):
         fig = px.scatter(data, x=features[0], y=features[1], color="Cluster",
                          title="Clusters", opacity=0.7)
     fig.update_layout(height=500)
-    st.plotly_chart(fig, use_container_width=True)
+    rdl_plotly_chart(fig)
 
     # Cluster profiles
     section_header("Cluster Profiles")
@@ -412,7 +421,7 @@ def _show_cluster_results(data, X, labels, features, cat_cols, df):
     fig = px.bar(x=sizes.index, y=sizes.values, labels={"x": "Cluster", "y": "Count"},
                  title="Cluster Sizes", color=sizes.index)
     fig.update_layout(height=300)
-    st.plotly_chart(fig, use_container_width=True)
+    rdl_plotly_chart(fig)
 
 
 def _render_classification(df: pd.DataFrame):
@@ -549,7 +558,7 @@ def _render_classification(df: pd.DataFrame):
         fig = px.imshow(cm, text_auto=True, color_continuous_scale="Blues",
                         x=[str(c) for c in classes], y=[str(c) for c in classes],
                         labels=dict(x="Predicted", y="Actual"), title="Confusion Matrix")
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
         # Classification report
         report = classification_report(y_test, y_pred, target_names=[str(c) for c in classes], output_dict=True)
@@ -570,7 +579,7 @@ def _render_classification(df: pd.DataFrame):
             fig.add_trace(go.Scatter(x=fpr, y=tpr, name=f"ROC (AUC={roc_auc:.4f})"))
             fig.add_trace(go.Scatter(x=[0, 1], y=[0, 1], line=dict(dash="dash", color="gray"), name="Random"))
             fig.update_layout(title="ROC Curve", xaxis_title="FPR", yaxis_title="TPR", height=400)
-            st.plotly_chart(fig, use_container_width=True)
+            rdl_plotly_chart(fig)
 
             # Precision-Recall curve
             try:
@@ -601,7 +610,7 @@ def _render_classification(df: pd.DataFrame):
                     xaxis_title="Recall", yaxis_title="Precision",
                     height=400,
                 )
-                st.plotly_chart(fig_pr, use_container_width=True)
+                rdl_plotly_chart(fig_pr)
             except Exception:
                 pass
 
@@ -612,14 +621,14 @@ def _render_classification(df: pd.DataFrame):
             fig = px.bar(imp_df, x="Importance", y="Feature", orientation="h",
                          title="Feature Importance")
             fig.update_layout(height=max(300, len(features) * 25))
-            st.plotly_chart(fig, use_container_width=True)
+            rdl_plotly_chart(fig)
         elif hasattr(model, "coef_"):
             coefs = np.abs(model.coef_[0]) if model.coef_.ndim > 1 else np.abs(model.coef_)
             imp_df = pd.DataFrame({"Feature": features, "Importance": coefs}).sort_values("Importance", ascending=True)
             fig = px.bar(imp_df, x="Importance", y="Feature", orientation="h",
                          title="Feature Importance (|coefficients|)")
             fig.update_layout(height=max(300, len(features) * 25))
-            st.plotly_chart(fig, use_container_width=True)
+            rdl_plotly_chart(fig)
 
         # SHAP analysis
         try:
@@ -642,7 +651,7 @@ def _render_classification(df: pd.DataFrame):
                     fig = px.bar(shap_imp, x="Mean |SHAP|", y="Feature", orientation="h",
                                  title="SHAP Feature Importance")
                     fig.update_layout(height=max(300, len(features) * 30))
-                    st.plotly_chart(fig, use_container_width=True)
+                    rdl_plotly_chart(fig)
                 except Exception as e:
                     st.warning(f"SHAP analysis failed: {e}")
         except ImportError:
@@ -656,7 +665,7 @@ def _render_classification(df: pd.DataFrame):
                                               name="Loss"))
                 fig_loss.update_layout(title="Training Loss", xaxis_title="Iteration",
                                        yaxis_title="Loss", height=350)
-                st.plotly_chart(fig_loss, use_container_width=True)
+                rdl_plotly_chart(fig_loss)
 
 
 def _build_classifier(algorithm, params, random_state):
@@ -836,7 +845,7 @@ def _render_ml_regression(df: pd.DataFrame):
         fig.update_xaxes(title_text="Predicted", row=1, col=2)
         fig.update_yaxes(title_text="Residuals", row=1, col=2)
         fig.update_layout(height=400)
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
         # Feature importance
         if hasattr(model, "feature_importances_"):
@@ -845,14 +854,14 @@ def _render_ml_regression(df: pd.DataFrame):
             fig = px.bar(imp_df, x="Importance", y="Feature", orientation="h",
                          title="Feature Importance")
             fig.update_layout(height=max(300, len(features) * 25))
-            st.plotly_chart(fig, use_container_width=True)
+            rdl_plotly_chart(fig)
         elif hasattr(model, "coef_"):
             coefs = model.coef_
             coef_df = pd.DataFrame({"Feature": features, "Coefficient": coefs}).sort_values("Coefficient")
             fig = px.bar(coef_df, x="Coefficient", y="Feature", orientation="h",
                          title="Coefficients")
             fig.update_layout(height=max(300, len(features) * 25))
-            st.plotly_chart(fig, use_container_width=True)
+            rdl_plotly_chart(fig)
 
         # SHAP analysis for regression
         try:
@@ -870,7 +879,7 @@ def _render_ml_regression(df: pd.DataFrame):
                     fig = px.bar(shap_imp, x="Mean |SHAP|", y="Feature", orientation="h",
                                  title="SHAP Feature Importance")
                     fig.update_layout(height=max(300, len(features) * 30))
-                    st.plotly_chart(fig, use_container_width=True)
+                    rdl_plotly_chart(fig)
                 except Exception as e:
                     st.warning(f"SHAP analysis failed: {e}")
         except ImportError:
@@ -884,7 +893,7 @@ def _render_ml_regression(df: pd.DataFrame):
                                               name="Loss"))
                 fig_loss.update_layout(title="Training Loss", xaxis_title="Iteration",
                                        yaxis_title="Loss", height=350)
-                st.plotly_chart(fig_loss, use_container_width=True)
+                rdl_plotly_chart(fig_loss)
 
 
 def _build_regressor(algorithm, params, random_state):
@@ -991,7 +1000,7 @@ def _render_dim_reduction(df: pd.DataFrame):
                                 color="color" if "color" in emb_df else None,
                                 title=f"{method} 3D", opacity=0.7)
         fig.update_layout(height=600)
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
 
 def _render_model_comparison(df: pd.DataFrame):
@@ -1026,7 +1035,7 @@ def _render_model_comparison(df: pd.DataFrame):
                          error_y="Std", title="Model Comparison (5-Fold CV)",
                          color="Mean Accuracy", color_continuous_scale="Blues")
             fig.update_layout(height=400)
-            st.plotly_chart(fig, use_container_width=True)
+            rdl_plotly_chart(fig)
 
             # ── Best model interpretation ────────────────────────────
             try:
@@ -1070,7 +1079,7 @@ def _render_model_comparison(df: pd.DataFrame):
                          error_y="Std R²", title="Model Comparison (5-Fold CV)",
                          color="Mean R²", color_continuous_scale="Blues")
             fig.update_layout(height=400)
-            st.plotly_chart(fig, use_container_width=True)
+            rdl_plotly_chart(fig)
 
             # ── Best model interpretation ────────────────────────────
             try:
@@ -1089,3 +1098,1109 @@ def _render_model_comparison(df: pd.DataFrame):
                     })
             except Exception:
                 pass
+
+
+# ─── AutoTune Tab ─────────────────────────────────────────────────────────
+
+@st.cache_data(show_spinner=False)
+def _run_autotune_search(
+    _X_bytes, _y_bytes, n_features, task_type, algorithms, search_strategy,
+    n_iter, scoring, cv_folds, random_state, param_configs,
+):
+    """Run hyperparameter search (cached).
+
+    _X_bytes / _y_bytes are bytes representations so Streamlit can hash them.
+    """
+    X = np.frombuffer(_X_bytes, dtype=np.float64).reshape(-1, n_features)
+    y = np.frombuffer(_y_bytes, dtype=np.float64)
+
+    if task_type == "Classification":
+        y = y.astype(int)
+
+    all_results = []
+
+    for algo_name in algorithms:
+        model, param_grid = _autotune_model_and_grid(
+            algo_name, task_type, random_state, param_configs.get(algo_name, {}),
+        )
+        if model is None:
+            continue
+
+        pipe = Pipeline([("scaler", StandardScaler()), ("model", model)])
+        # Prefix param names for pipeline
+        pipe_grid = {f"model__{k}": v for k, v in param_grid.items()}
+
+        try:
+            if search_strategy == "Grid Search":
+                searcher = GridSearchCV(
+                    pipe, pipe_grid, cv=cv_folds, scoring=scoring,
+                    n_jobs=-1, error_score="raise",
+                )
+            else:
+                searcher = RandomizedSearchCV(
+                    pipe, pipe_grid, n_iter=min(n_iter, _grid_size(pipe_grid)),
+                    cv=cv_folds, scoring=scoring, n_jobs=-1,
+                    random_state=random_state, error_score="raise",
+                )
+            searcher.fit(X, y)
+
+            cv_results = searcher.cv_results_
+            for i in range(len(cv_results["mean_test_score"])):
+                row = {
+                    "Algorithm": algo_name,
+                    "Mean Score": cv_results["mean_test_score"][i],
+                    "Std Score": cv_results["std_test_score"][i],
+                    "Rank": cv_results["rank_test_score"][i],
+                }
+                raw_params = cv_results["params"][i]
+                clean_params = {
+                    k.replace("model__", ""): v for k, v in raw_params.items()
+                }
+                row["Params"] = str(clean_params)
+                all_results.append(row)
+        except Exception as exc:
+            all_results.append({
+                "Algorithm": algo_name,
+                "Mean Score": None,
+                "Std Score": None,
+                "Rank": None,
+                "Params": f"Error: {exc}",
+            })
+
+    return all_results
+
+
+def _grid_size(grid):
+    """Compute total number of combinations in a parameter grid."""
+    size = 1
+    for v in grid.values():
+        size *= len(v)
+    return size
+
+
+def _autotune_model_and_grid(algo_name, task_type, random_state, cfg):
+    """Return (estimator, param_grid) for the given algorithm and user config."""
+    if task_type == "Classification":
+        builders = {
+            "Random Forest": (
+                RandomForestClassifier(random_state=random_state),
+                {
+                    "n_estimators": list(range(
+                        cfg.get("n_estimators_min", 50),
+                        cfg.get("n_estimators_max", 500) + 1,
+                        50,
+                    )),
+                    "max_depth": list(range(
+                        cfg.get("max_depth_min", 2),
+                        cfg.get("max_depth_max", 30) + 1,
+                        4,
+                    )),
+                    "min_samples_split": list(range(
+                        cfg.get("min_samples_split_min", 2),
+                        cfg.get("min_samples_split_max", 20) + 1,
+                        3,
+                    )),
+                },
+            ),
+            "Gradient Boosting": (
+                GradientBoostingClassifier(random_state=random_state),
+                {
+                    "n_estimators": list(range(
+                        cfg.get("n_estimators_min", 50),
+                        cfg.get("n_estimators_max", 500) + 1,
+                        50,
+                    )),
+                    "learning_rate": [
+                        round(v, 2)
+                        for v in np.arange(
+                            cfg.get("learning_rate_min", 0.01),
+                            cfg.get("learning_rate_max", 0.5) + 0.01,
+                            0.05,
+                        ).tolist()
+                    ],
+                    "max_depth": list(range(
+                        cfg.get("max_depth_min", 2),
+                        cfg.get("max_depth_max", 15) + 1,
+                        2,
+                    )),
+                },
+            ),
+            "SVM": (
+                SVC(random_state=random_state, probability=True),
+                {
+                    "C": [
+                        round(v, 2)
+                        for v in np.logspace(
+                            np.log10(cfg.get("C_min", 0.01)),
+                            np.log10(cfg.get("C_max", 100)),
+                            10,
+                        ).tolist()
+                    ],
+                    "kernel": cfg.get("kernels", ["rbf", "linear", "poly"]),
+                },
+            ),
+            "KNN": (
+                KNeighborsClassifier(),
+                {
+                    "n_neighbors": list(range(
+                        cfg.get("n_neighbors_min", 1),
+                        cfg.get("n_neighbors_max", 30) + 1,
+                        2,
+                    )),
+                },
+            ),
+        }
+        # XGBoost
+        if algo_name == "XGBoost":
+            try:
+                from xgboost import XGBClassifier
+                return (
+                    XGBClassifier(
+                        random_state=random_state, eval_metric="logloss",
+                        use_label_encoder=False, verbosity=0,
+                    ),
+                    {
+                        "n_estimators": list(range(
+                            cfg.get("n_estimators_min", 50),
+                            cfg.get("n_estimators_max", 500) + 1,
+                            50,
+                        )),
+                        "learning_rate": [
+                            round(v, 2)
+                            for v in np.arange(
+                                cfg.get("learning_rate_min", 0.01),
+                                cfg.get("learning_rate_max", 0.5) + 0.01,
+                                0.05,
+                            ).tolist()
+                        ],
+                        "max_depth": list(range(
+                            cfg.get("max_depth_min", 2),
+                            cfg.get("max_depth_max", 15) + 1,
+                            2,
+                        )),
+                    },
+                )
+            except ImportError:
+                return None, None
+    else:
+        builders = {
+            "Random Forest": (
+                RandomForestRegressor(random_state=random_state),
+                {
+                    "n_estimators": list(range(
+                        cfg.get("n_estimators_min", 50),
+                        cfg.get("n_estimators_max", 500) + 1,
+                        50,
+                    )),
+                    "max_depth": list(range(
+                        cfg.get("max_depth_min", 2),
+                        cfg.get("max_depth_max", 30) + 1,
+                        4,
+                    )),
+                    "min_samples_split": list(range(
+                        cfg.get("min_samples_split_min", 2),
+                        cfg.get("min_samples_split_max", 20) + 1,
+                        3,
+                    )),
+                },
+            ),
+            "Gradient Boosting": (
+                GradientBoostingRegressor(random_state=random_state),
+                {
+                    "n_estimators": list(range(
+                        cfg.get("n_estimators_min", 50),
+                        cfg.get("n_estimators_max", 500) + 1,
+                        50,
+                    )),
+                    "learning_rate": [
+                        round(v, 2)
+                        for v in np.arange(
+                            cfg.get("learning_rate_min", 0.01),
+                            cfg.get("learning_rate_max", 0.5) + 0.01,
+                            0.05,
+                        ).tolist()
+                    ],
+                    "max_depth": list(range(
+                        cfg.get("max_depth_min", 2),
+                        cfg.get("max_depth_max", 15) + 1,
+                        2,
+                    )),
+                },
+            ),
+            "SVM": (
+                SVR(),
+                {
+                    "C": [
+                        round(v, 2)
+                        for v in np.logspace(
+                            np.log10(cfg.get("C_min", 0.01)),
+                            np.log10(cfg.get("C_max", 100)),
+                            10,
+                        ).tolist()
+                    ],
+                    "kernel": cfg.get("kernels", ["rbf", "linear", "poly"]),
+                },
+            ),
+            "KNN": (
+                KNeighborsRegressor(),
+                {
+                    "n_neighbors": list(range(
+                        cfg.get("n_neighbors_min", 1),
+                        cfg.get("n_neighbors_max", 30) + 1,
+                        2,
+                    )),
+                },
+            ),
+        }
+        # XGBoost
+        if algo_name == "XGBoost":
+            try:
+                from xgboost import XGBRegressor
+                return (
+                    XGBRegressor(random_state=random_state, verbosity=0),
+                    {
+                        "n_estimators": list(range(
+                            cfg.get("n_estimators_min", 50),
+                            cfg.get("n_estimators_max", 500) + 1,
+                            50,
+                        )),
+                        "learning_rate": [
+                            round(v, 2)
+                            for v in np.arange(
+                                cfg.get("learning_rate_min", 0.01),
+                                cfg.get("learning_rate_max", 0.5) + 0.01,
+                                0.05,
+                            ).tolist()
+                        ],
+                        "max_depth": list(range(
+                            cfg.get("max_depth_min", 2),
+                            cfg.get("max_depth_max", 15) + 1,
+                            2,
+                        )),
+                    },
+                )
+            except ImportError:
+                return None, None
+
+    if algo_name in builders:
+        return builders[algo_name]
+    return None, None
+
+
+def _render_auto_tune(df: pd.DataFrame):
+    """AutoTune -- automated hyperparameter search across algorithms."""
+    num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    cat_cols = df.select_dtypes(include=["object", "category"]).columns.tolist()
+
+    section_header(
+        "AutoTune",
+        "Automated hyperparameter search using Grid Search or Random Search across multiple algorithms.",
+    )
+
+    help_tip(
+        "How AutoTune works",
+        "Select one or more algorithms, adjust their hyperparameter ranges, "
+        "pick a search strategy, and AutoTune will evaluate all combinations "
+        "with cross-validation. The best configuration is highlighted and can "
+        "be stored in session state for use elsewhere.",
+    )
+
+    # Task type
+    task_type = st.radio(
+        "Task type:", ["Classification", "Regression"],
+        horizontal=True, key="at_task",
+    )
+
+    # Target & features
+    if task_type == "Classification":
+        target_options = cat_cols + [c for c in num_cols if df[c].nunique() <= 15]
+        if not target_options:
+            empty_state("No suitable classification target found.")
+            return
+        target = st.selectbox("Target variable:", target_options, key="at_target")
+        feature_options = [c for c in num_cols if c != target]
+    else:
+        if len(num_cols) < 2:
+            empty_state("Need at least 2 numeric columns for regression.")
+            return
+        target = st.selectbox("Target variable:", num_cols, key="at_target")
+        feature_options = [c for c in num_cols if c != target]
+
+    features = st.multiselect(
+        "Feature columns:", feature_options,
+        default=feature_options[:min(5, len(feature_options))],
+        key="at_features",
+    )
+    if not features:
+        st.info("Select at least one feature column.")
+        return
+
+    # Algorithm selection
+    algo_options = ["Random Forest", "Gradient Boosting", "SVM", "KNN"]
+    try:
+        import xgboost  # noqa: F401
+        algo_options.append("XGBoost")
+    except ImportError:
+        pass
+    algorithms = st.multiselect(
+        "Algorithms to tune:", algo_options,
+        default=algo_options[:2], key="at_algos",
+    )
+    if not algorithms:
+        st.info("Select at least one algorithm.")
+        return
+
+    # Per-algorithm hyperparameter sliders
+    param_configs = {}
+    with st.expander("Hyperparameter Ranges", expanded=True):
+        for algo in algorithms:
+            st.markdown(f"**{algo}**")
+            cfg = {}
+            if algo in ("Random Forest", "Gradient Boosting", "XGBoost"):
+                c1, c2 = st.columns(2)
+                ne_range = c1.slider(
+                    f"n_estimators ({algo}):", 50, 500, (50, 300),
+                    step=50, key=f"at_{algo}_ne",
+                )
+                cfg["n_estimators_min"] = ne_range[0]
+                cfg["n_estimators_max"] = ne_range[1]
+                if algo in ("Gradient Boosting", "XGBoost"):
+                    lr_range = c2.slider(
+                        f"learning_rate ({algo}):", 0.01, 0.50, (0.01, 0.30),
+                        step=0.01, key=f"at_{algo}_lr",
+                    )
+                    cfg["learning_rate_min"] = lr_range[0]
+                    cfg["learning_rate_max"] = lr_range[1]
+                if algo == "Random Forest":
+                    md_range = c2.slider(
+                        f"max_depth ({algo}):", 2, 30, (2, 20),
+                        key=f"at_{algo}_md",
+                    )
+                    mss_range = st.slider(
+                        f"min_samples_split ({algo}):", 2, 20, (2, 10),
+                        key=f"at_{algo}_mss",
+                    )
+                    cfg["min_samples_split_min"] = mss_range[0]
+                    cfg["min_samples_split_max"] = mss_range[1]
+                else:
+                    md_max = 15 if algo != "Random Forest" else 30
+                    md_range = c2.slider(
+                        f"max_depth ({algo}):", 2, md_max, (2, 10),
+                        key=f"at_{algo}_md",
+                    )
+                cfg["max_depth_min"] = md_range[0]
+                cfg["max_depth_max"] = md_range[1]
+
+            elif algo == "SVM":
+                c1, c2 = st.columns(2)
+                c_range = c1.slider(
+                    "C (SVM):", 0.01, 100.0, (0.01, 10.0),
+                    key="at_svm_c",
+                )
+                cfg["C_min"] = c_range[0]
+                cfg["C_max"] = c_range[1]
+                kernels = c2.multiselect(
+                    "Kernels (SVM):", ["rbf", "linear", "poly"],
+                    default=["rbf", "linear"], key="at_svm_kernels",
+                )
+                cfg["kernels"] = kernels if kernels else ["rbf"]
+
+            elif algo == "KNN":
+                nn_range = st.slider(
+                    "n_neighbors (KNN):", 1, 30, (1, 15),
+                    key="at_knn_nn",
+                )
+                cfg["n_neighbors_min"] = nn_range[0]
+                cfg["n_neighbors_max"] = nn_range[1]
+
+            param_configs[algo] = cfg
+            st.divider()
+
+    # Search strategy
+    c1, c2, c3 = st.columns(3)
+    search_strategy = c1.radio(
+        "Search strategy:", ["Grid Search", "Random Search"],
+        key="at_strategy",
+    )
+    n_iter = 20
+    if search_strategy == "Random Search":
+        n_iter = c2.slider("Max iterations per algo:", 5, 200, 20, key="at_niter")
+
+    cv_folds = c3.slider("CV folds:", 2, 10, 5, key="at_cv")
+
+    # Scoring metric
+    if task_type == "Classification":
+        scoring_options = ["accuracy", "f1_weighted", "precision_weighted", "recall_weighted", "roc_auc_ovr"]
+    else:
+        scoring_options = ["r2", "neg_root_mean_squared_error", "neg_mean_absolute_error"]
+    scoring = st.selectbox("Scoring metric:", scoring_options, key="at_scoring")
+
+    random_state = 42
+
+    if st.button("Run AutoTune", key="run_autotune", type="primary"):
+        data = df[features + [target]].dropna()
+        if len(data) < 10:
+            st.warning("Not enough data after dropping NaNs (need at least 10 rows).")
+            return
+
+        X = data[features].values
+        if task_type == "Classification":
+            le = LabelEncoder()
+            y = le.fit_transform(data[target]).astype(np.float64)
+        else:
+            y = data[target].values.astype(np.float64)
+
+        with st.spinner("Running hyperparameter search -- this may take a while..."):
+            results = _run_autotune_search(
+                X.astype(np.float64).tobytes(),
+                y.tobytes(),
+                len(features),
+                task_type,
+                algorithms,
+                search_strategy,
+                n_iter,
+                scoring,
+                cv_folds,
+                random_state,
+                param_configs,
+            )
+
+        if not results:
+            st.warning("No results returned. Check your configuration.")
+            return
+
+        results_df = pd.DataFrame(results)
+        valid = results_df.dropna(subset=["Mean Score"])
+        if valid.empty:
+            st.warning("All algorithm evaluations failed. Check data/settings.")
+            st.dataframe(results_df, use_container_width=True, hide_index=True)
+            return
+
+        valid = valid.sort_values("Mean Score", ascending=False).reset_index(drop=True)
+        valid["Rank"] = range(1, len(valid) + 1)
+
+        section_header("Results")
+        st.dataframe(
+            valid[["Rank", "Algorithm", "Mean Score", "Std Score", "Params"]].round(4),
+            use_container_width=True, hide_index=True,
+        )
+
+        # Bar chart of top results
+        top_n = min(20, len(valid))
+        top = valid.head(top_n).copy()
+        top["Label"] = top["Algorithm"] + " #" + top["Rank"].astype(str)
+        fig = px.bar(
+            top, x="Mean Score", y="Label", orientation="h",
+            error_x="Std Score", color="Algorithm",
+            title=f"Top {top_n} Configurations by {scoring}",
+        )
+        fig.update_layout(
+            height=max(350, top_n * 30),
+            yaxis=dict(autorange="reversed"),
+        )
+        rdl_plotly_chart(fig, key="autotune_results_chart")
+
+        # Best result interpretation
+        best = valid.iloc[0]
+        interpretation_card({
+            "title": "Best Configuration",
+            "body": (
+                f"{best['Algorithm']} achieved a mean CV {scoring} of "
+                f"{best['Mean Score']:.4f} (+/- {best['Std Score']:.4f})."
+            ),
+            "detail": f"Parameters: {best['Params']}",
+        })
+
+        # "Use Best" button
+        if st.button("Use Best Parameters", key="at_use_best"):
+            st.session_state["autotune_best"] = {
+                "algorithm": best["Algorithm"],
+                "task_type": task_type,
+                "scoring": scoring,
+                "mean_score": best["Mean Score"],
+                "params": best["Params"],
+            }
+            st.success(
+                f"Stored best config in session state: {best['Algorithm']} -- "
+                f"{best['Params']}"
+            )
+
+        log_analysis(
+            "Machine Learning", "AutoTune",
+            params={"algorithms": algorithms, "strategy": search_strategy, "scoring": scoring},
+            summary=f"Best: {best['Algorithm']} ({best['Mean Score']:.4f})",
+        )
+
+
+# ─── SHAP Explorer Tab ───────────────────────────────────────────────────
+
+def _render_shap_explorer(df: pd.DataFrame):
+    """Enhanced SHAP Explorer with beeswarm, dependence, and waterfall plots."""
+    try:
+        import shap  # noqa: F401
+    except ImportError:
+        empty_state(
+            "SHAP library not installed.",
+            "Install it with: pip install shap",
+        )
+        return
+
+    num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    cat_cols = df.select_dtypes(include=["object", "category"]).columns.tolist()
+
+    section_header(
+        "SHAP Explorer",
+        "Explore model predictions with SHAP (SHapley Additive exPlanations) values.",
+    )
+
+    help_tip(
+        "What are SHAP values?",
+        "SHAP values decompose a prediction into contributions from each feature. "
+        "Positive SHAP values push the prediction higher; negative values push it lower. "
+        "The beeswarm plot shows the distribution of SHAP values across all observations.",
+    )
+
+    # Task type
+    task_type = st.radio(
+        "Task type:", ["Classification", "Regression"],
+        horizontal=True, key="shap_task",
+    )
+
+    # Target & features
+    if task_type == "Classification":
+        target_options = cat_cols + [c for c in num_cols if df[c].nunique() <= 15]
+        if not target_options:
+            empty_state("No suitable classification target found.")
+            return
+        target = st.selectbox("Target:", target_options, key="shap_target")
+        feature_options = [c for c in num_cols if c != target]
+    else:
+        if len(num_cols) < 2:
+            empty_state("Need at least 2 numeric columns.")
+            return
+        target = st.selectbox("Target:", num_cols, key="shap_target")
+        feature_options = [c for c in num_cols if c != target]
+
+    features = st.multiselect(
+        "Features:", feature_options,
+        default=feature_options[:min(8, len(feature_options))],
+        key="shap_features",
+    )
+    if not features:
+        st.info("Select at least one feature.")
+        return
+
+    model_options = ["Random Forest", "Gradient Boosting"]
+    try:
+        import xgboost  # noqa: F401
+        model_options.append("XGBoost")
+    except ImportError:
+        pass
+    model_type = st.selectbox("Model type:", model_options, key="shap_model")
+
+    if st.button("Compute SHAP Values", key="run_shap", type="primary"):
+        import shap
+
+        data = df[features + [target]].dropna()
+        if len(data) < 10:
+            st.warning("Not enough data (need at least 10 rows after dropping NaNs).")
+            return
+
+        X = data[features].values
+        feature_vals = data[features].copy()  # keep raw values for coloring
+
+        if task_type == "Classification":
+            le = LabelEncoder()
+            y = le.fit_transform(data[target])
+        else:
+            y = data[target].values
+
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.2, random_state=42,
+        )
+
+        scaler = StandardScaler()
+        X_train_sc = scaler.fit_transform(X_train)
+        X_test_sc = scaler.transform(X_test)
+
+        # Build model
+        with st.spinner("Training model..."):
+            if model_type == "Random Forest":
+                if task_type == "Classification":
+                    model = RandomForestClassifier(n_estimators=100, random_state=42)
+                else:
+                    model = RandomForestRegressor(n_estimators=100, random_state=42)
+            elif model_type == "Gradient Boosting":
+                if task_type == "Classification":
+                    model = GradientBoostingClassifier(n_estimators=100, random_state=42)
+                else:
+                    model = GradientBoostingRegressor(n_estimators=100, random_state=42)
+            elif model_type == "XGBoost":
+                from xgboost import XGBClassifier, XGBRegressor
+                if task_type == "Classification":
+                    model = XGBClassifier(
+                        n_estimators=100, random_state=42,
+                        eval_metric="logloss", use_label_encoder=False, verbosity=0,
+                    )
+                else:
+                    model = XGBRegressor(
+                        n_estimators=100, random_state=42, verbosity=0,
+                    )
+            model.fit(X_train_sc, y_train)
+
+        # Compute SHAP
+        with st.spinner("Computing SHAP values..."):
+            try:
+                explainer = shap.TreeExplainer(model)
+                shap_values_obj = explainer(
+                    pd.DataFrame(X_test_sc, columns=features),
+                )
+            except Exception:
+                background = shap.sample(
+                    pd.DataFrame(X_train_sc, columns=features),
+                    min(100, len(X_train_sc)),
+                )
+                explainer = shap.Explainer(
+                    model.predict, background, feature_names=features,
+                )
+                shap_values_obj = explainer(
+                    pd.DataFrame(X_test_sc, columns=features),
+                )
+
+        # Extract SHAP values array
+        sv = shap_values_obj.values
+        if sv.ndim == 3:
+            # Multi-class: use class 1 for binary, or mean absolute across classes
+            if sv.shape[2] == 2:
+                sv = sv[:, :, 1]
+            else:
+                sv = np.abs(sv).mean(axis=2)
+
+        # Corresponding raw feature values for color mapping
+        # Use original (unscaled) test data
+        raw_test = feature_vals.iloc[-len(X_test):].values
+
+        # ── Beeswarm Plot ──────────────────────────────────────
+        section_header("SHAP Beeswarm Plot")
+
+        mean_abs_shap = np.abs(sv).mean(axis=0)
+        sorted_idx = np.argsort(mean_abs_shap)  # ascending for horizontal
+        sorted_features = [features[i] for i in sorted_idx]
+
+        fig_bee = go.Figure()
+        for rank, feat_idx in enumerate(sorted_idx):
+            shap_col = sv[:, feat_idx]
+            feat_raw = raw_test[:, feat_idx]
+            # Normalize feature values to [0, 1] for color mapping
+            fmin, fmax = feat_raw.min(), feat_raw.max()
+            if fmax - fmin > 0:
+                feat_norm = (feat_raw - fmin) / (fmax - fmin)
+            else:
+                feat_norm = np.full_like(feat_raw, 0.5)
+
+            # Map to blue (low) -> red (high)
+            colors = [
+                f"rgb({int(255 * v)}, {int(50 * (1 - abs(2 * v - 1)))}, {int(255 * (1 - v))})"
+                for v in feat_norm
+            ]
+
+            # Add jitter for beeswarm effect
+            jitter = np.random.default_rng(42).normal(0, 0.12, size=len(shap_col))
+
+            fig_bee.add_trace(go.Scatter(
+                x=shap_col,
+                y=np.full(len(shap_col), rank) + jitter,
+                mode="markers",
+                marker=dict(size=4, color=colors, opacity=0.7),
+                name=sorted_features[rank],
+                showlegend=False,
+                hovertemplate=(
+                    f"<b>{sorted_features[rank]}</b><br>"
+                    "SHAP value: %{x:.4f}<br>"
+                    "<extra></extra>"
+                ),
+            ))
+
+        fig_bee.update_layout(
+            title="SHAP Beeswarm (feature impact on prediction)",
+            xaxis_title="SHAP Value",
+            yaxis=dict(
+                tickvals=list(range(len(sorted_features))),
+                ticktext=sorted_features,
+            ),
+            height=max(400, len(features) * 40),
+        )
+        # Add a color bar annotation
+        fig_bee.add_annotation(
+            text="Feature value: <span style='color:rgb(0,0,255)'>Low</span> to "
+                 "<span style='color:rgb(255,0,0)'>High</span>",
+            xref="paper", yref="paper", x=1.0, y=1.05,
+            showarrow=False, font=dict(size=11),
+        )
+        rdl_plotly_chart(fig_bee, key="shap_beeswarm")
+
+        # ── Dependence Plots (top 3 features) ─────────────────
+        section_header("SHAP Dependence Plots")
+        top_n = min(3, len(features))
+        top_feat_indices = sorted_idx[-top_n:][::-1]  # descending by importance
+
+        fig_dep = make_subplots(
+            rows=1, cols=top_n,
+            subplot_titles=[features[i] for i in top_feat_indices],
+            horizontal_spacing=0.08,
+        )
+        for col_i, feat_idx in enumerate(top_feat_indices):
+            feat_raw = raw_test[:, feat_idx]
+            shap_col = sv[:, feat_idx]
+            fig_dep.add_trace(
+                go.Scatter(
+                    x=feat_raw, y=shap_col, mode="markers",
+                    marker=dict(size=4, opacity=0.6, color=shap_col,
+                                colorscale="RdBu_r", showscale=(col_i == top_n - 1)),
+                    name=features[feat_idx],
+                    showlegend=False,
+                ),
+                row=1, col=col_i + 1,
+            )
+            fig_dep.update_xaxes(title_text=features[feat_idx], row=1, col=col_i + 1)
+            fig_dep.update_yaxes(title_text="SHAP Value" if col_i == 0 else "", row=1, col=col_i + 1)
+
+        fig_dep.update_layout(
+            title=f"SHAP Dependence (Top {top_n} Features)",
+            height=400,
+        )
+        rdl_plotly_chart(fig_dep, key="shap_dependence")
+
+        # ── Waterfall for Individual Prediction ───────────────
+        section_header("SHAP Waterfall (Individual Prediction)")
+        max_row = len(X_test) - 1
+        row_idx = st.number_input(
+            "Select test observation index:", 0, max_row, 0,
+            key="shap_waterfall_row",
+        )
+
+        row_shap = sv[row_idx]
+        base_value = (
+            shap_values_obj.base_values[row_idx]
+            if hasattr(shap_values_obj.base_values, '__len__')
+            else shap_values_obj.base_values
+        )
+        if hasattr(base_value, '__len__'):
+            # Multi-class: pick class 1 for binary
+            base_value = base_value[1] if len(base_value) == 2 else float(np.mean(base_value))
+
+        # Sort by absolute SHAP value
+        wf_order = np.argsort(np.abs(row_shap))
+        wf_features = [features[i] for i in wf_order]
+        wf_values = row_shap[wf_order]
+        wf_raw = raw_test[row_idx, wf_order]
+
+        colors = ["#ef4444" if v > 0 else "#3b82f6" for v in wf_values]
+        labels = [f"{f} = {r:.2f}" for f, r in zip(wf_features, wf_raw)]
+
+        fig_wf = go.Figure(go.Bar(
+            x=wf_values, y=labels, orientation="h",
+            marker_color=colors,
+            hovertemplate="SHAP: %{x:.4f}<extra></extra>",
+        ))
+        fig_wf.update_layout(
+            title=f"Feature Contributions (Obs #{row_idx})",
+            xaxis_title="SHAP Value",
+            height=max(350, len(features) * 30),
+        )
+        fig_wf.add_annotation(
+            text=f"Base value: {base_value:.4f}",
+            xref="paper", yref="paper", x=0.5, y=-0.12,
+            showarrow=False, font=dict(size=12),
+        )
+        rdl_plotly_chart(fig_wf, key="shap_waterfall")
+
+        log_analysis(
+            "Machine Learning", "SHAP Explorer",
+            params={"model": model_type, "task": task_type, "n_features": len(features)},
+            summary=f"Top feature: {features[sorted_idx[-1]]}",
+        )
+
+
+# ─── ML Prediction Profiler Tab ──────────────────────────────────────────
+
+def _render_ml_profiler(df: pd.DataFrame):
+    """Interactive prediction profiler with live sliders and partial dependence."""
+    num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    cat_cols = df.select_dtypes(include=["object", "category"]).columns.tolist()
+
+    section_header(
+        "ML Prediction Profiler",
+        "Interactively explore how each feature affects the model prediction.",
+    )
+
+    help_tip(
+        "How the Profiler works",
+        "Train a model, then use the sliders to set feature values. The live "
+        "prediction updates instantly. Partial dependence plots show how the "
+        "prediction changes as each feature varies while all others are held "
+        "at their current slider positions.",
+    )
+
+    # Task type
+    task_type = st.radio(
+        "Task type:", ["Classification", "Regression"],
+        horizontal=True, key="prof_task",
+    )
+
+    # Target & features
+    if task_type == "Classification":
+        target_options = cat_cols + [c for c in num_cols if df[c].nunique() <= 15]
+        if not target_options:
+            empty_state("No suitable classification target found.")
+            return
+        target = st.selectbox("Target:", target_options, key="prof_target")
+        feature_options = [c for c in num_cols if c != target]
+    else:
+        if len(num_cols) < 2:
+            empty_state("Need at least 2 numeric columns.")
+            return
+        target = st.selectbox("Target:", num_cols, key="prof_target")
+        feature_options = [c for c in num_cols if c != target]
+
+    features = st.multiselect(
+        "Features:", feature_options,
+        default=feature_options[:min(6, len(feature_options))],
+        key="prof_features",
+    )
+    if not features:
+        st.info("Select at least one feature.")
+        return
+
+    # Model type
+    model_options = [
+        "Random Forest", "Gradient Boosting", "Linear / Logistic",
+        "KNN", "SVM",
+    ]
+    try:
+        import xgboost  # noqa: F401
+        model_options.append("XGBoost")
+    except ImportError:
+        pass
+    model_type = st.selectbox("Model:", model_options, key="prof_model")
+
+    # Train
+    train_key = f"prof_trained_{task_type}_{target}_{model_type}_{'_'.join(sorted(features))}"
+    if st.button("Train Model", key="prof_train", type="primary"):
+        data = df[features + [target]].dropna()
+        if len(data) < 10:
+            st.warning("Not enough data (need at least 10 rows).")
+            return
+
+        X = data[features].values
+        if task_type == "Classification":
+            le = LabelEncoder()
+            y = le.fit_transform(data[target])
+            classes = le.classes_
+        else:
+            y = data[target].values
+            classes = None
+
+        scaler = StandardScaler()
+        X_sc = scaler.fit_transform(X)
+
+        with st.spinner("Training model..."):
+            model = _build_profiler_model(model_type, task_type)
+            model.fit(X_sc, y)
+
+        # Store everything needed for profiling
+        st.session_state[train_key] = {
+            "model": model,
+            "scaler": scaler,
+            "features": features,
+            "classes": classes,
+            "task_type": task_type,
+            "feature_mins": data[features].min().to_dict(),
+            "feature_maxs": data[features].max().to_dict(),
+            "feature_means": data[features].mean().to_dict(),
+        }
+        st.success("Model trained successfully.")
+        log_analysis(
+            "Machine Learning", "Profiler Train",
+            params={"model": model_type, "task": task_type},
+        )
+
+    # Profiling interface
+    if train_key not in st.session_state:
+        st.info("Train a model first to enable the profiler.")
+        return
+
+    trained = st.session_state[train_key]
+    model = trained["model"]
+    scaler = trained["scaler"]
+    feat_names = trained["features"]
+    classes = trained["classes"]
+    t_type = trained["task_type"]
+    feat_mins = trained["feature_mins"]
+    feat_maxs = trained["feature_maxs"]
+    feat_means = trained["feature_means"]
+
+    st.divider()
+    section_header("Feature Sliders")
+
+    # Create sliders for each feature
+    slider_values = {}
+    n_cols = min(3, len(feat_names))
+    cols = st.columns(n_cols)
+    for i, feat in enumerate(feat_names):
+        col = cols[i % n_cols]
+        fmin = float(feat_mins[feat])
+        fmax = float(feat_maxs[feat])
+        fmean = float(feat_means[feat])
+        # Handle edge case where min == max
+        if fmin == fmax:
+            fmin -= 1.0
+            fmax += 1.0
+        step = (fmax - fmin) / 100.0
+        slider_values[feat] = col.slider(
+            feat, min_value=fmin, max_value=fmax, value=fmean,
+            step=step, key=f"prof_slider_{feat}",
+        )
+
+    # Live prediction
+    input_arr = np.array([[slider_values[f] for f in feat_names]])
+    input_sc = scaler.transform(input_arr)
+
+    st.divider()
+    section_header("Prediction")
+
+    if t_type == "Classification":
+        pred_class_idx = model.predict(input_sc)[0]
+        pred_class = classes[pred_class_idx] if classes is not None else pred_class_idx
+
+        st.metric("Predicted Class", str(pred_class))
+
+        if hasattr(model, "predict_proba"):
+            probs = model.predict_proba(input_sc)[0]
+            prob_labels = [str(c) for c in classes] if classes is not None else [str(i) for i in range(len(probs))]
+            fig_prob = go.Figure(go.Bar(
+                x=probs, y=prob_labels, orientation="h",
+                marker_color=["#6366f1" if i == pred_class_idx else "#cbd5e1"
+                               for i in range(len(probs))],
+                text=[f"{p:.3f}" for p in probs],
+                textposition="auto",
+            ))
+            fig_prob.update_layout(
+                title="Class Probabilities",
+                xaxis_title="Probability", xaxis_range=[0, 1],
+                height=max(200, len(prob_labels) * 40),
+            )
+            rdl_plotly_chart(fig_prob, key="prof_probabilities")
+    else:
+        pred_val = model.predict(input_sc)[0]
+        st.metric("Predicted Value", f"{pred_val:.4f}")
+
+    # ── Partial Dependence Plots ──────────────────────────
+    section_header("Partial Dependence Plots")
+
+    n_feats = len(feat_names)
+    n_pdp_cols = min(3, n_feats)
+    n_pdp_rows = (n_feats + n_pdp_cols - 1) // n_pdp_cols
+
+    fig_pdp = make_subplots(
+        rows=n_pdp_rows, cols=n_pdp_cols,
+        subplot_titles=feat_names,
+        vertical_spacing=0.12,
+        horizontal_spacing=0.08,
+    )
+
+    n_grid = 50
+    for i, feat in enumerate(feat_names):
+        row = i // n_pdp_cols + 1
+        col = i % n_pdp_cols + 1
+
+        fmin = float(feat_mins[feat])
+        fmax = float(feat_maxs[feat])
+        if fmin == fmax:
+            fmin -= 1.0
+            fmax += 1.0
+        grid = np.linspace(fmin, fmax, n_grid)
+
+        # Build input grid: all features at slider value except this one
+        grid_input = np.tile(input_arr, (n_grid, 1))
+        feat_idx = feat_names.index(feat)
+        grid_input[:, feat_idx] = grid
+
+        grid_sc = scaler.transform(grid_input)
+
+        if t_type == "Classification" and hasattr(model, "predict_proba"):
+            preds = model.predict_proba(grid_sc)[:, -1]  # probability of last class
+            y_label = "P(positive)" if len(classes) == 2 else "P(last class)"
+        else:
+            preds = model.predict(grid_sc)
+            y_label = "Prediction"
+
+        fig_pdp.add_trace(
+            go.Scatter(
+                x=grid, y=preds, mode="lines",
+                line=dict(width=2),
+                showlegend=False,
+                hovertemplate=f"{feat}: " + "%{x:.3f}<br>" + f"{y_label}: " + "%{y:.4f}<extra></extra>",
+            ),
+            row=row, col=col,
+        )
+
+        # Mark current slider position
+        current_val = slider_values[feat]
+        current_pred_idx = np.argmin(np.abs(grid - current_val))
+        fig_pdp.add_trace(
+            go.Scatter(
+                x=[current_val], y=[preds[current_pred_idx]],
+                mode="markers",
+                marker=dict(size=10, color="#ef4444", symbol="diamond"),
+                showlegend=False,
+                hovertemplate=f"Current: {current_val:.3f}<extra></extra>",
+            ),
+            row=row, col=col,
+        )
+
+        fig_pdp.update_xaxes(title_text=feat, row=row, col=col)
+        if col == 1:
+            fig_pdp.update_yaxes(title_text=y_label, row=row, col=col)
+
+    fig_pdp.update_layout(
+        title="Partial Dependence (other features held at slider values)",
+        height=max(350, n_pdp_rows * 300),
+    )
+    rdl_plotly_chart(fig_pdp, key="prof_pdp")
+
+
+def _build_profiler_model(model_type, task_type):
+    """Build a model for the profiler."""
+    if model_type == "Random Forest":
+        if task_type == "Classification":
+            return RandomForestClassifier(n_estimators=100, random_state=42)
+        return RandomForestRegressor(n_estimators=100, random_state=42)
+    elif model_type == "Gradient Boosting":
+        if task_type == "Classification":
+            return GradientBoostingClassifier(n_estimators=100, random_state=42)
+        return GradientBoostingRegressor(n_estimators=100, random_state=42)
+    elif model_type == "Linear / Logistic":
+        if task_type == "Classification":
+            return LogisticRegression(max_iter=1000, random_state=42)
+        return LinearRegression()
+    elif model_type == "KNN":
+        if task_type == "Classification":
+            return KNeighborsClassifier()
+        return KNeighborsRegressor()
+    elif model_type == "SVM":
+        if task_type == "Classification":
+            return SVC(probability=True, random_state=42)
+        return SVR()
+    elif model_type == "XGBoost":
+        from xgboost import XGBClassifier, XGBRegressor
+        if task_type == "Classification":
+            return XGBClassifier(
+                n_estimators=100, random_state=42,
+                eval_metric="logloss", use_label_encoder=False, verbosity=0,
+            )
+        return XGBRegressor(n_estimators=100, random_state=42, verbosity=0)
+    # Fallback
+    if task_type == "Classification":
+        return RandomForestClassifier(n_estimators=100, random_state=42)
+    return RandomForestRegressor(n_estimators=100, random_state=42)

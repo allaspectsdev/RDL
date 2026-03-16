@@ -9,7 +9,7 @@ from scipy import stats
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from modules.ui_helpers import section_header, empty_state, validation_panel, interpretation_card, sample_size_indicator
+from modules.ui_helpers import section_header, empty_state, validation_panel, interpretation_card, sample_size_indicator, rdl_plotly_chart
 from modules.validation import check_sample_size, interpret_effect_size
 
 
@@ -297,14 +297,14 @@ def _render_distribution(df: pd.DataFrame):
     fig.update_yaxes(title_text="Sample Quantiles", row=2, col=1)
     fig.update_xaxes(title_text="Value", row=2, col=2)
     fig.update_yaxes(title_text="Cumulative Probability", row=2, col=2)
-    st.plotly_chart(fig, use_container_width=True)
+    rdl_plotly_chart(fig)
 
     # Violin plot
     with st.expander("Violin Plot"):
         fig_violin = go.Figure(go.Violin(y=col_data, name=col_name, box_visible=True,
                                           meanline_visible=True, fillcolor="lightblue"))
         fig_violin.update_layout(height=400, title=f"Violin Plot: {col_name}")
-        st.plotly_chart(fig_violin, use_container_width=True)
+        rdl_plotly_chart(fig_violin)
 
     # P-P Plot
     with st.expander("P-P Plot"):
@@ -355,7 +355,7 @@ def _render_distribution(df: pd.DataFrame):
                 yaxis_title="Empirical CDF",
                 height=450,
             )
-            st.plotly_chart(fig_pp, use_container_width=True)
+            rdl_plotly_chart(fig_pp)
 
     # Normality tests
     section_header("Normality Tests")
@@ -467,7 +467,7 @@ def _render_frequency(df: pd.DataFrame):
         fig = px.bar(x=freq_sorted.index.astype(str), y=freq_sorted.values,
                      labels={"x": col_name, "y": "Count"}, title=f"Frequency: {col_name}",
                      color=freq_sorted.values, color_continuous_scale="Blues")
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
     elif chart_type == "Pareto":
         fig = make_subplots(specs=[[{"secondary_y": True}]])
@@ -480,13 +480,13 @@ def _render_frequency(df: pd.DataFrame):
         fig.update_layout(title=f"Pareto Chart: {col_name}", height=500)
         fig.update_yaxes(title_text="Count", secondary_y=False)
         fig.update_yaxes(title_text="Cumulative %", secondary_y=True, range=[0, 105])
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
     elif chart_type in ("Pie", "Donut"):
         hole = 0.4 if chart_type == "Donut" else 0
         fig = px.pie(values=freq.values, names=freq.index.astype(str),
                      title=f"{chart_type} Chart: {col_name}", hole=hole)
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
 
 def _render_grouped_stats(df: pd.DataFrame):
@@ -512,16 +512,16 @@ def _render_grouped_stats(df: pd.DataFrame):
     if plot_type == "Box Plot":
         fig = px.box(df, x=group_col, y=value_col, color=group_col,
                      title=f"{value_col} by {group_col}", points="outliers")
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
     elif plot_type == "Violin Plot":
         fig = px.violin(df, x=group_col, y=value_col, color=group_col,
                         title=f"{value_col} by {group_col}", box=True, points="all")
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
     elif plot_type == "Histogram":
         fig = px.histogram(df, x=value_col, color=group_col,
                            title=f"{value_col} by {group_col}",
                            barmode="overlay", opacity=0.7)
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
 
 def _render_outliers(df: pd.DataFrame):
@@ -581,7 +581,7 @@ def _render_outliers(df: pd.DataFrame):
                                  mode="markers", name="Outliers",
                                  marker=dict(color="red", size=8, symbol="x")))
     fig.update_layout(title=f"Outlier Detection: {col_name}", height=500)
-    st.plotly_chart(fig, use_container_width=True)
+    rdl_plotly_chart(fig)
 
 
 # ─── Distribution Fitting Helpers ─────────────────────────────────────────
@@ -696,7 +696,7 @@ def _render_distribution_fitting(df: pd.DataFrame):
     ))
     fig_hist.update_layout(title=f"Histogram with {best['Distribution']} Fit",
                            xaxis_title="Value", yaxis_title="Density", height=450)
-    st.plotly_chart(fig_hist, use_container_width=True)
+    rdl_plotly_chart(fig_hist)
 
     # QQ and PP plots for a selected distribution
     dist_names = [r["Distribution"] for r in fit_results]
@@ -727,7 +727,7 @@ def _render_distribution_fitting(df: pd.DataFrame):
         fig_qq.update_layout(title=f"QQ Plot: {selected_dist_name}",
                              xaxis_title="Theoretical Quantiles",
                              yaxis_title="Sample Quantiles", height=400)
-        st.plotly_chart(fig_qq, use_container_width=True)
+        rdl_plotly_chart(fig_qq)
 
     # PP plot
     with col_pp:
@@ -743,7 +743,7 @@ def _render_distribution_fitting(df: pd.DataFrame):
         fig_pp.update_layout(title=f"P-P Plot: {selected_dist_name}",
                              xaxis_title="Theoretical CDF",
                              yaxis_title="Empirical CDF", height=400)
-        st.plotly_chart(fig_pp, use_container_width=True)
+        rdl_plotly_chart(fig_pp)
 
     # Goodness-of-fit tests
     section_header("Goodness-of-Fit Tests")
@@ -938,7 +938,7 @@ def _render_distribution_platform(df: pd.DataFrame):
         fig.update_yaxes(title_text="Sample Quantiles", row=2, col=1)
         fig.update_xaxes(title_text="Value", row=2, col=2)
         fig.update_yaxes(title_text="Cumulative Probability", row=2, col=2)
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
         # Percentile table + Normality tests + Top-3 distribution fits
         c_left, c_right = st.columns(2)

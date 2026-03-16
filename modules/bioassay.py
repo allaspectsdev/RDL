@@ -13,7 +13,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from modules.ui_helpers import (
     section_header, empty_state, help_tip, validation_panel,
-    interpretation_card, significance_result,
+    interpretation_card, significance_result, rdl_plotly_chart,
 )
 from modules.validation import ValidationCheck, Interpretation
 
@@ -330,7 +330,7 @@ def _run_logistic_fit(df, dose_col, resp_col, group_col, log_dose, model="4pl"):
                                   title=f"{'5PL' if model == '5pl' else '4PL'} Dose-Response")
         if log_dose:
             fig.update_layout(xaxis_title="log10(Dose)")
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
         # Results table
         section_header("Parameter Estimates")
@@ -622,7 +622,7 @@ def _run_parallel_line(df, dose_col, resp_col, group_col, ref_group, test_group,
             xaxis=dict(range=[min(50, ci_lo_pct - 10), max(200, ci_hi_pct + 10)]),
             height=250,
         )
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
         # --- Overlay plot ---
         section_header("Fitted Curves Overlay")
@@ -648,7 +648,7 @@ def _run_parallel_line(df, dose_col, resp_col, group_col, ref_group, test_group,
             xaxis_title="log10(Dose)" if log_dose else "Dose",
             yaxis_title="Response", template="plotly+rdl",
         )
-        st.plotly_chart(fig2, use_container_width=True)
+        rdl_plotly_chart(fig2)
 
         # Results summary table
         section_header("Summary")
@@ -836,7 +836,7 @@ def _run_dilution_linearity(log_x, y, x_raw, range_vals, threshold, dose_col, re
             xaxis_title=f"log10({dose_col})", yaxis_title=resp_col,
             template="plotly+rdl",
         )
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
         # Recovery plot
         section_header("% Recovery Plot")
@@ -861,7 +861,7 @@ def _run_dilution_linearity(log_x, y, x_raw, range_vals, threshold, dose_col, re
             template="plotly+rdl",
             yaxis=dict(range=[max(0, recovery.min() - 15), recovery.max() + 15]),
         )
-        st.plotly_chart(fig_rec, use_container_width=True)
+        rdl_plotly_chart(fig_rec)
 
         # Validation
         checks = []

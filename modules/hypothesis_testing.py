@@ -10,7 +10,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from modules.ui_helpers import significance_result, help_tip, empty_state, section_header
-from modules.ui_helpers import validation_panel, interpretation_card, alternative_suggestion, confidence_badge
+from modules.ui_helpers import validation_panel, interpretation_card, alternative_suggestion, confidence_badge, rdl_plotly_chart
 from modules.validation import (
     check_normality, check_equal_variance, check_sample_size,
     check_expected_frequencies, recommend_alternative,
@@ -170,7 +170,7 @@ def _render_one_sample(df: pd.DataFrame):
             fig.add_vline(x=stat, line_dash="solid", line_color="red", row=1, col=2,
                           annotation_text=f"t={stat:.3f}")
             fig.update_layout(height=400)
-            st.plotly_chart(fig, use_container_width=True)
+            rdl_plotly_chart(fig)
 
     elif test_type == "One-Sample Wilcoxon Signed-Rank":
         col_name = st.selectbox("Column:", num_cols, key="one_wilc_col")
@@ -329,7 +329,7 @@ def _render_one_sample(df: pd.DataFrame):
                 yaxis_title=col_name,
                 height=400,
             )
-            st.plotly_chart(fig_runs, use_container_width=True)
+            rdl_plotly_chart(fig_runs)
             st.caption("Blue dots = above median, red dots = at or below median. "
                        "Each change in color represents a new run.")
 
@@ -440,7 +440,7 @@ def _render_two_sample(df: pd.DataFrame):
                 fig.add_trace(go.Box(y=g1, name=str(g1_name)), row=1, col=2)
                 fig.add_trace(go.Box(y=g2, name=str(g2_name)), row=1, col=2)
                 fig.update_layout(height=400)
-                st.plotly_chart(fig, use_container_width=True)
+                rdl_plotly_chart(fig)
 
             elif test_type == "Mood's Median Test":
                 st.markdown(f"**H₀:** The two groups have the same median")
@@ -493,7 +493,7 @@ def _render_two_sample(df: pd.DataFrame):
                 fig.add_trace(go.Box(y=g1, name=str(g1_name)), row=1, col=2)
                 fig.add_trace(go.Box(y=g2, name=str(g2_name)), row=1, col=2)
                 fig.update_layout(height=400)
-                st.plotly_chart(fig, use_container_width=True)
+                rdl_plotly_chart(fig)
 
     elif test_type in ("Paired t-test", "Wilcoxon Signed-Rank (paired)"):
         if len(num_cols) < 2:
@@ -558,7 +558,7 @@ def _render_two_sample(df: pd.DataFrame):
             fig.update_layout(height=400)
             fig.update_xaxes(title_text=col1, row=1, col=2)
             fig.update_yaxes(title_text=col2, row=1, col=2)
-            st.plotly_chart(fig, use_container_width=True)
+            rdl_plotly_chart(fig)
 
 
 def _render_chi_square(df: pd.DataFrame):
@@ -641,7 +641,7 @@ def _render_chi_square(df: pd.DataFrame):
             fig = px.imshow(residuals, x=ct.columns.astype(str), y=ct.index.astype(str),
                             color_continuous_scale="RdBu_r", text_auto=".2f",
                             title="Standardized Residuals")
-            st.plotly_chart(fig, use_container_width=True)
+            rdl_plotly_chart(fig)
 
     elif test_type == "Chi-Square Goodness of Fit":
         col_name = st.selectbox("Variable:", cat_cols, key="chi_gof_col")
@@ -699,7 +699,7 @@ def _render_chi_square(df: pd.DataFrame):
             fig.add_trace(go.Scatter(x=observed.index.astype(str), y=expected, name="Expected",
                                      mode="markers+lines", line=dict(color="red", width=2)))
             fig.update_layout(title="Observed vs Expected Frequencies", height=400)
-            st.plotly_chart(fig, use_container_width=True)
+            rdl_plotly_chart(fig)
 
     elif test_type == "McNemar's Test (paired binary)":
         # Identify binary columns (categorical with 2 levels or numeric with 2 unique values)
@@ -855,7 +855,7 @@ def _render_normality(df: pd.DataFrame):
                                  mode="lines", line=dict(color="red", dash="dash"),
                                  showlegend=False), row=r, col=c)
     fig.update_layout(height=350 * rows)
-    st.plotly_chart(fig, use_container_width=True)
+    rdl_plotly_chart(fig)
 
 
 def _power_t_test(effect_size, n, alpha, two_sample=False):
@@ -904,7 +904,7 @@ def _render_power_analysis():
                               annotation_text=f"n={n}")
                 fig.update_layout(title="Power Curve", xaxis_title="Sample Size", yaxis_title="Power",
                                   height=400)
-                st.plotly_chart(fig, use_container_width=True)
+                rdl_plotly_chart(fig)
 
                 # Sample size lookup table
                 _render_power_lookup_table(analysis_type, alpha)
@@ -924,7 +924,7 @@ def _render_power_analysis():
                 fig.add_hline(y=0.8, line_dash="dash", line_color="gray")
                 fig.update_layout(title="Power vs Sample Size by Effect Size",
                                   xaxis_title="n", yaxis_title="Power", height=400)
-                st.plotly_chart(fig, use_container_width=True)
+                rdl_plotly_chart(fig)
 
     elif analysis_type == "One-Way ANOVA":
         effect_size = st.slider("Cohen's f (effect size):", 0.05, 1.0, 0.25, 0.05, key="power_f")
@@ -962,7 +962,7 @@ def _render_power_analysis():
                               annotation_text=f"n={n}")
                 fig.update_layout(title="ANOVA Power Curve", xaxis_title="n per group",
                                   yaxis_title="Power", height=400)
-                st.plotly_chart(fig, use_container_width=True)
+                rdl_plotly_chart(fig)
         else:
             n_per_group = st.number_input("n per group:", 5, 5000, 30, key="power_anova_n")
             if st.button("Calculate", key="calc_power_anova_p"):
@@ -1013,7 +1013,7 @@ def _render_power_analysis():
                               annotation_text=f"n={n}")
                 fig.update_layout(title="Power Curve (Two-Proportions)", xaxis_title="n per group",
                                   yaxis_title="Power", height=400)
-                st.plotly_chart(fig, use_container_width=True)
+                rdl_plotly_chart(fig)
         else:
             sample_n = st.number_input("Sample size per group:", 5, 10000, 100, key="power_prop_n")
             if st.button("Calculate", key="calc_power_prop_p"):
@@ -1060,7 +1060,7 @@ def _render_power_analysis():
                               annotation_text=f"n={n}")
                 fig.update_layout(title="Chi-Square Power Curve", xaxis_title="Total n",
                                   yaxis_title="Power", height=400)
-                st.plotly_chart(fig, use_container_width=True)
+                rdl_plotly_chart(fig)
         else:
             sample_n = st.number_input("Total sample size:", 10, 10000, 100, key="power_chi_n")
             if st.button("Calculate", key="calc_power_chi_p"):
@@ -1098,7 +1098,7 @@ def _render_power_analysis():
                               annotation_text=f"n={n}")
                 fig.update_layout(title="Correlation Power Curve", xaxis_title="n (pairs)",
                                   yaxis_title="Power", height=400)
-                st.plotly_chart(fig, use_container_width=True)
+                rdl_plotly_chart(fig)
         else:
             sample_n = st.number_input("Sample size (pairs):", 10, 10000, 50, key="power_corr_n")
             if st.button("Calculate", key="calc_power_corr_p"):
@@ -1140,7 +1140,7 @@ def _render_power_analysis():
                               annotation_text=f"n={n}")
                 fig.update_layout(title="Paired t-test Power Curve", xaxis_title="n (pairs)",
                                   yaxis_title="Power", height=400)
-                st.plotly_chart(fig, use_container_width=True)
+                rdl_plotly_chart(fig)
         else:
             sample_n = st.number_input("Number of pairs:", 5, 10000, 30, key="power_paired_n")
             if st.button("Calculate", key="calc_power_paired_p"):
@@ -1195,7 +1195,7 @@ def _render_power_analysis():
                                   annotation_text=f"n={n}")
                     fig.update_layout(title="TOST Power Curve", xaxis_title="n per group",
                                       yaxis_title="Power", height=400)
-                    st.plotly_chart(fig, use_container_width=True)
+                    rdl_plotly_chart(fig)
         else:
             sample_n = st.number_input("Sample size per group:", 5, 10000, 50, key="power_tost_n")
             if st.button("Calculate", key="calc_power_tost_p"):
@@ -1444,7 +1444,7 @@ def _render_bootstrap_permutation(df: pd.DataFrame):
                               annotation_text=f"CI High={ci_high:.4f}")
                 fig.update_layout(title=f"Bootstrap Distribution of {statistic_name} (n={n_resamples})",
                                   xaxis_title=statistic_name, yaxis_title="Frequency", height=450)
-                st.plotly_chart(fig, use_container_width=True)
+                rdl_plotly_chart(fig)
 
             except Exception as e:
                 st.error(f"Bootstrap failed: {e}")
@@ -1515,7 +1515,7 @@ def _render_bootstrap_permutation(df: pd.DataFrame):
                     title=f"Permutation Null Distribution (n={n_resamples})",
                     xaxis_title=test_stat, yaxis_title="Frequency", height=450,
                 )
-                st.plotly_chart(fig, use_container_width=True)
+                rdl_plotly_chart(fig)
 
             except Exception as e:
                 st.error(f"Permutation test failed: {e}")
@@ -1636,7 +1636,7 @@ def _render_equivalence(df: pd.DataFrame):
             fig.update_layout(title="TOST: CI vs Equivalence Bounds",
                               xaxis_title="Difference", height=300,
                               yaxis_visible=False)
-            st.plotly_chart(fig, use_container_width=True)
+            rdl_plotly_chart(fig)
 
     elif test_type == "TOST Equivalence (Paired)":
         if len(num_cols) < 2:
@@ -1855,7 +1855,7 @@ def _render_equivalence(df: pd.DataFrame):
                         xaxis=dict(range=[max(50, lower_limit - 20),
                                           min(160, upper_limit + 20)]),
                     )
-                    st.plotly_chart(fig, use_container_width=True)
+                    rdl_plotly_chart(fig)
 
                     # ANOVA table
                     with st.expander("Model Details"):
@@ -1953,7 +1953,7 @@ Adjust prior parameters to see how prior beliefs combine with data.
                       annotation_text=f"Post mean={post_mu:.3f}")
         fig.update_layout(title="Prior / Likelihood / Posterior",
                           xaxis_title="μ", yaxis_title="Density (normalized)", height=450)
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
     elif analysis_type == "Proportion (Beta-Binomial)":
         section_header("Data")
@@ -2007,7 +2007,7 @@ Adjust prior parameters to see how prior beliefs combine with data.
         fig.add_vrect(x0=ci_lower, x1=ci_upper, fillcolor="red", opacity=0.1)
         fig.update_layout(title="Beta Prior → Posterior",
                           xaxis_title="p", yaxis_title="Density (normalized)", height=450)
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
     elif analysis_type == "Poisson Rate (Gamma-Poisson)":
         section_header("Data")
@@ -2059,4 +2059,4 @@ Adjust prior parameters to see how prior beliefs combine with data.
         fig.add_vrect(x0=ci_lower, x1=ci_upper, fillcolor="red", opacity=0.1)
         fig.update_layout(title="Gamma Prior → Posterior",
                           xaxis_title="λ (rate)", yaxis_title="Density (normalized)", height=450)
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)

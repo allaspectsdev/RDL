@@ -9,7 +9,7 @@ from scipy import stats, optimize
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from modules.ui_helpers import section_header, empty_state, help_tip, validation_panel, interpretation_card, confidence_badge
+from modules.ui_helpers import section_header, empty_state, help_tip, validation_panel, interpretation_card, confidence_badge, rdl_plotly_chart, log_analysis
 from modules.validation import (
     check_normality, check_sample_size, check_multicollinearity,
     check_independence, check_homoscedasticity, check_residual_normality,
@@ -38,7 +38,7 @@ def render_regression(df: pd.DataFrame):
         "Logistic", "Curve Fitting", "Diagnostics",
         "GLM", "Robust & Quantile", "Mixed Models",
         "Regularized", "Nonlinear", "Profiler",
-        "Variable Selection",
+        "Variable Selection", "GAM",
     ])
 
     with tabs[0]:
@@ -67,6 +67,8 @@ def render_regression(df: pd.DataFrame):
         _render_profiler(df)
     with tabs[12]:
         _render_variable_selection(df)
+    with tabs[13]:
+        _render_gam(df)
 
 
 def _render_simple_linear(df: pd.DataFrame):
@@ -158,7 +160,7 @@ def _render_simple_linear(df: pd.DataFrame):
                                          fill="toself", fillcolor="rgba(0,0,255,0.05)",
                                          line=dict(color="rgba(0,0,255,0)"), name="95% PI"))
             fig.update_layout(title=f"{y_col} vs {x_col}", xaxis_title=x_col, yaxis_title=y_col, height=500)
-            st.plotly_chart(fig, use_container_width=True)
+            rdl_plotly_chart(fig)
 
             # Residual plots
             _plot_residuals(model, x_col, y_col)
@@ -179,7 +181,7 @@ def _render_simple_linear(df: pd.DataFrame):
                 pass
             st.write(f"**y = {intercept:.4f} + {slope:.4f} · x**  (p = {p_value:.6f})")
             fig = px.scatter(data, x=x_col, y=y_col, trendline="ols")
-            st.plotly_chart(fig, use_container_width=True)
+            rdl_plotly_chart(fig)
 
 
 def _render_multiple_linear(df: pd.DataFrame):
@@ -358,7 +360,7 @@ Observations with higher weight have more influence on the fitted model.
                                  name="Coefficients"))
         fig.add_vline(x=0, line_dash="dash", line_color="gray")
         fig.update_layout(title="Coefficient Plot (with 95% CI)", height=400)
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
         # Residuals
         _plot_residuals(model, "Fitted", y_col)
@@ -444,7 +446,7 @@ def _render_polynomial(df: pd.DataFrame):
                                  name=f"Degree {degree}", line=dict(color="red", width=2)))
         fig.update_layout(title=f"Polynomial Regression (degree={degree})",
                           xaxis_title=x_col, yaxis_title=y_col, height=500)
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
         # Compare degrees
         with st.expander("Compare Polynomial Degrees"):
@@ -468,7 +470,7 @@ def _render_polynomial(df: pd.DataFrame):
                                           line=dict(color=colors[d % len(colors)])))
             st.dataframe(pd.DataFrame(comp), use_container_width=True, hide_index=True)
             fig2.update_layout(height=400, title="Model Comparison")
-            st.plotly_chart(fig2, use_container_width=True)
+            rdl_plotly_chart(fig2)
 
 
 def _render_logistic(df: pd.DataFrame):
@@ -598,7 +600,7 @@ def _render_logistic(df: pd.DataFrame):
                            x=[str(c) for c in classes], y=[str(c) for c in classes],
                            labels=dict(x="Predicted", y="Actual"),
                            title="Confusion Matrix (Test Set)")
-        st.plotly_chart(fig_cm, use_container_width=True)
+        rdl_plotly_chart(fig_cm)
 
         # Classification report
         report = classification_report(y_test, y_pred, target_names=[str(c) for c in classes], output_dict=True)
@@ -614,7 +616,7 @@ def _render_logistic(df: pd.DataFrame):
                                      line=dict(color="gray", dash="dash")))
         fig_roc.update_layout(title="ROC Curve (Test Set)", xaxis_title="False Positive Rate",
                               yaxis_title="True Positive Rate", height=400)
-        st.plotly_chart(fig_roc, use_container_width=True)
+        rdl_plotly_chart(fig_roc)
 
 
 def _render_multinomial_logistic(df, target, features, n_classes):
@@ -707,7 +709,7 @@ def _render_multinomial_logistic(df, target, features, n_classes):
                                x=[str(c) for c in classes], y=[str(c) for c in classes],
                                labels=dict(x="Predicted", y="Actual"),
                                title="Confusion Matrix")
-            st.plotly_chart(fig_cm, use_container_width=True)
+            rdl_plotly_chart(fig_cm)
 
             # Classification report
             report = classification_report(y, y_pred, target_names=[str(c) for c in classes], output_dict=True)
@@ -734,7 +736,7 @@ def _render_multinomial_logistic(df, target, features, n_classes):
                 fig.update_layout(title=f"Predicted Probabilities vs {plot_feature}",
                                   xaxis_title=plot_feature, yaxis_title="Probability",
                                   height=450)
-                st.plotly_chart(fig, use_container_width=True)
+                rdl_plotly_chart(fig)
 
         except Exception as e:
             st.error(f"Multinomial logistic regression failed: {e}")
@@ -839,7 +841,7 @@ def _render_ordinal_logistic(df, target, features, n_classes):
                                x=[str(c) for c in classes], y=[str(c) for c in classes],
                                labels=dict(x="Predicted", y="Actual"),
                                title="Confusion Matrix")
-            st.plotly_chart(fig_cm, use_container_width=True)
+            rdl_plotly_chart(fig_cm)
 
             # Classification report
             report = classification_report(y, y_pred, target_names=[str(c) for c in classes], output_dict=True)
@@ -867,7 +869,7 @@ def _render_ordinal_logistic(df, target, features, n_classes):
                 fig.update_layout(title=f"Cumulative Probabilities vs {plot_feature}",
                                   xaxis_title=plot_feature, yaxis_title="Cumulative Probability",
                                   height=450)
-                st.plotly_chart(fig, use_container_width=True)
+                rdl_plotly_chart(fig)
 
         except Exception as e:
             st.error(f"Ordinal logistic regression failed: {e}")
@@ -972,7 +974,7 @@ def _render_curve_fitting(df: pd.DataFrame):
                                      name="Fit", line=dict(color="red", width=2)))
             fig.update_layout(title=f"Curve Fit: {model_type.split('(')[0].strip()}",
                               xaxis_title=x_col, yaxis_title=y_col, height=500)
-            st.plotly_chart(fig, use_container_width=True)
+            rdl_plotly_chart(fig)
 
             # Residual plot
             residuals = y - y_pred
@@ -982,7 +984,7 @@ def _render_curve_fitting(df: pd.DataFrame):
             fig_res.add_hline(y=0, line_dash="dash", line_color="red")
             fig_res.update_layout(title="Residuals vs Fitted", xaxis_title="Fitted",
                                   yaxis_title="Residuals", height=350)
-            st.plotly_chart(fig_res, use_container_width=True)
+            rdl_plotly_chart(fig_res)
 
         except RuntimeError as e:
             st.error(f"Curve fitting failed to converge: {e}")
@@ -1069,7 +1071,7 @@ def _render_diagnostics(df: pd.DataFrame):
         fig.add_trace(go.Bar(y=leverage, name="Leverage", marker_color="#6366f1"), row=1, col=2)
         fig.add_hline(y=2 * k / n, line_dash="dash", line_color="red", row=1, col=2)
         fig.update_layout(height=400)
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
         _plot_residuals(model, "Fitted", y_col)
 
@@ -1122,7 +1124,7 @@ def _plot_residuals(model, x_label, y_label):
     fig.update_yaxes(title_text="√|Std Residuals|", row=2, col=1)
     fig.update_xaxes(title_text="Observation Order", row=2, col=2)
     fig.update_yaxes(title_text="Residuals", row=2, col=2)
-    st.plotly_chart(fig, use_container_width=True)
+    rdl_plotly_chart(fig)
 
 
 def _render_glm(df: pd.DataFrame):
@@ -1258,7 +1260,7 @@ def _render_glm(df: pd.DataFrame):
                                      line=dict(color="red", dash="dash"), showlegend=False),
                           row=1, col=2)
             fig.update_layout(height=400)
-            st.plotly_chart(fig, use_container_width=True)
+            rdl_plotly_chart(fig)
 
         except Exception as e:
             st.error(f"GLM fitting failed: {e}")
@@ -1346,7 +1348,7 @@ def _render_robust_quantile(df: pd.DataFrame):
                 fig.add_hline(y=1, line_dash="dash", line_color="red")
                 fig.update_layout(title="Robustness Weights (low = downweighted outlier)",
                                   xaxis_title="Observation", yaxis_title="Weight", height=350)
-                st.plotly_chart(fig, use_container_width=True)
+                rdl_plotly_chart(fig)
 
                 n_downweighted = (weights < 0.9).sum()
                 st.write(f"**{n_downweighted}** observations downweighted (weight < 0.9)")
@@ -1409,7 +1411,7 @@ def _render_robust_quantile(df: pd.DataFrame):
                                              name="OLS", line=dict(color="black", dash="dash", width=2)))
                     fig.update_layout(title="Quantile Regression Lines",
                                       xaxis_title=x_cols[0], yaxis_title=y_col, height=500)
-                    st.plotly_chart(fig, use_container_width=True)
+                    rdl_plotly_chart(fig)
 
     elif reg_type == "RANSAC":
         from sklearn.linear_model import RANSACRegressor
@@ -1453,7 +1455,7 @@ def _render_robust_quantile(df: pd.DataFrame):
                     fig.add_trace(go.Scatter(x=x_line.ravel(), y=ols.predict(x_line), mode="lines",
                                              name="OLS", line=dict(color="orange", dash="dash", width=2)))
                     fig.update_layout(title="RANSAC vs OLS", xaxis_title=x_cols[0], yaxis_title=y_col, height=500)
-                    st.plotly_chart(fig, use_container_width=True)
+                    rdl_plotly_chart(fig)
                 else:
                     st.write(f"**RANSAC Coefficients:** {model.estimator_.coef_.round(6)}")
                     st.write(f"**Intercept:** {model.estimator_.intercept_:.6f}")
@@ -1582,7 +1584,7 @@ def _render_mixed_models(df: pd.DataFrame):
                 fig.add_trace(go.Bar(x=group_names, y=values, marker_color="#6366f1"))
                 fig.update_layout(title=f"Random {group_var} by Group",
                                   xaxis_title=group_col, yaxis_title=f"Random {group_var}", height=350)
-                st.plotly_chart(fig, use_container_width=True)
+                rdl_plotly_chart(fig)
 
         except Exception as e:
             st.error(f"Mixed model failed: {e}")
@@ -1716,7 +1718,7 @@ def _render_regularized(df: pd.DataFrame):
         fig.update_layout(title="Coefficient Path vs log(α)",
                           xaxis_title="log₁₀(α)", yaxis_title="Coefficient",
                           height=500)
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
         # MSE vs alpha plot
         if mse_path is not None:
@@ -1737,7 +1739,7 @@ def _render_regularized(df: pd.DataFrame):
             fig_mse.update_layout(title="CV MSE vs log(α)",
                                   xaxis_title="log₁₀(α)", yaxis_title="MSE",
                                   height=400)
-            st.plotly_chart(fig_mse, use_container_width=True)
+            rdl_plotly_chart(fig_mse)
 
         # Coefficient bar chart
         section_header("Coefficient Magnitudes")
@@ -1749,7 +1751,7 @@ def _render_regularized(df: pd.DataFrame):
                                     marker_color=["#EF553B" if c == 0 else "#6366f1"
                                                    for c in coef_abs["Coefficient"]]))
         fig_bar.update_layout(title="Coefficients (standardized)", height=max(300, len(x_cols) * 25))
-        st.plotly_chart(fig_bar, use_container_width=True)
+        rdl_plotly_chart(fig_bar)
 
 
 # ===================================================================
@@ -1905,7 +1907,7 @@ Built-in models:
             ))
             fig.update_layout(title=f"Nonlinear Fit: {model_type}",
                               xaxis_title=x_col, yaxis_title=y_col, height=500)
-            st.plotly_chart(fig, use_container_width=True)
+            rdl_plotly_chart(fig)
 
             # Residual plot
             residuals = y - y_pred
@@ -1916,7 +1918,7 @@ Built-in models:
             fig_res.add_hline(y=0, line_dash="dash", line_color="red", row=1, col=1)
             fig_res.add_trace(go.Histogram(x=residuals, nbinsx=20), row=1, col=2)
             fig_res.update_layout(height=350)
-            st.plotly_chart(fig_res, use_container_width=True)
+            rdl_plotly_chart(fig_res)
 
         except RuntimeError as e:
             st.error(f"Curve fitting failed: {e}. Try different initial parameters or a different model.")
@@ -2032,6 +2034,14 @@ Interactively explore how each predictor affects the response:
         st.metric("Predicted Response", f"{pred_mean:.4f}",
                    delta=f"95% CI: [{pred_ci[0]:.4f}, {pred_ci[1]:.4f}]")
 
+        if st.button("Save Scenario", key="prof_save"):
+            st.session_state.setdefault("profiler_scenarios", []).append({
+                "values": dict(zip(x_cols, current_x)),
+                "prediction": pred_mean,
+                "ci": [pred_ci[0], pred_ci[1]],
+            })
+            st.toast("Scenario saved!")
+
         # Marginal effect plots
         section_header("Marginal Effect Plots")
         n_plots = len(x_cols)
@@ -2079,7 +2089,111 @@ Interactively explore how each predictor affects the response:
 
         fig.update_layout(height=350 * rows_plot,
                           title_text="Marginal Effect Plots (with 95% CI)")
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
+
+        # --- Scenario Comparison Table ---
+        if st.session_state.get("profiler_scenarios"):
+            section_header("Saved Scenarios")
+            scenarios = st.session_state["profiler_scenarios"]
+            rows = []
+            for i, sc in enumerate(scenarios):
+                row = {"Scenario": i + 1, "Prediction": f"{sc['prediction']:.4f}",
+                       "95% CI": f"[{sc['ci'][0]:.4f}, {sc['ci'][1]:.4f}]"}
+                row.update(sc["values"])
+                rows.append(row)
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+            if st.button("Clear Scenarios", key="prof_clear"):
+                st.session_state["profiler_scenarios"] = []
+                st.rerun()
+
+        # --- Desirability ---
+        with st.expander("Desirability"):
+            help_tip("Derringer-Suich Desirability", """
+The desirability function maps the predicted response to a 0-1 scale:
+- **d = 0** means the response is unacceptable
+- **d = 1** means the response is ideal (at the target)
+- Values between 0 and 1 indicate partial satisfaction
+
+The optimizer searches for predictor settings that maximize desirability.
+""")
+            dc1, dc2, dc3 = st.columns(3)
+            d_target = dc1.number_input("Target value:", value=float(pred_mean), key="prof_d_target")
+            d_min = dc2.number_input("Min acceptable:", value=float(pred_mean - 2 * np.sqrt(model.mse_resid)), key="prof_d_min")
+            d_max = dc3.number_input("Max acceptable:", value=float(pred_mean + 2 * np.sqrt(model.mse_resid)), key="prof_d_max")
+
+            s_exp = st.slider("Desirability exponent (s):", 0.1, 10.0, 1.0, 0.1, key="prof_d_s")
+
+            def derringer_suich(y_val, y_min, y_target, y_max, s_param):
+                """Compute Derringer-Suich desirability."""
+                if y_val < y_min or y_val > y_max:
+                    return 0.0
+                elif y_val <= y_target:
+                    if y_target == y_min:
+                        return 1.0
+                    return ((y_val - y_min) / (y_target - y_min)) ** s_param
+                else:
+                    if y_max == y_target:
+                        return 1.0
+                    return ((y_max - y_val) / (y_max - y_target)) ** s_param
+
+            current_d = derringer_suich(pred_mean, d_min, d_target, d_max, s_exp)
+
+            # Desirability gauge
+            gauge_fig = go.Figure(go.Indicator(
+                mode="gauge+number",
+                value=current_d,
+                title={"text": "Current Desirability"},
+                gauge={
+                    "axis": {"range": [0, 1]},
+                    "bar": {"color": "#6366f1"},
+                    "steps": [
+                        {"range": [0, 0.3], "color": "#fee2e2"},
+                        {"range": [0.3, 0.7], "color": "#fef3c7"},
+                        {"range": [0.7, 1.0], "color": "#d1fae5"},
+                    ],
+                },
+                number={"valueformat": ".4f"},
+            ))
+            gauge_fig.update_layout(height=250)
+            rdl_plotly_chart(gauge_fig)
+
+            if st.button("Optimize", key="prof_optimize"):
+                with st.spinner("Searching for optimal settings..."):
+                    bounds = [(float(data[col].min()), float(data[col].max())) for col in x_cols]
+
+                    def neg_desirability(x_opt):
+                        try:
+                            pm, _ = predict_at(x_opt.tolist())
+                            return -derringer_suich(pm, d_min, d_target, d_max, s_exp)
+                        except Exception:
+                            return 0.0
+
+                    best_result = None
+                    best_val = 0.0
+                    # Multi-start optimization
+                    for _ in range(20):
+                        x0 = np.array([np.random.uniform(b[0], b[1]) for b in bounds])
+                        try:
+                            result = optimize.minimize(neg_desirability, x0, method="L-BFGS-B", bounds=bounds)
+                            if best_result is None or result.fun < best_val:
+                                best_result = result
+                                best_val = result.fun
+                        except Exception:
+                            continue
+
+                    if best_result is not None and best_val < 0:
+                        opt_pred, opt_ci = predict_at(best_result.x.tolist())
+                        opt_d = derringer_suich(opt_pred, d_min, d_target, d_max, s_exp)
+
+                        st.success(f"Optimal desirability: **{opt_d:.4f}** (Predicted: {opt_pred:.4f})")
+                        opt_df = pd.DataFrame({
+                            "Predictor": x_cols,
+                            "Optimal Value": [f"{v:.4f}" for v in best_result.x],
+                            "Current Value": [f"{current_values[col]:.4f}" for col in x_cols],
+                        })
+                        st.dataframe(opt_df, use_container_width=True, hide_index=True)
+                    else:
+                        st.warning("Optimization could not find a feasible solution. Try adjusting the desirability bounds.")
 
 
 # ===================================================================
@@ -2469,7 +2583,7 @@ def _render_variable_selection(df: pd.DataFrame):
                 fig.update_layout(title=f"{crit_col} vs Number of Predictors",
                                   xaxis_title="Number of Predictors", yaxis_title=crit_col,
                                   height=450)
-                st.plotly_chart(fig, use_container_width=True)
+                rdl_plotly_chart(fig)
 
                 # Mallows' Cp plot
                 fig_cp = go.Figure()
@@ -2485,7 +2599,7 @@ def _render_variable_selection(df: pd.DataFrame):
                 fig_cp.update_layout(title="Mallows' Cp vs Number of Predictors",
                                       xaxis_title="Number of Predictors", yaxis_title="Mallows' Cp",
                                       height=400)
-                st.plotly_chart(fig_cp, use_container_width=True)
+                rdl_plotly_chart(fig_cp)
 
                 criteria_df = None  # Already shown above
 
@@ -2512,7 +2626,7 @@ def _render_variable_selection(df: pd.DataFrame):
             fig_step.update_layout(title="Information Criteria at Each Step",
                                    xaxis_title="Step", yaxis_title="Criterion Value",
                                    height=400)
-            st.plotly_chart(fig_step, use_container_width=True)
+            rdl_plotly_chart(fig_step)
 
         # Final model summary
         if final_predictors:
@@ -2558,3 +2672,230 @@ def _render_variable_selection(df: pd.DataFrame):
             st.markdown(f"**RMSE:** {np.sqrt(final_model.mse_resid):.4f}")
         else:
             st.warning("No predictors were selected. The null model (intercept only) was chosen.")
+
+
+# ===================================================================
+# Tab 14 -- Generalized Additive Models (GAM)
+# ===================================================================
+
+def _render_gam(df: pd.DataFrame):
+    """Generalized Additive Models using pygam."""
+    try:
+        from pygam import LinearGAM, LogisticGAM, s, f, l
+        HAS_GAM = True
+    except ImportError:
+        HAS_GAM = False
+
+    if not HAS_GAM:
+        empty_state(
+            "pygam is required for Generalized Additive Models.",
+            "Install with: pip install pygam",
+        )
+        return
+
+    num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    all_cols = df.columns.tolist()
+    if len(num_cols) < 2:
+        empty_state("Need at least 2 numeric columns.", "Upload a dataset with numeric predictors and a response.")
+        return
+
+    section_header("Generalized Additive Models", "Fit flexible, non-linear relationships using penalized splines.")
+    help_tip("GAM Overview", """
+**Generalized Additive Models (GAMs)** extend linear models by allowing each predictor
+to have a smooth, non-linear effect on the response:
+
+    g(E[Y]) = beta_0 + f_1(x_1) + f_2(x_2) + ...
+
+- **Smooth (s):** Fits a penalized spline to capture non-linear trends.
+- **Factor (f):** Treats the predictor as a categorical factor.
+- **Linear (l):** Standard linear term (no non-linearity).
+
+GAMs are powerful for discovering non-linear relationships without specifying the functional form in advance.
+""")
+
+    # --- Column selection ---
+    y_col = st.selectbox("Response (Y):", num_cols, key="gam_y")
+    available_x = [c for c in all_cols if c != y_col]
+    x_cols = st.multiselect("Predictors:", available_x, key="gam_x")
+
+    if len(x_cols) < 1:
+        st.info("Select at least 1 predictor.")
+        return
+
+    # --- Term type for each predictor ---
+    section_header("Term Configuration")
+    term_types = {}
+    n_splines_dict = {}
+    term_cols = st.columns(min(len(x_cols), 4))
+    for i, col in enumerate(x_cols):
+        with term_cols[i % len(term_cols)]:
+            term_types[col] = st.selectbox(
+                f"{col} term:", ["Smooth (s)", "Factor (f)", "Linear (l)"],
+                key=f"gam_term_{col}",
+            )
+            if term_types[col] == "Smooth (s)":
+                n_splines_dict[col] = st.slider(
+                    f"{col} splines:", 4, 50, 20, key=f"gam_ns_{col}",
+                )
+
+    # --- Determine model type ---
+    y_data = df[y_col].dropna()
+    unique_vals = y_data.nunique()
+    is_binary = unique_vals == 2 and set(y_data.unique()).issubset({0, 1, 0.0, 1.0})
+    model_type = st.selectbox(
+        "Model type:",
+        ["LinearGAM", "LogisticGAM"] if is_binary else ["LinearGAM"],
+        key="gam_model_type",
+        help="LogisticGAM is available when Y is binary (0/1).",
+    )
+
+    # --- Fit ---
+    if st.button("Fit GAM", key="gam_fit"):
+        with st.spinner("Fitting GAM..."):
+            data = df[[y_col] + x_cols].dropna()
+            if len(data) < 10:
+                st.error("Not enough data points after dropping missing values (need at least 10).")
+                return
+
+            X = data[x_cols].values
+            y = data[y_col].values
+
+            # Build terms
+            term_builders = {"Smooth (s)": s, "Factor (f)": f, "Linear (l)": l}
+            terms = None
+            for j, col in enumerate(x_cols):
+                builder = term_builders[term_types[col]]
+                if term_types[col] == "Smooth (s)":
+                    t = builder(j, n_splines=n_splines_dict[col])
+                else:
+                    t = builder(j)
+                terms = t if terms is None else terms + t
+
+            try:
+                if model_type == "LogisticGAM":
+                    gam = LogisticGAM(terms).fit(X, y)
+                else:
+                    gam = LinearGAM(terms).fit(X, y)
+            except Exception as e:
+                st.error(f"GAM fitting failed: {e}")
+                return
+
+            log_analysis("Regression", "GAM fit", {
+                "response": y_col, "predictors": x_cols,
+                "model_type": model_type, "n_obs": len(data),
+            })
+
+            # --- Model summary metrics ---
+            section_header("Model Summary")
+            mc1, mc2, mc3 = st.columns(3)
+
+            try:
+                pseudo_r2 = gam.statistics_["pseudo_r2"]["explained_deviance"]
+                mc1.metric("Pseudo R² (deviance explained)", f"{pseudo_r2:.4f}")
+            except Exception:
+                mc1.metric("Pseudo R²", "N/A")
+
+            try:
+                gcv = gam.statistics_["GCV"]
+                mc2.metric("GCV", f"{gcv:.4f}")
+            except Exception:
+                try:
+                    aic_val = gam.statistics_["AIC"]
+                    mc2.metric("AIC", f"{aic_val:.4f}")
+                except Exception:
+                    mc2.metric("GCV / AIC", "N/A")
+
+            try:
+                edof = gam.statistics_["edof"]
+                mc3.metric("Effective DoF", f"{edof:.2f}")
+            except Exception:
+                mc3.metric("Effective DoF", "N/A")
+
+            # --- Partial dependence plots ---
+            smooth_indices = [j for j, col in enumerate(x_cols) if term_types[col] == "Smooth (s)"]
+
+            if smooth_indices:
+                section_header("Partial Dependence Plots")
+                help_tip("Partial Dependence", """
+Each plot shows the estimated smooth function for one predictor,
+with all other predictors held at their mean values.
+The shaded band represents the 95% confidence interval.
+""")
+                n_smooth = len(smooth_indices)
+                plot_cols = min(n_smooth, 3)
+                plot_rows = (n_smooth + plot_cols - 1) // plot_cols
+
+                pdp_fig = make_subplots(
+                    rows=plot_rows, cols=plot_cols,
+                    subplot_titles=[x_cols[j] for j in smooth_indices],
+                )
+
+                for plot_idx, j in enumerate(smooth_indices):
+                    r = plot_idx // plot_cols + 1
+                    c = plot_idx % plot_cols + 1
+
+                    try:
+                        XX = gam.generate_X_grid(term=j)
+                        pdep, confi = gam.partial_dependence(term=j, X=XX, width=0.95)
+
+                        x_grid = XX[:, j]
+
+                        # Partial dependence line
+                        pdp_fig.add_trace(go.Scatter(
+                            x=x_grid, y=pdep,
+                            mode="lines", line=dict(color="#6366f1", width=2),
+                            showlegend=False,
+                        ), row=r, col=c)
+
+                        # Confidence band
+                        pdp_fig.add_trace(go.Scatter(
+                            x=x_grid.tolist() + x_grid.tolist()[::-1],
+                            y=confi[:, 1].tolist() + confi[:, 0].tolist()[::-1],
+                            fill="toself", fillcolor="rgba(99,102,241,0.15)",
+                            line=dict(color="rgba(99,102,241,0)"),
+                            showlegend=False,
+                        ), row=r, col=c)
+
+                        pdp_fig.update_xaxes(title_text=x_cols[j], row=r, col=c)
+                        if c == 1:
+                            pdp_fig.update_yaxes(title_text="Partial Effect", row=r, col=c)
+                    except Exception as e:
+                        pdp_fig.add_annotation(
+                            text=f"Error: {e}", xref="paper", yref="paper",
+                            x=0.5, y=0.5, showarrow=False, row=r, col=c,
+                        )
+
+                pdp_fig.update_layout(
+                    height=350 * plot_rows,
+                    title_text="Partial Dependence Plots (with 95% CI)",
+                )
+                rdl_plotly_chart(pdp_fig)
+
+            # --- Model diagnostics: residual histogram ---
+            section_header("Model Diagnostics")
+            try:
+                y_pred = gam.predict(X)
+                residuals = y - y_pred
+
+                resid_fig = go.Figure()
+                resid_fig.add_trace(go.Histogram(
+                    x=residuals, nbinsx=30,
+                    marker_color="#6366f1", opacity=0.75,
+                    name="Residuals",
+                ))
+                resid_fig.update_layout(
+                    title_text="Residual Distribution",
+                    xaxis_title="Residual",
+                    yaxis_title="Count",
+                    height=400,
+                )
+                rdl_plotly_chart(resid_fig)
+
+                # Summary stats for residuals
+                rc1, rc2, rc3, rc4 = st.columns(4)
+                rc1.metric("Mean Residual", f"{np.mean(residuals):.4f}")
+                rc2.metric("Std Residual", f"{np.std(residuals):.4f}")
+                rc3.metric("Min", f"{np.min(residuals):.4f}")
+                rc4.metric("Max", f"{np.max(residuals):.4f}")
+            except Exception as e:
+                st.warning(f"Could not compute residuals: {e}")

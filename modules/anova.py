@@ -12,6 +12,7 @@ from plotly.subplots import make_subplots
 from modules.ui_helpers import (
     significance_result, help_tip, section_header, empty_state,
     validation_panel, interpretation_card, alternative_suggestion, confidence_badge,
+    rdl_plotly_chart,
 )
 from modules.validation import (
     check_normality, check_equal_variance, check_sample_size,
@@ -43,6 +44,7 @@ def render_anova(df: pd.DataFrame):
     tabs = st.tabs([
         "One-Way ANOVA", "Two-Way ANOVA", "Repeated Measures",
         "Kruskal-Wallis", "Friedman Test", "ANCOVA", "MANOVA",
+        "Nested ANOVA",
     ])
 
     with tabs[0]:
@@ -59,6 +61,8 @@ def render_anova(df: pd.DataFrame):
         _render_ancova(df)
     with tabs[6]:
         _render_manova(df)
+    with tabs[7]:
+        _render_nested_anova(df)
 
 
 def _get_cat_cols(df):
@@ -345,7 +349,7 @@ def _render_one_way(df: pd.DataFrame):
         with c1:
             fig = px.box(data, x=factor, y=dep_var, color=factor,
                          title=f"{dep_var} by {factor}", points="outliers")
-            st.plotly_chart(fig, use_container_width=True)
+            rdl_plotly_chart(fig)
         with c2:
             means = data.groupby(factor)[dep_var].agg(["mean", "std", "count"]).reset_index()
             means["se"] = means["std"] / np.sqrt(means["count"])
@@ -358,7 +362,7 @@ def _render_one_way(df: pd.DataFrame):
             ))
             fig.update_layout(title="Means Plot (±95% CI)", xaxis_title=factor,
                               yaxis_title=f"Mean {dep_var}", height=400)
-            st.plotly_chart(fig, use_container_width=True)
+            rdl_plotly_chart(fig)
 
 
 def _render_two_way(df: pd.DataFrame):
@@ -437,7 +441,7 @@ def _render_two_way(df: pd.DataFrame):
             fig = px.line(means, x=factor_a, y=dep_var, color=factor_b,
                           markers=True, title="Interaction Plot")
             fig.update_layout(height=400)
-            st.plotly_chart(fig, use_container_width=True)
+            rdl_plotly_chart(fig)
         except Exception as e:
             st.error(f"Error fitting model: {e}")
 
@@ -482,7 +486,7 @@ def _render_repeated_measures(df: pd.DataFrame):
             # Visualization
             fig = px.box(data, x=within_col, y=dep_var, color=within_col,
                          title=f"{dep_var} across {within_col}", points="all")
-            st.plotly_chart(fig, use_container_width=True)
+            rdl_plotly_chart(fig)
 
         except Exception as e:
             st.error(f"Error: {e}")
@@ -544,7 +548,7 @@ def _render_kruskal_wallis(df: pd.DataFrame):
 
         fig = px.box(data, x=factor, y=dep_var, color=factor,
                      title=f"Kruskal-Wallis: {dep_var} by {factor}", points="all")
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
 
 def _render_friedman(df: pd.DataFrame):
@@ -592,7 +596,7 @@ def _render_friedman(df: pd.DataFrame):
         melt_df = data.melt(var_name="Condition", value_name="Value")
         fig = px.box(melt_df, x="Condition", y="Value", color="Condition",
                      title="Friedman Test: Distributions", points="all")
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
 
 def _render_ancova(df: pd.DataFrame):
@@ -630,7 +634,7 @@ def _render_ancova(df: pd.DataFrame):
             for cov in covariates:
                 fig = px.scatter(data, x=cov, y=dep_var, color=factor,
                                  trendline="ols", title=f"{dep_var} vs {cov} by {factor}")
-                st.plotly_chart(fig, use_container_width=True)
+                rdl_plotly_chart(fig)
 
             # Adjusted means
             section_header("Group Means")
@@ -712,7 +716,7 @@ def _render_posthoc_forest_plot(group_names, groups, ms_within, k, n_total, alph
         yaxis_title="Comparison",
         height=max(300, len(labels) * 40 + 100),
     )
-    st.plotly_chart(fig, use_container_width=True)
+    rdl_plotly_chart(fig)
 
 
 # ─── MANOVA ─────────────────────────────────────────────────────────────
@@ -882,9 +886,225 @@ Test statistics:
                     title_text=f"Group Means by {f} (with 95% CI)",
                     height=350 * rows_plot,
                 )
-                st.plotly_chart(fig, use_container_width=True)
+                rdl_plotly_chart(fig)
 
         except np.linalg.LinAlgError:
             st.error("MANOVA failed: singular matrix. This can happen when there are too few observations per group or highly correlated dependent variables.")
         except Exception as e:
             st.error(f"MANOVA failed: {e}")
+
+
+# ─── Nested ANOVA ─────────────────────────────────────────────────────────
+
+def _render_nested_anova(df: pd.DataFrame):
+    """Nested ANOVA: inner factor nested within outer factor using mixed-effects models."""
+    if not HAS_SM:
+        empty_state("statsmodels is required for Nested ANOVA.", "Install with: pip install statsmodels")
+        return
+
+    section_header("Nested ANOVA",
+                   "Test for effects when one factor is nested within another (e.g., operators nested within labs).")
+
+    help_tip("Nested ANOVA", """
+**Nested (hierarchical) ANOVA** is used when levels of one factor (the inner/nested factor) are unique
+to each level of another factor (the outer factor).
+
+**Example:** Testing measurement consistency where operators (inner) are nested within labs (outer).
+Each operator works in only one lab, so operator is nested within lab.
+
+This analysis uses a **mixed-effects model** where:
+- The **outer factor** is treated as a fixed effect.
+- The **inner factor** (nested within outer) is treated as a random effect (grouping variable).
+
+**Variance components** decompose total variance into:
+- Between-group variance (due to the outer factor)
+- Within-group variance (residual / measurement error)
+""")
+
+    num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    cat_cols = _get_cat_cols(df)
+
+    if not num_cols:
+        empty_state("Need at least one numeric column as response variable.")
+        return
+    if len(cat_cols) < 2:
+        empty_state("Need at least 2 categorical columns (outer and inner factors).",
+                     "The inner factor must be nested within the outer factor.")
+        return
+
+    y_col = st.selectbox("Response variable (numeric):", num_cols, key="nested_y")
+    outer_col = st.selectbox("Outer factor (e.g., Lab):", cat_cols, key="nested_outer")
+    inner_options = [c for c in cat_cols if c != outer_col]
+    inner_col = st.selectbox("Inner factor nested within outer (e.g., Operator):", inner_options, key="nested_inner")
+
+    ss_type = st.selectbox("Sum of Squares type:", [1, 2, 3], index=2, key="nested_ss_type")
+
+    if st.button("Run Nested ANOVA", key="run_nested"):
+        data = df[[y_col, outer_col, inner_col]].dropna().copy()
+        data[outer_col] = data[outer_col].astype(str)
+        data[inner_col] = data[inner_col].astype(str)
+
+        if len(data) < 10:
+            st.error("Too few observations after cleaning (need at least 10).")
+            return
+
+        n_outer = data[outer_col].nunique()
+        n_inner = data[inner_col].nunique()
+
+        if n_outer < 2:
+            st.error("Outer factor must have at least 2 levels.")
+            return
+        if n_inner < 2:
+            st.error("Inner factor must have at least 2 levels.")
+            return
+
+        # Verify nesting: each inner level should appear in only one outer level
+        nesting_check = data.groupby(inner_col)[outer_col].nunique()
+        non_nested = nesting_check[nesting_check > 1]
+        if len(non_nested) > 0:
+            st.warning(
+                f"Some inner factor levels appear in multiple outer factor levels: "
+                f"{list(non_nested.index[:5])}. This suggests the design may not be truly nested. "
+                "Results should be interpreted with caution."
+            )
+
+        try:
+            # ── Mixed-effects model (inner factor as random grouping) ──
+            section_header("Mixed-Effects Model (Nested)")
+            import statsmodels.formula.api as smf
+
+            with st.spinner("Fitting mixed-effects model..."):
+                model = smf.mixedlm(
+                    f"Q('{y_col}') ~ C(Q('{outer_col}'))",
+                    data,
+                    groups=data[inner_col],
+                )
+                result = model.fit(reml=True)
+
+            # Model summary
+            with st.expander("Full Model Summary"):
+                st.text(str(result.summary()))
+
+            # Fixed effects table
+            section_header("Fixed Effects (Outer Factor)")
+            fe_df = pd.DataFrame({
+                "Parameter": result.fe_params.index,
+                "Coefficient": result.fe_params.values,
+                "Std. Error": result.bse_fe.values,
+                "z": result.tvalues.values[:len(result.fe_params)],
+                "p-value": result.pvalues.values[:len(result.fe_params)],
+            }).round(4)
+            st.dataframe(fe_df, use_container_width=True, hide_index=True)
+
+            # ── Type I/II/III SS ANOVA table using OLS ──
+            section_header(f"ANOVA Table (Type {ss_type} SS)")
+            help_tip("Sum of Squares Types", """
+- **Type I (Sequential):** Tests each factor after accounting for factors listed before it. Order-dependent.
+- **Type II:** Tests each factor after accounting for all other factors (but not interactions). Recommended for balanced designs.
+- **Type III:** Tests each factor as if it were entered last. Recommended for unbalanced designs.
+""")
+
+            try:
+                # Create a nested factor label for the OLS approach
+                data["_nested_factor"] = data[outer_col] + ":" + data[inner_col]
+
+                # OLS model with nested term
+                formula_ols = f"Q('{y_col}') ~ C(Q('{outer_col}')) + C(_nested_factor)"
+                model_ols = ols(formula_ols, data=data).fit()
+                anova_table = anova_lm(model_ols, typ=ss_type)
+                anova_table = anova_table.round(4)
+                st.dataframe(anova_table, use_container_width=True)
+
+                # Effect sizes from ANOVA table
+                ss_total = anova_table["sum_sq"].sum()
+                for idx in anova_table.index[:-1]:
+                    eta_sq = anova_table.loc[idx, "sum_sq"] / ss_total
+                    st.write(f"**{idx}:** eta-squared = {eta_sq:.4f}")
+
+                # Interpretation
+                try:
+                    for idx in anova_table.index[:-1]:
+                        p_val = anova_table.loc[idx, "PR(>F)"] if "PR(>F)" in anova_table.columns else None
+                        if p_val is not None and not np.isnan(p_val):
+                            interpretation_card(interpret_p_value(p_val, 0.05))
+                except Exception:
+                    pass
+
+            except Exception as e:
+                st.warning(f"Could not compute Type {ss_type} ANOVA table: {e}")
+
+            # ── Variance Components ──
+            section_header("Variance Components")
+
+            try:
+                # Extract variance components from mixed model
+                re_variance = float(result.cov_re.iloc[0, 0]) if hasattr(result.cov_re, 'iloc') else float(result.cov_re)
+                residual_variance = result.scale
+
+                total_variance = re_variance + residual_variance
+                pct_between = (re_variance / total_variance * 100) if total_variance > 0 else 0
+                pct_within = (residual_variance / total_variance * 100) if total_variance > 0 else 0
+
+                vc_df = pd.DataFrame({
+                    "Component": [f"Between Groups ({inner_col})", "Within Groups (Residual)", "Total"],
+                    "Variance": [round(re_variance, 4), round(residual_variance, 4), round(total_variance, 4)],
+                    "% of Total": [f"{pct_between:.1f}%", f"{pct_within:.1f}%", "100.0%"],
+                })
+                st.dataframe(vc_df, use_container_width=True, hide_index=True)
+
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Between-Group Variance", f"{re_variance:.4f}")
+                c2.metric("Within-Group Variance", f"{residual_variance:.4f}")
+
+                # ICC (Intraclass Correlation Coefficient)
+                icc = re_variance / total_variance if total_variance > 0 else 0
+                c3.metric("ICC", f"{icc:.4f}")
+
+                help_tip("ICC Interpretation", """
+The **Intraclass Correlation Coefficient (ICC)** represents the proportion of total variance
+attributable to the grouping (nested) factor:
+- **ICC near 0:** Little variance due to grouping; observations within groups are not more similar than between groups.
+- **ICC near 1:** Most variance is between groups; observations within the same group are very similar.
+""")
+
+            except Exception as e:
+                st.warning(f"Could not compute variance components: {e}")
+
+            # ── Box Plots by Nested Groups ──
+            section_header("Box Plots by Nested Groups")
+
+            # Create a combined label for display
+            data["_display_group"] = data[outer_col] + " / " + data[inner_col]
+
+            fig = px.box(
+                data, x="_display_group", y=y_col, color=outer_col,
+                title=f"{y_col} by {inner_col} (nested within {outer_col})",
+                points="outliers",
+                category_orders={"_display_group": sorted(data["_display_group"].unique())},
+            )
+            fig.update_layout(
+                height=500,
+                xaxis_title=f"{inner_col} (within {outer_col})",
+                xaxis_tickangle=-45,
+            )
+            rdl_plotly_chart(fig)
+
+            # Also show box plot by outer factor only
+            fig2 = px.box(
+                data, x=outer_col, y=y_col, color=outer_col,
+                title=f"{y_col} by {outer_col} (outer factor)",
+                points="outliers",
+            )
+            fig2.update_layout(height=400)
+            rdl_plotly_chart(fig2)
+
+            # Group summary statistics
+            with st.expander("Group Summary Statistics"):
+                summary = data.groupby([outer_col, inner_col])[y_col].agg(
+                    ["count", "mean", "std", "min", "max"]
+                ).round(4)
+                summary.columns = ["N", "Mean", "Std Dev", "Min", "Max"]
+                st.dataframe(summary, use_container_width=True)
+
+        except Exception as e:
+            st.error(f"Nested ANOVA error: {e}")

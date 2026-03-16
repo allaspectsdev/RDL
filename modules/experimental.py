@@ -20,7 +20,7 @@ from scipy import stats as sp_stats
 import plotly.express as px
 import plotly.graph_objects as go
 
-from modules.ui_helpers import section_header, empty_state, help_tip, validation_panel
+from modules.ui_helpers import section_header, empty_state, help_tip, validation_panel, rdl_plotly_chart
 
 # ─── Optional Dependencies ───────────────────────────────────────────────
 
@@ -1770,7 +1770,7 @@ def _render_execution_results():
             with st.expander(f"Data preview ({len(output)} rows)", expanded=True):
                 st.dataframe(output.head(20), use_container_width=True)
         elif isinstance(output, go.Figure):
-            st.plotly_chart(output, use_container_width=True)
+            rdl_plotly_chart(output)
         elif isinstance(output, dict) and "validation_results" in output:
             # Validation node -- render with validation_panel
             from modules.validation import ValidationCheck
@@ -1810,7 +1810,7 @@ def _render_execution_results():
                             with st.expander(f"Data preview ({len(item)} rows)", expanded=True):
                                 st.dataframe(item.head(20), use_container_width=True)
                     elif isinstance(item, go.Figure):
-                        st.plotly_chart(item, use_container_width=True)
+                        rdl_plotly_chart(item)
                     elif isinstance(item, str):
                         st.markdown(item)
                     elif isinstance(item, dict):

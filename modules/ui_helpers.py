@@ -6,6 +6,7 @@ section headers, empty states, grouped chart selector, and validation components
 from __future__ import annotations
 
 import html as _html
+from datetime import datetime
 
 import streamlit as st
 import plotly.io as pio
@@ -387,3 +388,72 @@ def sample_size_indicator(n, min_recommended):
         css = "rdl-sample-size--critical"
         text = f"n = {n:,} (well below recommended {min_recommended})"
     st.markdown(f'<span class="rdl-sample-size {css}">{text}</span>', unsafe_allow_html=True)
+
+
+# ─── RDL Plotly Chart Wrapper ──────────────────────────────────────────────
+
+def rdl_plotly_chart(fig, key=None, **kwargs):
+    """Plotly chart wrapper with SVG export, annotation tools, and no logo."""
+    config = {
+        'toImageButtonOptions': {
+            'format': 'svg',
+            'filename': key or 'rdl_chart',
+            'height': 600,
+            'width': 1000,
+            'scale': 3,
+        },
+        'displaylogo': False,
+        'modeBarButtonsToAdd': ['drawline', 'drawrect', 'eraseshape'],
+    }
+    st.plotly_chart(fig, use_container_width=True, config=config, key=key, **kwargs)
+
+
+# ─── Add to Report Button ──────────────────────────────────────────────────
+
+def add_to_report_button(title, content, key):
+    """Button that appends a section to the session report."""
+    if "report_sections" not in st.session_state:
+        st.session_state["report_sections"] = []
+    if st.button("Add to Report", key=f"rpt_add_{key}"):
+        st.session_state["report_sections"].append({
+            "title": title,
+            "content": content,
+            "timestamp": datetime.now().isoformat(),
+        })
+        st.toast(f"Added '{title}' to report.")
+
+
+# ─── Role-Aware Selectbox ──────────────────────────────────────────────────
+
+def role_aware_selectbox(label, df, preferred_role=None, key=None, **kwargs):
+    """Selectbox that pre-selects columns matching a session-state role."""
+    roles = st.session_state.get("column_roles", {})
+    options = df.columns.tolist()
+    if not options:
+        return st.selectbox(label, options, key=key, **kwargs)
+
+    default_idx = 0
+    if preferred_role:
+        for i, col in enumerate(options):
+            if roles.get(col, {}).get("role") == preferred_role:
+                default_idx = i
+                break
+    return st.selectbox(label, options, index=default_idx, key=key, **kwargs)
+
+
+# ─── Analysis Log ──────────────────────────────────────────────────────────
+
+def log_analysis(module, action, params=None, summary=""):
+    """Append an entry to the analysis history log."""
+    if "analysis_log" not in st.session_state:
+        st.session_state["analysis_log"] = []
+    st.session_state["analysis_log"].append({
+        "timestamp": datetime.now().strftime("%H:%M:%S"),
+        "module": module,
+        "action": action,
+        "params": str(params) if params else "",
+        "summary": summary,
+    })
+    # Keep last 50 entries
+    if len(st.session_state["analysis_log"]) > 50:
+        st.session_state["analysis_log"] = st.session_state["analysis_log"][-50:]

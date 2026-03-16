@@ -9,12 +9,14 @@ from scipy import stats
 from sklearn.decomposition import PCA, FactorAnalysis
 from sklearn.manifold import TSNE
 from sklearn.preprocessing import StandardScaler
+from sklearn.cross_decomposition import PLSRegression, PLSCanonical, CCA
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from modules.ui_helpers import (
     section_header, empty_state, validation_panel,
     interpretation_card, alternative_suggestion, help_tip,
+    rdl_plotly_chart, log_analysis,
 )
 from modules.validation import (
     check_sample_size, check_kmo_bartlett, interpret_correlation,
@@ -52,6 +54,7 @@ def render_correlation(df: pd.DataFrame):
         "Correlation Matrix", "Scatter Matrix", "Pairwise Scatter",
         "PCA", "t-SNE", "Factor Analysis", "Partial Correlation",
         "Discriminant Analysis", "MDS", "Correspondence Analysis",
+        "PLS / CCA",
     ])
 
     with tabs[0]:
@@ -74,6 +77,8 @@ def render_correlation(df: pd.DataFrame):
         _render_mds(df)
     with tabs[9]:
         _render_correspondence_analysis(df)
+    with tabs[10]:
+        _render_pls(df)
 
 
 def _render_corr_matrix(df: pd.DataFrame):
@@ -120,7 +125,7 @@ def _render_corr_matrix(df: pd.DataFrame):
                     zmin=-1, zmax=1, title=f"{method.title()} Correlation Matrix",
                     aspect="auto")
     fig.update_layout(height=max(400, len(selected) * 40))
-    st.plotly_chart(fig, use_container_width=True)
+    rdl_plotly_chart(fig)
 
     # P-value matrix
     with st.expander("P-Values"):
@@ -164,7 +169,7 @@ def _render_scatter_matrix(df: pd.DataFrame):
                             opacity=0.6)
     fig.update_traces(diagonal_visible=True, showupperhalf=True)
     fig.update_layout(height=max(600, len(selected) * 200))
-    st.plotly_chart(fig, use_container_width=True)
+    rdl_plotly_chart(fig)
 
 
 def _render_pairwise(df: pd.DataFrame):
@@ -190,7 +195,7 @@ def _render_pairwise(df: pd.DataFrame):
                      marginal_x=show_marginal, marginal_y=show_marginal,
                      title=f"{y_col} vs {x_col}", opacity=0.7)
     fig.update_layout(height=600)
-    st.plotly_chart(fig, use_container_width=True)
+    rdl_plotly_chart(fig)
 
     # Correlation stats
     pair_data = df[[x_col, y_col]].dropna()
@@ -277,7 +282,7 @@ def _render_pca(df: pd.DataFrame):
         fig.update_layout(title="Scree Plot", height=400)
         fig.update_yaxes(title_text="Individual %", secondary_y=False)
         fig.update_yaxes(title_text="Cumulative %", range=[0, 105], secondary_y=True)
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
         # Kaiser criterion
         n_kaiser = np.sum(pca.explained_variance_ > 1)
@@ -337,7 +342,7 @@ def _render_pca(df: pd.DataFrame):
             yaxis_title=f"PC2 ({exp_var[1]*100:.1f}%)",
             height=600,
         )
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
 
 def _render_tsne(df: pd.DataFrame):
@@ -385,7 +390,7 @@ def _render_tsne(df: pd.DataFrame):
                                 color="color" if "color" in emb_df else None,
                                 title="t-SNE 3D", opacity=0.7)
         fig.update_layout(height=600)
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
 
 def _render_factor_analysis(df: pd.DataFrame):
@@ -447,7 +452,7 @@ def _render_factor_analysis(df: pd.DataFrame):
                         text_auto=".2f", color_continuous_scale="RdBu_r",
                         zmin=-1, zmax=1, title="Factor Loadings Heatmap")
         fig.update_layout(height=max(300, len(selected) * 30))
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
 
 def _render_partial_corr(df: pd.DataFrame):
@@ -504,7 +509,7 @@ def _render_partial_corr(df: pd.DataFrame):
         fig = px.scatter(x=resid1, y=resid2, trendline="ols",
                          labels={"x": f"{var1} (residualized)", "y": f"{var2} (residualized)"},
                          title=f"Partial Correlation: {var1} vs {var2}")
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
 
 # ===================================================================
@@ -567,7 +572,7 @@ def _render_discriminant(df: pd.DataFrame):
                             x=[str(c) for c in classes], y=[str(c) for c in classes],
                             labels=dict(x="Predicted", y="Actual"),
                             title="Confusion Matrix")
-        st.plotly_chart(fig_cm, use_container_width=True)
+        rdl_plotly_chart(fig_cm)
 
         # Classification report
         report = classification_report(y, y_pred, output_dict=True)
@@ -604,7 +609,7 @@ def _render_discriminant(df: pd.DataFrame):
                 fig = px.scatter(lda_df, x="LD1", y="LD2", color="Group",
                                  title="Linear Discriminant Projection", opacity=0.7)
                 fig.update_layout(height=500)
-                st.plotly_chart(fig, use_container_width=True)
+                rdl_plotly_chart(fig)
             elif n_components == 1:
                 section_header("LD1 Distribution by Group")
                 X_lda = model.transform(X_scaled)
@@ -612,7 +617,7 @@ def _render_discriminant(df: pd.DataFrame):
                 fig = px.histogram(lda_df, x="LD1", color="Group", barmode="overlay",
                                    opacity=0.6, title="LD1 by Group")
                 fig.update_layout(height=400)
-                st.plotly_chart(fig, use_container_width=True)
+                rdl_plotly_chart(fig)
 
         # Wilks' Lambda (approximate)
         if method == "LDA (Linear)":
@@ -696,7 +701,7 @@ def _render_mds(df: pd.DataFrame):
                                 color="color" if "color" in emb_df else None,
                                 title=f"MDS 3D ({metric})", opacity=0.7)
         fig.update_layout(height=600)
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
         # Shepard diagram
         section_header("Shepard Diagram")
@@ -726,7 +731,7 @@ def _render_mds(df: pd.DataFrame):
                                xaxis_title="Original Distance",
                                yaxis_title="Embedded Distance",
                                height=450)
-        st.plotly_chart(fig_shep, use_container_width=True)
+        rdl_plotly_chart(fig_shep)
 
         # Interpretation
         if stress < 0.05:
@@ -902,7 +907,7 @@ as points in the same space. Points that are close together are more strongly as
                 yaxis_title=f"Dimension 2 ({dim2_pct:.1f}%)",
                 height=600,
             )
-            st.plotly_chart(fig, use_container_width=True)
+            rdl_plotly_chart(fig)
         else:
             # Only 1 dimension available
             section_header("Dimension 1 Projection")
@@ -918,7 +923,7 @@ as points in the same space. Points that are close together are more strongly as
             fig = px.strip(proj_df, x="Dim 1", color="Variable", hover_name="Label",
                            title="Dimension 1 Projection")
             fig.update_layout(height=350)
-            st.plotly_chart(fig, use_container_width=True)
+            rdl_plotly_chart(fig)
 
         # ---- Contributions ----
         section_header("Contributions (% contribution to each dimension)")
@@ -982,3 +987,427 @@ as points in the same space. Points that are close together are more strongly as
         col_cos2_df.index.name = col_var
         st.write(f"**Column cos² ({col_var}):**")
         st.dataframe(col_cos2_df, use_container_width=True)
+
+
+# ===================================================================
+# Tab 11 -- PLS / CCA
+# ===================================================================
+
+def _compute_vip(pls_model, X, Y):
+    """Compute VIP scores for PLS model."""
+    T = pls_model.x_scores_
+    W = pls_model.x_weights_
+    Q = pls_model.y_loadings_
+    p, h = W.shape
+
+    # SS for each component
+    ss = np.diag(T.T @ T @ Q.T @ Q)
+    total_ss = np.sum(ss)
+
+    vip = np.zeros(p)
+    for j in range(p):
+        vip[j] = np.sqrt(p * np.sum(ss * W[j, :] ** 2) / total_ss)
+    return vip
+
+
+def _render_pls(df):
+    """Partial Least Squares and Canonical Correlation Analysis."""
+    num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+
+    if len(num_cols) < 4:
+        empty_state(
+            "Need at least 4 numeric columns.",
+            "PLS and CCA require separate X and Y variable sets.",
+        )
+        return
+
+    section_header(
+        "PLS / CCA",
+        "Partial Least Squares relates two blocks of variables; CCA finds maximally correlated linear combinations.",
+    )
+    help_tip("About PLS & CCA", """
+**PLS Regression** projects both X (predictors) and Y (responses) to latent
+components that maximise the covariance between the two blocks.  It is widely
+used in chemometrics, spectroscopy, and genomics when predictors are numerous
+and collinear.
+
+**Key outputs:**
+- **VIP (Variable Importance in Projection):** variables with VIP > 1.0 are
+  considered important; those below 0.5 can often be removed.
+- **Q\u00b2 (cross-validated R\u00b2):** measures predictive ability.  Values above 0.5
+  indicate good prediction.
+- **Scores & Loadings plots:** visualise sample grouping and variable
+  contributions.
+
+**Canonical Correlation Analysis (CCA)** finds linear combinations of X and Y
+that are maximally correlated.  It generalises simple correlation to
+multivariate settings.
+""")
+
+    method = st.radio(
+        "Method:",
+        ["PLS Regression", "Canonical Correlation (CCA)"],
+        horizontal=True,
+        key="pls_cca_method",
+    )
+
+    if method == "PLS Regression":
+        _render_pls_regression(df, num_cols)
+    else:
+        _render_cca(df, num_cols)
+
+
+def _render_pls_regression(df, num_cols):
+    """PLS Regression sub-section."""
+    y_cols = st.multiselect(
+        "Y variables (responses):", num_cols, key="pls_y_cols",
+    )
+    remaining_cols = [c for c in num_cols if c not in y_cols]
+    x_cols = st.multiselect(
+        "X variables (predictors):", remaining_cols, key="pls_x_cols",
+    )
+
+    if len(y_cols) < 1 or len(x_cols) < 1:
+        st.info("Select at least one Y and one X variable.")
+        return
+
+    data = df[x_cols + y_cols].dropna()
+    n_samples = len(data)
+    max_components = min(len(x_cols), len(y_cols), n_samples)
+    if max_components < 1:
+        st.warning("Not enough data to fit a PLS model.")
+        return
+
+    n_components = st.slider(
+        "Number of components:", 1, max_components,
+        min(2, max_components), key="pls_n_comp",
+    )
+
+    if st.button("Fit PLS", key="run_pls"):
+        X = data[x_cols].values
+        Y = data[y_cols].values
+
+        scaler_x = StandardScaler()
+        scaler_y = StandardScaler()
+        X_scaled = scaler_x.fit_transform(X)
+        Y_scaled = scaler_y.fit_transform(Y)
+
+        with st.spinner("Fitting PLS model..."):
+            # ---- Cross-validation for optimal components ----
+            section_header("Cross-Validation: Q\u00b2 vs Components")
+            from sklearn.model_selection import cross_val_predict
+
+            q2_values = []
+            ss_total = np.sum((Y_scaled - Y_scaled.mean(axis=0)) ** 2)
+
+            for nc in range(1, max_components + 1):
+                pls_cv = PLSRegression(n_components=nc, scale=False)
+                try:
+                    cv_folds = min(5, n_samples)
+                    if cv_folds < 2:
+                        break
+                    Y_pred_cv = cross_val_predict(pls_cv, X_scaled, Y_scaled, cv=cv_folds)
+                    press = np.sum((Y_scaled - Y_pred_cv) ** 2)
+                    q2 = 1 - press / ss_total
+                    q2_values.append(q2)
+                except Exception:
+                    q2_values.append(np.nan)
+
+            if q2_values:
+                fig_q2 = go.Figure()
+                fig_q2.add_trace(go.Scatter(
+                    x=list(range(1, len(q2_values) + 1)),
+                    y=q2_values,
+                    mode="lines+markers",
+                    name="Q\u00b2",
+                    line=dict(width=2),
+                    marker=dict(size=8),
+                ))
+                fig_q2.update_layout(
+                    title="Q\u00b2 (Cross-Validated) vs Number of Components",
+                    xaxis_title="Components",
+                    yaxis_title="Q\u00b2",
+                    height=400,
+                )
+                rdl_plotly_chart(fig_q2, key="pls_q2_chart")
+
+                best_nc = int(np.nanargmax(q2_values)) + 1
+                st.write(f"**Optimal components (max Q\u00b2):** {best_nc} "
+                         f"(Q\u00b2 = {q2_values[best_nc - 1]:.4f})")
+
+            # ---- Fit final model ----
+            pls = PLSRegression(n_components=n_components, scale=False)
+            pls.fit(X_scaled, Y_scaled)
+            Y_pred = pls.predict(X_scaled)
+
+            # ---- Scores plot (T1 vs T2) ----
+            if n_components >= 2:
+                section_header("Scores Plot (X Scores)")
+                scores_df = pd.DataFrame({
+                    "T1": pls.x_scores_[:, 0],
+                    "T2": pls.x_scores_[:, 1],
+                })
+                fig_scores = px.scatter(
+                    scores_df, x="T1", y="T2",
+                    title="PLS X-Scores: T1 vs T2",
+                    opacity=0.7,
+                )
+                fig_scores.update_layout(height=500)
+                rdl_plotly_chart(fig_scores, key="pls_scores_chart")
+            elif n_components == 1:
+                section_header("Scores Plot")
+                scores_df = pd.DataFrame({"T1": pls.x_scores_[:, 0]})
+                fig_scores = px.histogram(
+                    scores_df, x="T1",
+                    title="PLS X-Scores: T1 Distribution",
+                )
+                fig_scores.update_layout(height=400)
+                rdl_plotly_chart(fig_scores, key="pls_scores_chart")
+
+            # ---- Loadings plot (P1 vs P2) ----
+            if n_components >= 2:
+                section_header("Loadings Plot (X Loadings)")
+                loadings_df = pd.DataFrame({
+                    "P1": pls.x_loadings_[:, 0],
+                    "P2": pls.x_loadings_[:, 1],
+                    "Variable": x_cols,
+                })
+                fig_load = px.scatter(
+                    loadings_df, x="P1", y="P2", text="Variable",
+                    title="PLS X-Loadings: P1 vs P2",
+                )
+                fig_load.update_traces(textposition="top center")
+                fig_load.update_layout(height=500)
+                rdl_plotly_chart(fig_load, key="pls_loadings_chart")
+
+            # ---- VIP bar chart ----
+            section_header("VIP (Variable Importance in Projection)")
+            try:
+                vip_scores = _compute_vip(pls, X_scaled, Y_scaled)
+                vip_df = pd.DataFrame({
+                    "Variable": x_cols,
+                    "VIP": vip_scores,
+                }).sort_values("VIP", ascending=True)
+
+                fig_vip = go.Figure()
+                colors = ["#ef4444" if v >= 1.0 else "#6366f1" for v in vip_df["VIP"]]
+                fig_vip.add_trace(go.Bar(
+                    y=vip_df["Variable"],
+                    x=vip_df["VIP"],
+                    orientation="h",
+                    marker_color=colors,
+                    name="VIP",
+                ))
+                fig_vip.add_vline(
+                    x=1.0, line_dash="dash", line_color="red",
+                    annotation_text="VIP = 1.0",
+                    annotation_position="top right",
+                )
+                fig_vip.update_layout(
+                    title="Variable Importance in Projection (VIP)",
+                    xaxis_title="VIP Score",
+                    yaxis_title="",
+                    height=max(350, len(x_cols) * 30),
+                )
+                rdl_plotly_chart(fig_vip, key="pls_vip_chart")
+
+                # Show important variables
+                important = vip_df[vip_df["VIP"] >= 1.0].sort_values("VIP", ascending=False)
+                if not important.empty:
+                    st.write(f"**{len(important)} variable(s) with VIP >= 1.0** (important):")
+                    st.dataframe(important.round(4), use_container_width=True, hide_index=True)
+                else:
+                    st.info("No variables exceed the VIP = 1.0 threshold.")
+            except Exception as e:
+                st.warning(f"Could not compute VIP scores: {e}")
+
+            # ---- Predicted vs Actual ----
+            section_header("Predicted vs Actual")
+            Y_pred_orig = scaler_y.inverse_transform(Y_pred)
+            Y_actual_orig = data[y_cols].values
+
+            for i, y_name in enumerate(y_cols):
+                y_act = Y_actual_orig[:, i]
+                y_prd = Y_pred_orig[:, i]
+                ss_res = np.sum((y_act - y_prd) ** 2)
+                ss_tot = np.sum((y_act - y_act.mean()) ** 2)
+                r2 = 1 - ss_res / ss_tot if ss_tot > 0 else 0
+                rmse = np.sqrt(np.mean((y_act - y_prd) ** 2))
+
+                fig_pa = go.Figure()
+                fig_pa.add_trace(go.Scatter(
+                    x=y_act, y=y_prd, mode="markers",
+                    marker=dict(size=6, opacity=0.6),
+                    name=y_name,
+                ))
+                # 1:1 line
+                min_val = min(y_act.min(), y_prd.min())
+                max_val = max(y_act.max(), y_prd.max())
+                fig_pa.add_trace(go.Scatter(
+                    x=[min_val, max_val], y=[min_val, max_val],
+                    mode="lines", line=dict(dash="dash", color="red"),
+                    name="1:1 Line",
+                ))
+                fig_pa.update_layout(
+                    title=f"{y_name}: Predicted vs Actual (R\u00b2={r2:.4f}, RMSE={rmse:.4f})",
+                    xaxis_title="Actual",
+                    yaxis_title="Predicted",
+                    height=450,
+                )
+                rdl_plotly_chart(fig_pa, key=f"pls_pa_{i}")
+
+            # ---- Coefficients table ----
+            section_header("PLS Coefficients")
+            coef_df = pd.DataFrame(
+                pls.coef_,
+                index=x_cols,
+                columns=y_cols,
+            ).round(6)
+            st.dataframe(coef_df, use_container_width=True)
+
+            log_analysis("Correlation", "PLS Regression",
+                         {"x_cols": x_cols, "y_cols": y_cols,
+                          "n_components": n_components},
+                         f"PLS with {n_components} components on {len(data)} observations")
+
+
+def _render_cca(df, num_cols):
+    """Canonical Correlation Analysis sub-section."""
+    x_cols = st.multiselect(
+        "X set:", num_cols, key="cca_x_cols",
+    )
+    remaining_cols = [c for c in num_cols if c not in x_cols]
+    y_cols = st.multiselect(
+        "Y set:", remaining_cols, key="cca_y_cols",
+    )
+
+    if len(x_cols) < 1 or len(y_cols) < 1:
+        st.info("Select at least one variable for each set.")
+        return
+
+    data = df[x_cols + y_cols].dropna()
+    n_samples = len(data)
+    max_components = min(len(x_cols), len(y_cols), n_samples)
+    if max_components < 1:
+        st.warning("Not enough data to fit CCA.")
+        return
+
+    n_components = st.slider(
+        "Number of components:", 1, max_components,
+        min(2, max_components), key="cca_n_comp",
+    )
+
+    if st.button("Fit CCA", key="run_cca"):
+        X = data[x_cols].values
+        Y = data[y_cols].values
+
+        scaler_x = StandardScaler()
+        scaler_y = StandardScaler()
+        X_scaled = scaler_x.fit_transform(X)
+        Y_scaled = scaler_y.fit_transform(Y)
+
+        with st.spinner("Fitting CCA model..."):
+            cca = CCA(n_components=n_components)
+            cca.fit(X_scaled, Y_scaled)
+            X_c, Y_c = cca.transform(X_scaled, Y_scaled)
+
+        # ---- Canonical correlations ----
+        section_header("Canonical Correlations")
+        canon_corrs = []
+        for i in range(n_components):
+            r, _ = stats.pearsonr(X_c[:, i], Y_c[:, i])
+            canon_corrs.append(abs(r))
+
+        fig_cc = go.Figure()
+        fig_cc.add_trace(go.Bar(
+            x=[f"CC{i+1}" for i in range(n_components)],
+            y=canon_corrs,
+            marker_color="#6366f1",
+            name="Canonical Correlation",
+        ))
+        fig_cc.update_layout(
+            title="Canonical Correlations",
+            xaxis_title="Component",
+            yaxis_title="Correlation",
+            yaxis_range=[0, 1.05],
+            height=400,
+        )
+        rdl_plotly_chart(fig_cc, key="cca_corr_chart")
+
+        corr_df = pd.DataFrame({
+            "Component": [f"CC{i+1}" for i in range(n_components)],
+            "Canonical Correlation": [round(c, 4) for c in canon_corrs],
+        })
+        st.dataframe(corr_df, use_container_width=True, hide_index=True)
+
+        # ---- Scores plot (canonical variates) ----
+        if n_components >= 2:
+            section_header("Scores Plot (Canonical Variates)")
+            fig_sc = go.Figure()
+            fig_sc.add_trace(go.Scatter(
+                x=X_c[:, 0], y=X_c[:, 1],
+                mode="markers", name="X scores",
+                marker=dict(size=7, opacity=0.6, color="#6366f1"),
+            ))
+            fig_sc.add_trace(go.Scatter(
+                x=Y_c[:, 0], y=Y_c[:, 1],
+                mode="markers", name="Y scores",
+                marker=dict(size=7, opacity=0.6, color="#ef4444", symbol="diamond"),
+            ))
+            fig_sc.update_layout(
+                title="Canonical Variate Scores: CC1 vs CC2",
+                xaxis_title="CC1",
+                yaxis_title="CC2",
+                height=500,
+            )
+            rdl_plotly_chart(fig_sc, key="cca_scores_chart")
+        elif n_components == 1:
+            section_header("Canonical Variate Pair")
+            fig_sc = px.scatter(
+                x=X_c[:, 0], y=Y_c[:, 0],
+                labels={"x": "X Canonical Variate 1", "y": "Y Canonical Variate 1"},
+                title=f"Canonical Variate Pair (r = {canon_corrs[0]:.4f})",
+                opacity=0.7,
+            )
+            fig_sc.update_layout(height=450)
+            rdl_plotly_chart(fig_sc, key="cca_scores_chart")
+
+        # ---- Loadings for both sets ----
+        section_header("X Loadings")
+        x_load_df = pd.DataFrame(
+            cca.x_loadings_,
+            index=x_cols,
+            columns=[f"CC{i+1}" for i in range(n_components)],
+        ).round(4)
+        st.dataframe(x_load_df, use_container_width=True)
+
+        if n_components >= 2:
+            fig_xl = px.scatter(
+                x_load_df, x="CC1", y="CC2", text=x_load_df.index,
+                title="X Loadings: CC1 vs CC2",
+            )
+            fig_xl.update_traces(textposition="top center")
+            fig_xl.update_layout(height=450)
+            rdl_plotly_chart(fig_xl, key="cca_x_loadings_chart")
+
+        section_header("Y Loadings")
+        y_load_df = pd.DataFrame(
+            cca.y_loadings_,
+            index=y_cols,
+            columns=[f"CC{i+1}" for i in range(n_components)],
+        ).round(4)
+        st.dataframe(y_load_df, use_container_width=True)
+
+        if n_components >= 2:
+            fig_yl = px.scatter(
+                y_load_df, x="CC1", y="CC2", text=y_load_df.index,
+                title="Y Loadings: CC1 vs CC2",
+            )
+            fig_yl.update_traces(textposition="top center")
+            fig_yl.update_layout(height=450)
+            rdl_plotly_chart(fig_yl, key="cca_y_loadings_chart")
+
+        log_analysis("Correlation", "CCA",
+                     {"x_cols": x_cols, "y_cols": y_cols,
+                      "n_components": n_components},
+                     f"CCA with {n_components} components on {len(data)} observations")

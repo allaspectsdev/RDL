@@ -8,7 +8,7 @@ import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from modules.ui_helpers import section_header, empty_state, help_tip, validation_panel, interpretation_card
+from modules.ui_helpers import section_header, empty_state, help_tip, validation_panel, interpretation_card, rdl_plotly_chart
 from modules.validation import check_sample_size, interpret_p_value, interpret_effect_size
 
 try:
@@ -24,6 +24,12 @@ try:
 except ImportError:
     HAS_LIFELINES = False
 
+try:
+    from lifelines import AalenJohansenFitter
+    HAS_AJ = True
+except ImportError:
+    HAS_AJ = False
+
 
 def render_survival_analysis(df: pd.DataFrame):
     """Render survival analysis interface."""
@@ -37,7 +43,7 @@ def render_survival_analysis(df: pd.DataFrame):
     tabs = st.tabs([
         "Kaplan-Meier", "Log-Rank Test",
         "Cox Proportional Hazards", "Parametric Models",
-        "Reliability",
+        "Reliability", "Competing Risks",
     ])
 
     with tabs[0]:
@@ -50,6 +56,8 @@ def render_survival_analysis(df: pd.DataFrame):
         _render_parametric(df)
     with tabs[4]:
         _render_reliability(df)
+    with tabs[5]:
+        _render_competing_risks(df)
 
 
 def _get_duration_event_cols(df, prefix):
@@ -155,7 +163,7 @@ def _render_kaplan_meier(df: pd.DataFrame):
                 height=550,
                 legend=dict(yanchor="top", y=0.99, xanchor="right", x=0.99),
             )
-            st.plotly_chart(fig, use_container_width=True)
+            rdl_plotly_chart(fig)
 
             # At-risk table
             with st.expander("At-Risk Table"):
@@ -329,7 +337,7 @@ def _render_logrank(df: pd.DataFrame):
                 xaxis_title="Time", yaxis_title="Survival Probability",
                 yaxis=dict(range=[0, 1.05]), height=500,
             )
-            st.plotly_chart(fig, use_container_width=True)
+            rdl_plotly_chart(fig)
 
         except Exception as e:
             st.error(f"Log-rank test error: {e}")
@@ -515,7 +523,7 @@ def _plot_forest(summary_df):
         height=max(350, 60 * len(covariates)),
         yaxis=dict(autorange="reversed"),
     )
-    st.plotly_chart(fig, use_container_width=True)
+    rdl_plotly_chart(fig)
 
 
 # ---------------------------------------------------------------------------
@@ -638,7 +646,7 @@ def _render_parametric(df: pd.DataFrame):
             xaxis_title="Time", yaxis_title="Survival Probability",
             yaxis=dict(range=[0, 1.05]), height=550,
         )
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
 
 # ---------------------------------------------------------------------------
@@ -704,7 +712,7 @@ The Weibull distribution is the most common reliability model:
         fig.update_layout(title="Weibull Probability Plot",
                           xaxis_title="ln(Time)", yaxis_title="ln(-ln(1-F(t)))",
                           height=500)
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
         # Parameters
         section_header("Weibull Parameters")
@@ -761,7 +769,7 @@ The Weibull distribution is the most common reliability model:
         fig2.add_trace(go.Scatter(x=t_range, y=hazard, name="h(t) Hazard",
                                    line=dict(color="orange")), row=1, col=2)
         fig2.update_layout(height=400)
-        st.plotly_chart(fig2, use_container_width=True)
+        rdl_plotly_chart(fig2)
 
     elif analysis == "Multi-Distribution Fitting":
         section_header("Multi-Distribution Fitting")
@@ -834,7 +842,7 @@ The Weibull distribution is the most common reliability model:
 
         fig.update_layout(title="Empirical vs Fitted CDFs",
                           xaxis_title="Time", yaxis_title="F(t)", height=500)
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
     elif analysis == "Degradation Analysis":
         section_header("Degradation Analysis")
@@ -902,7 +910,7 @@ Fit degradation models and extrapolate to a failure threshold.
             fig.update_layout(title="Degradation Paths",
                               xaxis_title=time_col, yaxis_title=meas_col,
                               height=500)
-            st.plotly_chart(fig, use_container_width=True)
+            rdl_plotly_chart(fig)
 
             if estimated_failures:
                 section_header("Estimated Failure Times")
@@ -916,4 +924,227 @@ Fit degradation models and extrapolate to a failure threshold.
                                         title="Estimated Failure Time Distribution",
                                         labels={"x": "Failure Time"})
                 fig_fail.update_layout(height=350)
-                st.plotly_chart(fig_fail, use_container_width=True)
+                rdl_plotly_chart(fig_fail)
+
+
+# ---------------------------------------------------------------------------
+# Tab 6: Competing Risks
+# ---------------------------------------------------------------------------
+
+def _render_competing_risks(df: pd.DataFrame):
+    """Competing risks analysis using Aalen-Johansen cumulative incidence."""
+    section_header("Competing Risks Analysis",
+                   "Estimate cumulative incidence functions when multiple event types compete.")
+
+    if not HAS_AJ:
+        st.warning(
+            "The `AalenJohansenFitter` is required for competing risks analysis. "
+            "Please upgrade lifelines to version >= 0.27: `pip install lifelines>=0.27`"
+        )
+        return
+
+    help_tip("Competing Risks", """
+**Competing risks** arise when subjects can experience one of several mutually exclusive event types.
+Standard Kaplan-Meier overestimates the probability of each event because it treats competing events as censored.
+
+The **Aalen-Johansen estimator** correctly accounts for competing risks by estimating the
+**cumulative incidence function (CIF)** for each event type. The CIF gives the probability of
+experiencing a specific event type by time *t*, considering that other events may occur first.
+
+- **Event column:** Must contain 0 for censored and integer codes (1, 2, 3, ...) for each event type.
+- The sum of all CIFs at any time point equals the overall event probability.
+""")
+
+    num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    if len(num_cols) < 2:
+        empty_state("Need at least 2 numeric columns (duration and event with multiple types).")
+        return
+
+    c1, c2 = st.columns(2)
+    duration_col = c1.selectbox("Duration / time column:", num_cols, key="cr_dur")
+    event_col = c2.selectbox("Event column (0=censored, 1,2,...=event types):", num_cols, key="cr_evt")
+
+    # Validate event column has multiple event types
+    data = df[[duration_col, event_col]].dropna().copy()
+    if (data[duration_col] < 0).any():
+        st.warning("Negative durations detected and removed.")
+        data = data[data[duration_col] >= 0]
+
+    if data.empty:
+        st.error("No valid rows after dropping missing values.")
+        return
+
+    event_values = sorted(data[event_col].unique())
+    event_types = [v for v in event_values if v != 0]
+
+    if len(event_types) < 2:
+        empty_state(
+            "The event column must contain at least 2 distinct non-zero event types for competing risks.",
+            "Use 0 for censored observations and integer codes (1, 2, 3, ...) for different event types."
+        )
+        return
+
+    st.info(f"Detected event types: {event_types} (0 = censored, n = {len(data)})")
+
+    # Optional grouping variable
+    cat_cols = df.select_dtypes(include=["object", "category"]).columns.tolist()
+    group_col = st.selectbox("Group column (optional):", ["None"] + cat_cols, key="cr_group")
+    group_col = None if group_col == "None" else group_col
+
+    # Time points for table
+    timepoints_input = st.text_input(
+        "CIF at timepoints (comma-separated, optional):",
+        placeholder="e.g. 12, 24, 36, 60",
+        key="cr_timepoints",
+    )
+
+    if st.button("Estimate Cumulative Incidence", key="cr_fit"):
+        try:
+            colors = px.colors.qualitative.Set1
+
+            if group_col is None:
+                # Single-group analysis
+                fig = go.Figure()
+                cif_records = []
+
+                for idx, event_of_interest in enumerate(event_types):
+                    aj = AalenJohansenFitter(calculate_variance=True)
+                    aj.fit(
+                        data[duration_col],
+                        data[event_col],
+                        event_of_interest=event_of_interest,
+                    )
+
+                    cif = aj.cumulative_density_
+                    timeline = cif.index.values
+                    cif_vals = cif.iloc[:, 0].values
+                    color = colors[idx % len(colors)]
+
+                    fig.add_trace(go.Scatter(
+                        x=timeline, y=cif_vals,
+                        mode="lines", name=f"Event {int(event_of_interest)}",
+                        line=dict(color=color, width=2, shape="hv"),
+                    ))
+
+                    # Build CIF records at time points
+                    if timepoints_input.strip():
+                        try:
+                            tps = [float(t.strip()) for t in timepoints_input.split(",") if t.strip()]
+                            for tp in tps:
+                                # Find closest time point
+                                valid_times = timeline[timeline <= tp]
+                                if len(valid_times) > 0:
+                                    closest_idx = np.argmin(np.abs(timeline - tp))
+                                    cif_val = cif_vals[closest_idx]
+                                else:
+                                    cif_val = 0.0
+                                cif_records.append({
+                                    "Event Type": int(event_of_interest),
+                                    "Time": tp,
+                                    "CIF": f"{cif_val:.4f}",
+                                })
+                        except ValueError:
+                            st.warning("Invalid timepoint format. Use comma-separated numbers.")
+
+                fig.update_layout(
+                    title="Cumulative Incidence Functions (Aalen-Johansen)",
+                    xaxis_title="Time",
+                    yaxis_title="Cumulative Incidence",
+                    yaxis=dict(range=[0, 1.05]),
+                    height=550,
+                    legend=dict(yanchor="top", y=0.99, xanchor="right", x=0.99),
+                )
+                rdl_plotly_chart(fig)
+
+                # Summary metrics
+                section_header("Event Summary")
+                summary_rows = []
+                for event_type in event_types:
+                    n_events = int((data[event_col] == event_type).sum())
+                    pct = n_events / len(data) * 100
+                    summary_rows.append({
+                        "Event Type": int(event_type),
+                        "Count": n_events,
+                        "Percentage": f"{pct:.1f}%",
+                    })
+                n_censored = int((data[event_col] == 0).sum())
+                summary_rows.append({
+                    "Event Type": "Censored (0)",
+                    "Count": n_censored,
+                    "Percentage": f"{n_censored / len(data) * 100:.1f}%",
+                })
+                st.dataframe(pd.DataFrame(summary_rows), use_container_width=True, hide_index=True)
+
+                # CIF at timepoints table
+                if cif_records:
+                    section_header("Cumulative Incidence at Specified Time Points")
+                    st.dataframe(pd.DataFrame(cif_records), use_container_width=True, hide_index=True)
+
+            else:
+                # Grouped analysis
+                full = df[[duration_col, event_col, group_col]].dropna()
+                full = full[full[duration_col] >= 0]
+                groups = sorted(full[group_col].unique())
+
+                if len(groups) > 10:
+                    st.warning("Too many groups (>10). Showing first 10.")
+                    groups = groups[:10]
+
+                for event_of_interest in event_types:
+                    section_header(f"Event Type {int(event_of_interest)}")
+                    fig = go.Figure()
+
+                    for g_idx, grp in enumerate(groups):
+                        mask = full[group_col] == grp
+                        grp_data = full.loc[mask]
+
+                        if len(grp_data) < 2:
+                            continue
+
+                        aj = AalenJohansenFitter(calculate_variance=True)
+                        aj.fit(
+                            grp_data[duration_col],
+                            grp_data[event_col],
+                            event_of_interest=event_of_interest,
+                        )
+
+                        cif = aj.cumulative_density_
+                        timeline = cif.index.values
+                        cif_vals = cif.iloc[:, 0].values
+                        color = colors[g_idx % len(colors)]
+
+                        fig.add_trace(go.Scatter(
+                            x=timeline, y=cif_vals,
+                            mode="lines", name=str(grp),
+                            line=dict(color=color, width=2, shape="hv"),
+                        ))
+
+                    fig.update_layout(
+                        title=f"Cumulative Incidence - Event {int(event_of_interest)} by {group_col}",
+                        xaxis_title="Time",
+                        yaxis_title="Cumulative Incidence",
+                        yaxis=dict(range=[0, 1.05]),
+                        height=500,
+                        legend=dict(yanchor="top", y=0.99, xanchor="right", x=0.99),
+                    )
+                    rdl_plotly_chart(fig)
+
+                # Event summary by group
+                section_header("Event Summary by Group")
+                summary_rows = []
+                for grp in groups:
+                    mask = full[group_col] == grp
+                    grp_data = full.loc[mask]
+                    for event_type in event_types:
+                        n_ev = int((grp_data[event_col] == event_type).sum())
+                        summary_rows.append({
+                            "Group": str(grp),
+                            "Event Type": int(event_type),
+                            "Count": n_ev,
+                            "N": len(grp_data),
+                            "Percentage": f"{n_ev / len(grp_data) * 100:.1f}%" if len(grp_data) > 0 else "0.0%",
+                        })
+                st.dataframe(pd.DataFrame(summary_rows), use_container_width=True, hide_index=True)
+
+        except Exception as e:
+            st.error(f"Competing risks error: {e}")

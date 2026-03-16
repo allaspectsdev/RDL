@@ -10,7 +10,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from itertools import combinations
-from modules.ui_helpers import section_header, empty_state, help_tip, validation_panel, interpretation_card
+from modules.ui_helpers import section_header, empty_state, help_tip, validation_panel, interpretation_card, rdl_plotly_chart
 from modules.validation import check_residual_normality, check_homoscedasticity, interpret_r_squared
 
 try:
@@ -237,7 +237,7 @@ def _render_design_generation(df: pd.DataFrame):
                 ),
                 height=500,
             )
-            st.plotly_chart(fig_tern, use_container_width=True)
+            rdl_plotly_chart(fig_tern)
 
         # Store in session state for Tab 2
         st.session_state["doe_coded_design"] = coded_df
@@ -560,7 +560,7 @@ space-filling when the response surface shape is unknown.
                     height=max(500, 120 * min(n_factors_lhs, 8)),
                 )
                 fig_scatter.update_traces(diagonal_visible=True, marker=dict(size=3))
-                st.plotly_chart(fig_scatter, use_container_width=True)
+                rdl_plotly_chart(fig_scatter)
             else:
                 st.info("Scatter matrix is shown for up to 8 factors. "
                         "Your design has more factors; showing pairwise correlations instead.")
@@ -629,7 +629,7 @@ def _lhs_space_metrics(points: np.ndarray, factor_names: list):
             zmin=-1, zmax=1, title="Factor Correlation Matrix",
         )
         fig_corr.update_layout(height=400)
-        st.plotly_chart(fig_corr, use_container_width=True)
+        rdl_plotly_chart(fig_corr)
 
 
 def _generate_design(design_type: str, n_factors: int) -> np.ndarray:
@@ -1150,7 +1150,7 @@ def _plot_pareto_chart(model):
         height=max(350, len(terms) * 35),
         showlegend=False,
     )
-    st.plotly_chart(fig, use_container_width=True)
+    rdl_plotly_chart(fig)
 
 
 def _plot_main_effects(data: pd.DataFrame, factor_cols: list, response_col: str):
@@ -1201,7 +1201,7 @@ def _plot_main_effects(data: pd.DataFrame, factor_cols: list, response_col: str)
                       row=row, col=c)
 
     fig.update_layout(height=300 * rows, title_text="Main Effects Plot")
-    st.plotly_chart(fig, use_container_width=True)
+    rdl_plotly_chart(fig)
 
 
 def _plot_interactions(data: pd.DataFrame, factor_cols: list, response_col: str):
@@ -1250,7 +1250,7 @@ def _plot_interactions(data: pd.DataFrame, factor_cols: list, response_col: str)
         fig.update_yaxes(title_text=response_col, row=row, col=c)
 
     fig.update_layout(height=350 * rows, title_text="Interaction Plots")
-    st.plotly_chart(fig, use_container_width=True)
+    rdl_plotly_chart(fig)
 
 
 def _plot_half_normal(model):
@@ -1305,7 +1305,7 @@ def _plot_half_normal(model):
         yaxis_title="|Effect|",
         height=450,
     )
-    st.plotly_chart(fig, use_container_width=True)
+    rdl_plotly_chart(fig)
 
 
 # ---------------------------------------------------------------------------
@@ -1430,7 +1430,7 @@ def _render_response_surface(df: pd.DataFrame):
             title="Response Surface",
             height=600,
         )
-        st.plotly_chart(fig_3d, use_container_width=True)
+        rdl_plotly_chart(fig_3d)
 
         # 2D Contour plot
         section_header("Contour Plot")
@@ -1452,7 +1452,7 @@ def _render_response_surface(df: pd.DataFrame):
             title=f"Contour Plot: {response_col}",
             height=500,
         )
-        st.plotly_chart(fig_contour, use_container_width=True)
+        rdl_plotly_chart(fig_contour)
 
         # Find optimal factor settings
         section_header("Optimal Factor Settings")
@@ -1865,7 +1865,7 @@ Simultaneously optimize multiple response variables:
                               row=len(response_cols) + 1, col=fi + 1)
 
             fig.update_layout(height=250 * (len(response_cols) + 1))
-            st.plotly_chart(fig, use_container_width=True)
+            rdl_plotly_chart(fig)
         else:
             st.warning("Optimization did not converge. Try different settings.")
 
@@ -2023,7 +2023,7 @@ delta (max S/N - min S/N) have the greatest influence.
             height=350 * rows_plot,
             title_text=f"S/N Factor Effect Plots ({sn_type})",
         )
-        st.plotly_chart(fig, use_container_width=True)
+        rdl_plotly_chart(fig)
 
         # ANOVA on S/N ratios
         if HAS_SM and len(factor_cols) >= 1:
