@@ -327,7 +327,7 @@ def _render_pca(df: pd.DataFrame):
 
         # Add loading vectors
         scale = max(scores_df["PC1"].abs().max(), scores_df["PC2"].abs().max()) * 0.8
-        load_scale = max(abs(pca.components_[0]).max(), abs(pca.components_[1]).max())
+        load_scale = max(abs(pca.components_[0]).max(), abs(pca.components_[1]).max()) or 1
         for i, var in enumerate(selected):
             x_load = pca.components_[0, i] * scale / load_scale
             y_load = pca.components_[1, i] * scale / load_scale

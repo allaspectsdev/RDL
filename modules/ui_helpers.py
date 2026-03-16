@@ -105,10 +105,10 @@ def section_header(title, help_text=None):
 
 def empty_state(message, suggestion=None):
     """Branded empty-state block replacing generic st.warning calls."""
-    suggestion_html = f'<p class="rdl-empty-suggestion">{suggestion}</p>' if suggestion else ""
+    suggestion_html = f'<p class="rdl-empty-suggestion">{_html.escape(suggestion)}</p>' if suggestion else ""
     html = (
         f'<div class="rdl-empty-state">'
-        f'<p class="rdl-empty-msg">{message}</p>'
+        f'<p class="rdl-empty-msg">{_html.escape(message)}</p>'
         f'{suggestion_html}'
         f'</div>'
     )
@@ -173,7 +173,9 @@ def column_switcher(label, columns, key):
         if st.button("\u25b6", key=f"{key}_next", use_container_width=True):
             st.session_state[idx_key] = (st.session_state[idx_key] + 1) % len(columns)
 
-    return columns[st.session_state[idx_key]]
+    idx = min(st.session_state[idx_key], len(columns) - 1)
+    st.session_state[idx_key] = idx
+    return columns[idx]
 
 
 # ─── Data Readiness Gauge ────────────────────────────────────────────────

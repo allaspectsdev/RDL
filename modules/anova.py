@@ -517,7 +517,7 @@ def _render_kruskal_wallis(df: pd.DataFrame):
         n = len(data)
         k = len(groups)
         # Effect size: eta-squared for Kruskal-Wallis
-        eta_sq_h = max(0, (h_stat - k + 1) / (n - k))
+        eta_sq_h = max(0, (h_stat - k + 1) / (n - k)) if n > k else np.nan
 
         c1, c2, c3 = st.columns(3)
         c1.metric("H-statistic", f"{h_stat:.4f}")

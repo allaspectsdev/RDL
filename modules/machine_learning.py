@@ -807,10 +807,11 @@ def _render_ml_regression(df: pd.DataFrame):
 
         # Metrics — use Pipeline for CV so scaling is done inside each fold
         r2 = r2_score(y_test, y_pred)
-        adj_r2 = 1 - (1 - r2) * (len(y_test) - 1) / (len(y_test) - len(features) - 1)
+        adj_r2 = 1 - (1 - r2) * (len(y_test) - 1) / (len(y_test) - len(features) - 1) if len(y_test) > len(features) + 1 else np.nan
         rmse = np.sqrt(mean_squared_error(y_test, y_pred))
         mae = mean_absolute_error(y_test, y_pred)
-        mape = np.mean(np.abs((y_test - y_pred) / y_test)) * 100 if (y_test != 0).all() else np.nan
+        nonzero = y_test != 0
+        mape = np.mean(np.abs((y_test[nonzero] - y_pred[nonzero]) / y_test[nonzero])) * 100 if nonzero.any() else np.nan
         cv_pipe = Pipeline([("scaler", StandardScaler()), ("model", _build_regressor(algorithm, params, random_state))])
         cv_scores = cross_val_score(cv_pipe, X, y, cv=cv_folds, scoring="r2")
 

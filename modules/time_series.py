@@ -303,7 +303,7 @@ def _render_acf_pacf(df: pd.DataFrame):
         ts_clean = ts.dropna()
 
         acf_vals = acf(ts_clean, nlags=n_lags, fft=True)
-        pacf_vals = pacf(ts_clean, nlags=min(n_lags, len(ts_clean) // 2 - 1))
+        pacf_vals = pacf(ts_clean, nlags=max(1, min(n_lags, len(ts_clean) // 2 - 1)))
 
         # Confidence interval (95%)
         ci = 1.96 / np.sqrt(len(ts_clean))
@@ -542,7 +542,8 @@ def _render_arima(df: pd.DataFrame):
                 # Metrics
                 mae = np.mean(np.abs(test.values - forecast.values))
                 rmse = np.sqrt(np.mean((test.values - forecast.values) ** 2))
-                mape = np.mean(np.abs((test.values - forecast.values) / test.values)) * 100 if (test.values != 0).all() else np.nan
+                nonzero = test.values != 0
+                mape = np.mean(np.abs((test.values[nonzero] - forecast.values[nonzero]) / test.values[nonzero])) * 100 if nonzero.any() else np.nan
 
                 c1, c2, c3 = st.columns(3)
                 c1.metric("MAE", f"{mae:.4f}")

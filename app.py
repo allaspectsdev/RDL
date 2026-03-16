@@ -1170,7 +1170,7 @@ st.markdown("""<style>
 
 # ─── MODULE IMPORTS ──────────────────────────────────────────────────────────
 import modules.ui_helpers  # noqa: F401  — registers RDL Plotly template
-from modules.data_manager import render_upload, render_data_manager
+from modules.data_manager import render_data_manager
 from modules.dataset_editor import render_dataset_editor
 from modules.descriptive_stats import render_descriptive_stats
 from modules.hypothesis_testing import render_hypothesis_testing
